@@ -95,6 +95,71 @@ Be strict but fair. Provide actionable, specific revision instructions when verd
   execution: `Execute the analysis plan using the scenario calculator tool.`,
 
   summary: `You are a senior consulting partner writing an executive summary. Produce a clear, structured summary with: Key Findings (bullet points), Recommendation (2-3 sentences), and Next Steps (numbered list). Use markdown formatting. Be concise and actionable. Return ONLY the summary text, not JSON.`,
+
+  presentation: `You are a consulting presentation designer. Given an executive summary, hypotheses, and scenario analysis results, produce a structured slide deck for a 16:9 presentation. Generate 6-10 slides.
+
+Return ONLY valid JSON matching this schema:
+{
+  "slides": [
+    {
+      "slideIndex": 0,
+      "layout": "title_slide",
+      "title": "Presentation Title",
+      "subtitle": "Subtitle or date",
+      "bodyJson": {},
+      "notesText": "Speaker notes for this slide"
+    },
+    {
+      "slideIndex": 1,
+      "layout": "section_header",
+      "title": "Section Title",
+      "subtitle": "Brief description",
+      "bodyJson": {},
+      "notesText": "Speaker notes"
+    },
+    {
+      "slideIndex": 2,
+      "layout": "title_body",
+      "title": "Slide Title",
+      "subtitle": null,
+      "bodyJson": {
+        "bullets": ["Key point 1", "Key point 2", "Key point 3"]
+      },
+      "notesText": "Speaker notes"
+    },
+    {
+      "slideIndex": 3,
+      "layout": "two_column",
+      "title": "Comparison Slide",
+      "subtitle": null,
+      "bodyJson": {
+        "leftTitle": "Current State",
+        "leftBullets": ["Point A", "Point B"],
+        "rightTitle": "Future State",
+        "rightBullets": ["Point X", "Point Y"]
+      },
+      "notesText": "Speaker notes"
+    },
+    {
+      "slideIndex": 4,
+      "layout": "metrics",
+      "title": "Key Metrics",
+      "subtitle": null,
+      "bodyJson": {
+        "metrics": [
+          { "label": "Revenue", "value": "$1.2M", "change": "+15%" },
+          { "label": "NPV", "value": "$850K", "change": "+22%" },
+          { "label": "ROI", "value": "18%", "change": "+5pp" }
+        ]
+      },
+      "notesText": "Speaker notes"
+    }
+  ]
+}
+
+Available layouts: "title_slide", "section_header", "title_body", "two_column", "metrics".
+Structure the deck as: Title Slide → Executive Summary → Key Findings (1-2 slides) → Analysis Results with Metrics → Recommendations → Next Steps.
+Use real numbers from the analysis results. Keep bullet points concise (max 8 words each). Generate compelling, professional slide content.`,
 };
 
 export function getDefaultConfigs() {
@@ -481,6 +546,167 @@ export async function summaryAgent(
   const summaryText = await callLLM(systemPrompt, userPrompt, model, maxTokens);
 
   return { summaryText: summaryText || "Summary generation failed." };
+}
+
+export interface SlideOutput {
+  slideIndex: number;
+  layout: string;
+  title: string;
+  subtitle?: string;
+  bodyJson: any;
+  notesText?: string;
+}
+
+export async function presentationAgent(
+  projectName: string,
+  objective: string,
+  summaryText: string,
+  hypotheses: { statement: string; metric: string }[],
+  modelRuns: { inputsJson: any; outputsJson: any }[]
+): Promise<{ slides: SlideOutput[] }> {
+  if (!openai) {
+    const mockSlides: SlideOutput[] = [
+      {
+        slideIndex: 0,
+        layout: "title_slide",
+        title: projectName,
+        subtitle: "Strategic Analysis & Recommendations",
+        bodyJson: {},
+        notesText: "Welcome and introductions",
+      },
+      {
+        slideIndex: 1,
+        layout: "section_header",
+        title: "Executive Summary",
+        subtitle: "Key findings from our analysis",
+        bodyJson: {},
+        notesText: "Transition to executive overview",
+      },
+      {
+        slideIndex: 2,
+        layout: "title_body",
+        title: "Objective & Scope",
+        subtitle: null,
+        bodyJson: {
+          bullets: [
+            objective,
+            "Multi-scenario financial modeling",
+            "Risk-adjusted return analysis",
+            "Data-driven recommendations",
+          ],
+        },
+        notesText: "Review the project scope and analytical approach",
+      },
+      {
+        slideIndex: 3,
+        layout: "metrics",
+        title: "Key Financial Metrics",
+        subtitle: null,
+        bodyJson: {
+          metrics: (() => {
+            const run = modelRuns[0]?.outputsJson?.summary;
+            return [
+              { label: "Expected NPV", value: run ? `$${(run.expectedValue / 1000).toFixed(0)}K` : "$850K", change: "+22%" },
+              { label: "Best Case", value: run ? `$${(run.optimisticNpv / 1000).toFixed(0)}K` : "$1.2M", change: "Upside" },
+              { label: "Risk-Adj Return", value: run ? `${run.riskAdjustedReturn}%` : "18%", change: "+5pp" },
+            ];
+          })(),
+        },
+        notesText: "Walk through each metric and its implications",
+      },
+      {
+        slideIndex: 4,
+        layout: "two_column",
+        title: "Scenario Comparison",
+        subtitle: null,
+        bodyJson: {
+          leftTitle: "Baseline Scenario",
+          leftBullets: [
+            "Conservative growth assumptions",
+            "Moderate cost efficiencies",
+            "Stable market conditions",
+          ],
+          rightTitle: "Optimistic Scenario",
+          rightBullets: [
+            "Accelerated market capture",
+            "Full cost reduction realized",
+            "Favorable competitive dynamics",
+          ],
+        },
+        notesText: "Compare the two primary scenarios",
+      },
+      {
+        slideIndex: 5,
+        layout: "title_body",
+        title: "Key Findings",
+        subtitle: null,
+        bodyJson: {
+          bullets: hypotheses.slice(0, 4).map((h) =>
+            h.statement.length > 60 ? h.statement.slice(0, 57) + "..." : h.statement
+          ),
+        },
+        notesText: "Detail each hypothesis and supporting evidence",
+      },
+      {
+        slideIndex: 6,
+        layout: "title_body",
+        title: "Recommendations",
+        subtitle: null,
+        bodyJson: {
+          bullets: [
+            "Proceed with phased implementation",
+            "Prioritize highest-NPV initiatives",
+            "Establish KPI tracking framework",
+            "Conduct monthly progress reviews",
+          ],
+        },
+        notesText: "Present the recommended course of action",
+      },
+      {
+        slideIndex: 7,
+        layout: "title_body",
+        title: "Next Steps",
+        subtitle: "30-60-90 Day Plan",
+        bodyJson: {
+          bullets: [
+            "Days 1-30: Stakeholder alignment",
+            "Days 31-60: Pilot program launch",
+            "Days 61-90: Scale & optimize",
+            "Ongoing: Monthly KPI review",
+          ],
+        },
+        notesText: "Outline the implementation timeline",
+      },
+      {
+        slideIndex: 8,
+        layout: "section_header",
+        title: "Thank You",
+        subtitle: "Questions & Discussion",
+        bodyJson: {},
+        notesText: "Open floor for Q&A",
+      },
+    ];
+
+    return { slides: mockSlides };
+  }
+
+  const hypSummary = hypotheses
+    .map((h, i) => {
+      const run = modelRuns[i];
+      const results = run?.outputsJson?.summary
+        ? `NPV: $${run.outputsJson.summary.expectedValue?.toLocaleString()}, Risk-Adj Return: ${run.outputsJson.summary.riskAdjustedReturn}%`
+        : "No results";
+      return `- ${h.statement} (${h.metric}): ${results}`;
+    })
+    .join("\n");
+
+  const systemPrompt = await getAgentPrompt("presentation");
+  const model = await getAgentModel("presentation");
+  const maxTokens = await getAgentMaxTokens("presentation");
+
+  const userPrompt = `Project: ${projectName}\nObjective: ${objective}\n\nExecutive Summary:\n${summaryText}\n\nHypotheses & Results:\n${hypSummary}`;
+  const raw = await callLLM(systemPrompt, userPrompt, model, maxTokens);
+  return extractJson(raw);
 }
 
 export { getModelUsed, runScenarioTool };
