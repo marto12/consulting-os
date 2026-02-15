@@ -21,6 +21,7 @@ function RootLayoutNav() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="project/[id]" />
+      <Stack.Screen name="agent/[key]" />
     </Stack>
   );
 }

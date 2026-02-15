@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   PanResponder,
 } from "react-native";
+import { useRouter } from "expo-router";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/query-client";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -304,6 +305,7 @@ function AgentNetworkGraph({
 }
 
 export default function PipelineScreen() {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const webTopInset = Platform.OS === "web" ? 67 : 0;
   const [enabledKeys, setEnabledKeys] = useState<Set<string>>(
@@ -517,37 +519,49 @@ export default function PipelineScreen() {
             <Text style={styles.detailCardDesc}>
               {selectedAgentDef.description}
             </Text>
-            <Pressable
-              style={[
-                styles.toggleBtn,
-                enabledKeys.has(selectedAgentDef.key)
-                  ? styles.toggleBtnActive
-                  : styles.toggleBtnInactive,
-              ]}
-              onPress={() => toggleAgent(selectedAgentDef.key)}
-            >
-              <Feather
-                name={
-                  enabledKeys.has(selectedAgentDef.key)
-                    ? "check-circle"
-                    : "plus-circle"
-                }
-                size={16}
-                color={
-                  enabledKeys.has(selectedAgentDef.key) ? "#FFFFFF" : Colors.accent
-                }
-              />
-              <Text
+            <View style={styles.detailCardActions}>
+              <Pressable
                 style={[
-                  styles.toggleBtnText,
+                  styles.toggleBtn,
                   enabledKeys.has(selectedAgentDef.key)
-                    ? styles.toggleBtnTextActive
-                    : styles.toggleBtnTextInactive,
+                    ? styles.toggleBtnActive
+                    : styles.toggleBtnInactive,
+                  { flex: 1 },
                 ]}
+                onPress={() => toggleAgent(selectedAgentDef.key)}
               >
-                {enabledKeys.has(selectedAgentDef.key) ? "Enabled" : "Add to Pipeline"}
-              </Text>
-            </Pressable>
+                <Feather
+                  name={
+                    enabledKeys.has(selectedAgentDef.key)
+                      ? "check-circle"
+                      : "plus-circle"
+                  }
+                  size={16}
+                  color={
+                    enabledKeys.has(selectedAgentDef.key) ? "#FFFFFF" : Colors.accent
+                  }
+                />
+                <Text
+                  style={[
+                    styles.toggleBtnText,
+                    enabledKeys.has(selectedAgentDef.key)
+                      ? styles.toggleBtnTextActive
+                      : styles.toggleBtnTextInactive,
+                  ]}
+                >
+                  {enabledKeys.has(selectedAgentDef.key) ? "Enabled" : "Add to Pipeline"}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={styles.viewDetailsBtn}
+                onPress={() =>
+                  router.push(`/agent/${selectedAgentDef.key}`)
+                }
+              >
+                <Feather name="external-link" size={16} color={Colors.accent} />
+                <Text style={styles.viewDetailsBtnText}>View Details</Text>
+              </Pressable>
+            </View>
           </View>
         )}
 
@@ -606,6 +620,14 @@ export default function PipelineScreen() {
                   <Text style={styles.agentRowRole}>{agent.role}</Text>
                 </View>
               </View>
+              <View style={styles.agentRowRight}>
+                <Pressable
+                  onPress={() => router.push(`/agent/${agent.key}`)}
+                  hitSlop={8}
+                  style={styles.agentRowLink}
+                >
+                  <Feather name="chevron-right" size={18} color={Colors.textMuted} />
+                </Pressable>
               <Pressable
                 style={[
                   styles.toggleChip,
@@ -620,6 +642,7 @@ export default function PipelineScreen() {
                   color={isEnabled ? "#FFFFFF" : Colors.accent}
                 />
               </Pressable>
+              </View>
             </Pressable>
           );
         })}
@@ -938,6 +961,35 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bg,
     borderWidth: 1,
     borderColor: Colors.surfaceBorder,
+  },
+  detailCardActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  viewDetailsBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: Colors.bg,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+  },
+  viewDetailsBtnText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: Colors.accent,
+  },
+  agentRowRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  agentRowLink: {
+    padding: 4,
   },
   summaryBar: {
     flexDirection: "row",

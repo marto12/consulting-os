@@ -9,6 +9,7 @@ import {
   presentationAgent,
   getModelUsed,
   getDefaultConfigs,
+  DEFAULT_PROMPTS,
 } from "./agents";
 
 const STAGE_ORDER = [
@@ -427,6 +428,184 @@ export async function registerRoutes(app: Express): Promise<Server> {
         maxTokens: maxTokens || 8192,
       });
       res.json(config);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  const AGENT_METADATA: Record<string, any> = {
+    issues_tree: {
+      key: "issues_tree",
+      label: "Issues Tree",
+      role: "Generator",
+      roleColor: "#3B82F6",
+      roleBg: "#EFF6FF",
+      stage: "issues_draft",
+      description: "Breaks down the project objective into a MECE (Mutually Exclusive, Collectively Exhaustive) issues tree with 3+ levels of depth. This is the foundational decomposition step of the consulting workflow.",
+      inputs: [
+        { name: "objective", type: "string", description: "The project's stated objective or governing question" },
+        { name: "constraints", type: "string", description: "Known constraints, boundaries, or limitations for the analysis" },
+      ],
+      outputs: [
+        { name: "issues", type: "IssueNode[]", description: "Array of 15-25 issue nodes forming a hierarchical tree with id, parentId, text, and priority (high/medium/low)" },
+        { name: "criticLog", type: "CriticResult[]", description: "Log of MECE Critic review iterations, including scores and revision instructions" },
+      ],
+      outputSchema: '{\n  "issues": [\n    { "id": "1", "parentId": null, "text": "Root issue", "priority": "high" },\n    { "id": "2", "parentId": "1", "text": "Sub-issue", "priority": "medium" }\n  ]\n}',
+      tools: [],
+      triggerStage: "created",
+      producesStage: "issues_draft",
+    },
+    mece_critic: {
+      key: "mece_critic",
+      label: "MECE Critic",
+      role: "Quality Gate",
+      roleColor: "#8B5CF6",
+      roleBg: "#F5F3FF",
+      stage: "issues_draft",
+      description: "Quality gate that audits the issues tree for MECE compliance. Scores across 5 criteria (overlap, coverage, mixed logics, branch balance, label quality) on a 1-5 scale. If score < 4, sends revision instructions back to the Issues Tree agent. Runs up to 2 revision loops.",
+      inputs: [
+        { name: "issues", type: "IssueNode[]", description: "The generated issues tree to evaluate" },
+        { name: "objective", type: "string", description: "The original project objective for context" },
+      ],
+      outputs: [
+        { name: "verdict", type: "'approved' | 'revise'", description: "Whether the tree passes quality review or needs revision" },
+        { name: "scores", type: "CriticScores", description: "Detailed scores (1-5) for overlap, coverage, mixed logics, branch balance, and label quality" },
+        { name: "overallScore", type: "number", description: "Aggregate score from 1-5. Tree is approved if >= 4" },
+        { name: "revisionInstructions", type: "string", description: "Specific instructions for what the Issues Tree agent should fix" },
+      ],
+      outputSchema: '{\n  "verdict": "approved" | "revise",\n  "scores": {\n    "overlap": { "score": 4, "details": "..." },\n    "coverage": { "score": 5, "details": "..." },\n    "mixedLogics": { "score": 4, "details": "..." },\n    "branchBalance": { "score": 3, "details": "..." },\n    "labelQuality": { "score": 5, "details": "..." }\n  },\n  "overallScore": 4,\n  "revisionInstructions": ""\n}',
+      tools: [],
+      triggerStage: "issues_draft",
+      producesStage: "issues_approved",
+    },
+    hypothesis: {
+      key: "hypothesis",
+      label: "Hypothesis",
+      role: "Analyst",
+      roleColor: "#0891B2",
+      roleBg: "#ECFEFF",
+      stage: "hypotheses_draft",
+      description: "Generates testable hypotheses linked to the top issues from the tree, and creates a structured analysis plan. Each hypothesis includes a statement, metric, data source, and method. The analysis plan defines parameters for the scenario calculator tool.",
+      inputs: [
+        { name: "issues", type: "IssueNode[]", description: "The approved issues tree nodes, with id, text, and priority" },
+      ],
+      outputs: [
+        { name: "hypotheses", type: "HypothesisOutput[]", description: "2-4 testable hypotheses, each linked to an issue node with statement, metric, data source, and method" },
+        { name: "analysisPlan", type: "AnalysisPlanOutput[]", description: "Corresponding execution plans with method, financial parameters, and required dataset" },
+      ],
+      outputSchema: '{\n  "hypotheses": [\n    {\n      "issueNodeId": "1",\n      "statement": "If we address X, we achieve Y",\n      "metric": "Revenue growth %",\n      "dataSource": "Industry benchmarks",\n      "method": "scenario_analysis"\n    }\n  ],\n  "analysisPlan": [\n    {\n      "hypothesisIndex": 0,\n      "method": "run_scenario_tool",\n      "parameters": {\n        "baselineRevenue": 1000000,\n        "growthRate": 0.1,\n        "costReduction": 0.05,\n        "timeHorizonYears": 5,\n        "volatility": 0.15\n      },\n      "requiredDataset": "Financial projections"\n    }\n  ]\n}',
+      tools: [],
+      triggerStage: "issues_approved",
+      producesStage: "hypotheses_draft",
+    },
+    execution: {
+      key: "execution",
+      label: "Execution",
+      role: "Tool Caller",
+      roleColor: "#059669",
+      roleBg: "#ECFDF5",
+      stage: "execution_done",
+      description: "Executes the analysis plan by calling the Scenario Calculator tool for each hypothesis. Performs financial scenario analysis with baseline, optimistic, and pessimistic projections, calculates NPV, expected value, and risk-adjusted returns. This is the only agent that uses real tool calling.",
+      inputs: [
+        { name: "analysisPlan", type: "AnalysisPlanOutput[]", description: "Array of analysis plans from the Hypothesis agent, each specifying method and financial parameters" },
+      ],
+      outputs: [
+        { name: "results", type: "ToolCallResult[]", description: "Array of tool call results with tool name, input parameters, and full scenario output including baseline/optimistic/pessimistic projections and NPV summary" },
+      ],
+      outputSchema: '[\n  {\n    "toolName": "run_scenario_tool",\n    "inputs": {\n      "baselineRevenue": 1000000,\n      "growthRate": 0.1,\n      "costReduction": 0.05,\n      "timeHorizonYears": 5,\n      "volatility": 0.15\n    },\n    "outputs": {\n      "baseline": [{ "year": 1, "revenue": ..., "costs": ..., "profit": ... }],\n      "optimistic": [...],\n      "pessimistic": [...],\n      "summary": {\n        "baselineNPV": ...,\n        "optimisticNPV": ...,\n        "pessimisticNPV": ...,\n        "expectedValue": ...,\n        "riskAdjustedReturn": ...\n      }\n    }\n  }\n]',
+      tools: [
+        {
+          name: "run_scenario_tool",
+          description: "Financial scenario calculator that projects revenue, costs, and profit across baseline, optimistic, and pessimistic scenarios over a configurable time horizon",
+          parameters: {
+            baselineRevenue: "number — Starting annual revenue",
+            growthRate: "number (0-1) — Annual growth rate",
+            costReduction: "number (0-1) — Expected cost reduction factor",
+            timeHorizonYears: "integer — Projection period in years",
+            volatility: "number (0-1) — Market volatility factor for scenario spread",
+          },
+        },
+      ],
+      triggerStage: "hypotheses_approved",
+      producesStage: "execution_done",
+    },
+    summary: {
+      key: "summary",
+      label: "Summary",
+      role: "Synthesizer",
+      roleColor: "#D97706",
+      roleBg: "#FFFBEB",
+      stage: "summary_draft",
+      description: "Synthesizes all analysis results into a structured executive summary with Key Findings, Recommendations, and Next Steps. Uses markdown formatting for rich text rendering. The output reads like a senior partner's memo to a client.",
+      inputs: [
+        { name: "objective", type: "string", description: "The original project objective" },
+        { name: "constraints", type: "string", description: "Project constraints" },
+        { name: "hypotheses", type: "Hypothesis[]", description: "The tested hypotheses with statement and metric" },
+        { name: "modelRuns", type: "ModelRun[]", description: "Execution results with input/output JSON from scenario analysis" },
+      ],
+      outputs: [
+        { name: "summaryText", type: "string (markdown)", description: "Full executive summary in markdown format with headings, bullet points, and numbered lists" },
+      ],
+      outputSchema: '"# Executive Summary\\n\\n## Key Findings\\n- Finding 1: ...\\n- Finding 2: ...\\n\\n## Recommendation\\nBased on...\\n\\n## Next Steps\\n1. Step one\\n2. Step two"',
+      tools: [],
+      triggerStage: "execution_approved",
+      producesStage: "summary_draft",
+    },
+    presentation: {
+      key: "presentation",
+      label: "Presentation",
+      role: "Designer",
+      roleColor: "#E11D48",
+      roleBg: "#FFF1F2",
+      stage: "presentation_draft",
+      description: "Generates a professional 16:9 slide deck from the analysis results. Produces 6-10 slides using 5 layout types: title_slide, section_header, title_body, two_column, and metrics. Each slide includes speaker notes. The deck follows a standard consulting structure: Title, Executive Summary, Key Findings, Analysis Results, Recommendations, Next Steps.",
+      inputs: [
+        { name: "projectName", type: "string", description: "Project name for the title slide" },
+        { name: "objective", type: "string", description: "Project objective" },
+        { name: "summaryText", type: "string", description: "The executive summary text" },
+        { name: "hypotheses", type: "Hypothesis[]", description: "Tested hypotheses" },
+        { name: "modelRuns", type: "ModelRun[]", description: "Scenario analysis results" },
+      ],
+      outputs: [
+        { name: "slides", type: "SlideOutput[]", description: "Array of 6-10 slide objects, each with slideIndex, layout, title, subtitle, bodyJson, and notesText" },
+      ],
+      outputSchema: '{\n  "slides": [\n    {\n      "slideIndex": 0,\n      "layout": "title_slide",\n      "title": "Project Name",\n      "subtitle": "Strategic Analysis",\n      "bodyJson": {},\n      "notesText": "Speaker notes"\n    }\n  ]\n}',
+      tools: [],
+      triggerStage: "summary_approved",
+      producesStage: "presentation_draft",
+    },
+  };
+
+  app.get("/api/agents", async (_req: Request, res: Response) => {
+    try {
+      const configs = await storage.getAllAgentConfigs();
+      const agents = Object.values(AGENT_METADATA).map((meta: any) => {
+        const saved = configs.find((c) => c.agentType === meta.key);
+        return {
+          ...meta,
+          systemPrompt: saved?.systemPrompt || DEFAULT_PROMPTS[meta.key] || "",
+          model: saved?.model || "gpt-5-nano",
+          maxTokens: saved?.maxTokens || 8192,
+        };
+      });
+      res.json(agents);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/agents/:key", async (req: Request, res: Response) => {
+    try {
+      const key = req.params.key as string;
+      const meta = (AGENT_METADATA as any)[key];
+      if (!meta) return res.status(404).json({ error: "Agent not found" });
+      const saved = await storage.getAgentConfig(key);
+      res.json({
+        ...meta,
+        systemPrompt: saved?.systemPrompt || (DEFAULT_PROMPTS as any)[key] || "",
+        model: saved?.model || "gpt-5-nano",
+        maxTokens: saved?.maxTokens || 8192,
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
