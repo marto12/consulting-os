@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { runScenarioTool, type ScenarioInput, type ScenarioOutput } from "./scenario-tool";
+import { storage } from "../storage";
 
 const hasApiKey = !!(
   process.env.AI_INTEGRATIONS_OPENAI_API_KEY &&
@@ -14,24 +15,101 @@ if (hasApiKey) {
   });
 }
 
-const MODEL = "gpt-5-nano";
+const DEFAULT_MODEL = "gpt-5-nano";
 
 function getModelUsed(): string {
-  return hasApiKey ? MODEL : "mock";
+  return hasApiKey ? DEFAULT_MODEL : "mock";
 }
 
-async function callLLM(systemPrompt: string, userPrompt: string): Promise<string> {
+export const DEFAULT_PROMPTS: Record<string, string> = {
+  issues_tree: `You are a McKinsey-style consulting analyst. Given a project objective and constraints, produce a MECE issues tree with AT LEAST 3 levels of depth. Return ONLY valid JSON matching this schema:
+{
+  "issues": [
+    { "id": "1", "parentId": null, "text": "Root issue", "priority": "high" },
+    { "id": "2", "parentId": "1", "text": "Level 2 sub-issue", "priority": "medium" },
+    { "id": "3", "parentId": "2", "text": "Level 3 detail", "priority": "low" }
+  ]
+}
+Priority must be "high", "medium", or "low". Use string IDs. parentId is null for root nodes. Include 15-25 nodes across 3+ levels of depth. Each root issue should have 2-3 children, and at least some children should have their own children (grandchildren of root).`,
+
+  hypothesis: `You are a consulting analyst. Given an issues tree, generate hypotheses and an analysis plan. Return ONLY valid JSON matching this schema:
+{
+  "hypotheses": [
+    {
+      "issueNodeId": "1",
+      "statement": "Hypothesis text",
+      "metric": "Revenue growth %",
+      "dataSource": "Industry benchmarks",
+      "method": "scenario_analysis"
+    }
+  ],
+  "analysisPlan": [
+    {
+      "hypothesisIndex": 0,
+      "method": "run_scenario_tool",
+      "parameters": {
+        "baselineRevenue": 1000000,
+        "growthRate": 0.1,
+        "costReduction": 0.05,
+        "timeHorizonYears": 5,
+        "volatility": 0.15
+      },
+      "requiredDataset": "Financial projections"
+    }
+  ]
+}
+Generate 2-4 hypotheses linked to the most important issues. Each hypothesis must have a corresponding analysis plan entry. The parameters must have all fields: baselineRevenue (number), growthRate (0-1), costReduction (0-1), timeHorizonYears (integer), volatility (0-1). Use realistic business numbers.`,
+
+  execution: `Execute the analysis plan using the scenario calculator tool.`,
+
+  summary: `You are a senior consulting partner writing an executive summary. Produce a clear, structured summary with: Key Findings (bullet points), Recommendation (2-3 sentences), and Next Steps (numbered list). Use markdown formatting. Be concise and actionable. Return ONLY the summary text, not JSON.`,
+};
+
+export function getDefaultConfigs() {
+  return Object.entries(DEFAULT_PROMPTS).map(([agentType, systemPrompt]) => ({
+    agentType,
+    systemPrompt,
+    model: DEFAULT_MODEL,
+    maxTokens: 8192,
+  }));
+}
+
+async function getAgentPrompt(agentType: string): Promise<string> {
+  try {
+    const config = await storage.getAgentConfig(agentType);
+    if (config) return config.systemPrompt;
+  } catch {}
+  return DEFAULT_PROMPTS[agentType] || "";
+}
+
+async function getAgentModel(agentType: string): Promise<string> {
+  try {
+    const config = await storage.getAgentConfig(agentType);
+    if (config) return config.model;
+  } catch {}
+  return DEFAULT_MODEL;
+}
+
+async function getAgentMaxTokens(agentType: string): Promise<number> {
+  try {
+    const config = await storage.getAgentConfig(agentType);
+    if (config) return config.maxTokens;
+  } catch {}
+  return 8192;
+}
+
+async function callLLM(systemPrompt: string, userPrompt: string, model?: string, maxTokens?: number): Promise<string> {
   if (!openai) {
     return "";
   }
 
   const response = await openai.chat.completions.create({
-    model: MODEL,
+    model: model || DEFAULT_MODEL,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    max_completion_tokens: 8192,
+    max_completion_tokens: maxTokens || 8192,
   });
 
   return response.choices[0]?.message?.content || "";
@@ -88,18 +166,12 @@ export async function issuesTreeAgent(
     };
   }
 
-  const systemPrompt = `You are a McKinsey-style consulting analyst. Given a project objective and constraints, produce a MECE issues tree with AT LEAST 3 levels of depth. Return ONLY valid JSON matching this schema:
-{
-  "issues": [
-    { "id": "1", "parentId": null, "text": "Root issue", "priority": "high" },
-    { "id": "2", "parentId": "1", "text": "Level 2 sub-issue", "priority": "medium" },
-    { "id": "3", "parentId": "2", "text": "Level 3 detail", "priority": "low" }
-  ]
-}
-Priority must be "high", "medium", or "low". Use string IDs. parentId is null for root nodes. Include 15-25 nodes across 3+ levels of depth. Each root issue should have 2-3 children, and at least some children should have their own children (grandchildren of root).`;
+  const systemPrompt = await getAgentPrompt("issues_tree");
+  const model = await getAgentModel("issues_tree");
+  const maxTokens = await getAgentMaxTokens("issues_tree");
 
   const userPrompt = `Objective: ${objective}\nConstraints: ${constraints}`;
-  const raw = await callLLM(systemPrompt, userPrompt);
+  const raw = await callLLM(systemPrompt, userPrompt, model, maxTokens);
   return extractJson(raw);
 }
 
@@ -152,35 +224,11 @@ export async function hypothesisAgent(
 
   const issuesList = issues.map((i) => `- [ID:${i.id}] ${i.text} (${i.priority})`).join("\n");
 
-  const systemPrompt = `You are a consulting analyst. Given an issues tree, generate hypotheses and an analysis plan. Return ONLY valid JSON matching this schema:
-{
-  "hypotheses": [
-    {
-      "issueNodeId": "1",
-      "statement": "Hypothesis text",
-      "metric": "Revenue growth %",
-      "dataSource": "Industry benchmarks",
-      "method": "scenario_analysis"
-    }
-  ],
-  "analysisPlan": [
-    {
-      "hypothesisIndex": 0,
-      "method": "run_scenario_tool",
-      "parameters": {
-        "baselineRevenue": 1000000,
-        "growthRate": 0.1,
-        "costReduction": 0.05,
-        "timeHorizonYears": 5,
-        "volatility": 0.15
-      },
-      "requiredDataset": "Financial projections"
-    }
-  ]
-}
-Generate 2-4 hypotheses linked to the most important issues. Each hypothesis must have a corresponding analysis plan entry. The parameters must have all fields: baselineRevenue (number), growthRate (0-1), costReduction (0-1), timeHorizonYears (integer), volatility (0-1). Use realistic business numbers.`;
+  const systemPrompt = await getAgentPrompt("hypothesis");
+  const model = await getAgentModel("hypothesis");
+  const maxTokens = await getAgentMaxTokens("hypothesis");
 
-  const raw = await callLLM(systemPrompt, `Issues:\n${issuesList}`);
+  const raw = await callLLM(systemPrompt, `Issues:\n${issuesList}`, model, maxTokens);
   return extractJson(raw);
 }
 
@@ -239,10 +287,12 @@ export async function summaryAgent(
     })
     .join("\n\n");
 
-  const systemPrompt = `You are a senior consulting partner writing an executive summary. Produce a clear, structured summary with: Key Findings (bullet points), Recommendation (2-3 sentences), and Next Steps (numbered list). Use markdown formatting. Be concise and actionable. Return ONLY the summary text, not JSON.`;
+  const systemPrompt = await getAgentPrompt("summary");
+  const model = await getAgentModel("summary");
+  const maxTokens = await getAgentMaxTokens("summary");
 
   const userPrompt = `Objective: ${objective}\nConstraints: ${constraints}\n\nHypotheses & Results:\n${hypList}`;
-  const summaryText = await callLLM(systemPrompt, userPrompt);
+  const summaryText = await callLLM(systemPrompt, userPrompt, model, maxTokens);
 
   return { summaryText: summaryText || "Summary generation failed." };
 }

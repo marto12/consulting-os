@@ -7,6 +7,7 @@ import {
   executionAgent,
   summaryAgent,
   getModelUsed,
+  getDefaultConfigs,
 } from "./agents";
 
 const STAGE_ORDER = [
@@ -283,6 +284,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const projectId = Number(req.params.id);
       const logs = await storage.getRunLogs(projectId);
       res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/agent-configs", async (_req: Request, res: Response) => {
+    try {
+      const configs = await storage.getAllAgentConfigs();
+      const defaults = getDefaultConfigs();
+      const merged = defaults.map((d) => {
+        const saved = configs.find((c) => c.agentType === d.agentType);
+        return saved || { ...d, id: 0, updatedAt: new Date() };
+      });
+      res.json(merged);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/agent-configs/:agentType", async (req: Request, res: Response) => {
+    try {
+      const agentType = req.params.agentType as string;
+      const validTypes = ["issues_tree", "hypothesis", "execution", "summary"];
+      if (!validTypes.includes(agentType)) {
+        return res.status(400).json({ error: "Invalid agent type" });
+      }
+      const { systemPrompt, model, maxTokens } = req.body;
+      if (!systemPrompt) {
+        return res.status(400).json({ error: "systemPrompt is required" });
+      }
+      const config = await storage.upsertAgentConfig({
+        agentType,
+        systemPrompt,
+        model: model || "gpt-5-nano",
+        maxTokens: maxTokens || 8192,
+      });
+      res.json(config);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
