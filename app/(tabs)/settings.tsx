@@ -73,6 +73,17 @@ const PIPELINE_STEPS = [
     icon: "text-box-outline",
     detail: "Produces a polished executive summary with key findings, recommendation, and next steps.",
   },
+  {
+    key: "presentation",
+    step: 6,
+    label: "Presentation",
+    role: "Designer",
+    roleColor: "#E11D48",
+    roleBg: "#FFF1F2",
+    description: "Generates a 16:9 slide deck from the analysis",
+    icon: "presentation",
+    detail: "Creates 6-10 structured slides with 5 layout types: title, section header, bullet points, two-column comparison, and metrics dashboard.",
+  },
 ];
 
 const AGENT_LABELS: Record<string, { label: string; description: string; icon: string }> = {};
