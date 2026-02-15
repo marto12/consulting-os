@@ -130,32 +130,97 @@ async function getAgentMaxTokens(agentType: string): Promise<number> {
   return 8192;
 }
 
-async function callLLM(systemPrompt: string, userPrompt: string, model?: string, maxTokens?: number): Promise<string> {
+async function callLLM(systemPrompt: string, userPrompt: string, model?: string, maxTokens?: number, retries = 1): Promise<string> {
   if (!openai) {
     return "";
   }
 
-  const response = await openai.chat.completions.create({
-    model: model || DEFAULT_MODEL,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
-    max_completion_tokens: maxTokens || 8192,
-  });
+  const resolvedModel = model || DEFAULT_MODEL;
+  const resolvedTokens = maxTokens || 8192;
 
-  return response.choices[0]?.message?.content || "";
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const messages: { role: "system" | "user"; content: string }[] = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: attempt > 0
+        ? `${userPrompt}\n\nIMPORTANT: Your previous response was truncated. Please produce a SHORTER, more concise response that fits within the token limit. Use fewer nodes, shorter descriptions, and minimal whitespace in JSON output.`
+        : userPrompt
+      },
+    ];
+
+    const response = await openai.chat.completions.create({
+      model: resolvedModel,
+      messages,
+      max_completion_tokens: resolvedTokens,
+    });
+
+    const content = response.choices[0]?.message?.content || "";
+    const finishReason = response.choices[0]?.finish_reason;
+
+    if (finishReason === "length" && attempt < retries) {
+      console.log(`LLM response truncated (finish_reason=length), retrying with conciseness hint (attempt ${attempt + 1}/${retries + 1})`);
+      continue;
+    }
+
+    return content;
+  }
+
+  return "";
+}
+
+function repairJson(text: string): string {
+  let s = text.trim();
+
+  const openBraces = (s.match(/\{/g) || []).length;
+  const closeBraces = (s.match(/\}/g) || []).length;
+  const openBrackets = (s.match(/\[/g) || []).length;
+  const closeBrackets = (s.match(/\]/g) || []).length;
+
+  s = s.replace(/,\s*([}\]])/g, "$1");
+
+  if (s.endsWith(",")) {
+    s = s.slice(0, -1);
+  }
+
+  for (let i = 0; i < openBrackets - closeBrackets; i++) {
+    s += "]";
+  }
+  for (let i = 0; i < openBraces - closeBraces; i++) {
+    s += "}";
+  }
+
+  return s;
 }
 
 function extractJson(text: string): any {
   const match = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (match) {
-    return JSON.parse(match[1].trim());
+    try {
+      return JSON.parse(match[1].trim());
+    } catch {
+      try {
+        return JSON.parse(repairJson(match[1].trim()));
+      } catch {}
+    }
   }
+
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
-    return JSON.parse(jsonMatch[0]);
+    try {
+      return JSON.parse(jsonMatch[0]);
+    } catch {
+      try {
+        return JSON.parse(repairJson(jsonMatch[0]));
+      } catch {}
+    }
   }
+
+  const partialJson = text.match(/\{[\s\S]*/);
+  if (partialJson) {
+    try {
+      return JSON.parse(repairJson(partialJson[0]));
+    } catch {}
+  }
+
   return JSON.parse(text);
 }
 
