@@ -65,25 +65,38 @@ export async function issuesTreeAgent(
       issues: [
         { id: "1", parentId: null, text: "Market Entry Strategy", priority: "high" },
         { id: "2", parentId: "1", text: "Target Market Sizing", priority: "high" },
-        { id: "3", parentId: "1", text: "Competitive Landscape Analysis", priority: "medium" },
-        { id: "4", parentId: null, text: "Revenue Model Design", priority: "high" },
-        { id: "5", parentId: "4", text: "Pricing Strategy Optimization", priority: "high" },
-        { id: "6", parentId: "4", text: "Channel Mix Selection", priority: "medium" },
-        { id: "7", parentId: null, text: "Operational Readiness", priority: "medium" },
-        { id: "8", parentId: "7", text: "Team Scaling Plan", priority: "medium" },
-        { id: "9", parentId: "7", text: "Technology Infrastructure", priority: "low" },
+        { id: "3", parentId: "2", text: "Addressable Market Segments", priority: "high" },
+        { id: "4", parentId: "2", text: "Growth Rate Projections", priority: "medium" },
+        { id: "5", parentId: "1", text: "Competitive Landscape", priority: "medium" },
+        { id: "6", parentId: "5", text: "Key Competitor Positioning", priority: "medium" },
+        { id: "7", parentId: "5", text: "Barrier to Entry Analysis", priority: "high" },
+        { id: "8", parentId: null, text: "Revenue Model Design", priority: "high" },
+        { id: "9", parentId: "8", text: "Pricing Strategy", priority: "high" },
+        { id: "10", parentId: "9", text: "Price Elasticity Testing", priority: "medium" },
+        { id: "11", parentId: "9", text: "Tiered Pricing Structure", priority: "high" },
+        { id: "12", parentId: "8", text: "Channel Mix Selection", priority: "medium" },
+        { id: "13", parentId: "12", text: "Direct Sales Capacity", priority: "medium" },
+        { id: "14", parentId: "12", text: "Partner Distribution", priority: "low" },
+        { id: "15", parentId: null, text: "Operational Readiness", priority: "medium" },
+        { id: "16", parentId: "15", text: "Team Scaling Plan", priority: "medium" },
+        { id: "17", parentId: "16", text: "Hiring Pipeline", priority: "medium" },
+        { id: "18", parentId: "16", text: "Training Programs", priority: "low" },
+        { id: "19", parentId: "15", text: "Technology Infrastructure", priority: "low" },
+        { id: "20", parentId: "19", text: "Platform Architecture", priority: "low" },
+        { id: "21", parentId: "19", text: "Data Pipeline Setup", priority: "medium" },
       ],
     };
   }
 
-  const systemPrompt = `You are a McKinsey-style consulting analyst. Given a project objective and constraints, produce a MECE issues tree. Return ONLY valid JSON matching this schema:
+  const systemPrompt = `You are a McKinsey-style consulting analyst. Given a project objective and constraints, produce a MECE issues tree with AT LEAST 3 levels of depth. Return ONLY valid JSON matching this schema:
 {
   "issues": [
     { "id": "1", "parentId": null, "text": "Root issue", "priority": "high" },
-    { "id": "2", "parentId": "1", "text": "Sub-issue", "priority": "medium" }
+    { "id": "2", "parentId": "1", "text": "Level 2 sub-issue", "priority": "medium" },
+    { "id": "3", "parentId": "2", "text": "Level 3 detail", "priority": "low" }
   ]
 }
-Priority must be "high", "medium", or "low". Use string IDs. parentId is null for root nodes. Include 6-12 nodes.`;
+Priority must be "high", "medium", or "low". Use string IDs. parentId is null for root nodes. Include 15-25 nodes across 3+ levels of depth. Each root issue should have 2-3 children, and at least some children should have their own children (grandchildren of root).`;
 
   const userPrompt = `Objective: ${objective}\nConstraints: ${constraints}`;
   const raw = await callLLM(systemPrompt, userPrompt);

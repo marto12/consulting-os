@@ -17,6 +17,7 @@ import { Ionicons, Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import Colors from "@/constants/colors";
 import { StatusBar } from "expo-status-bar";
+import IssuesGraph from "@/components/IssuesGraph";
 
 const STAGE_LABELS: Record<string, string> = {
   created: "New",
@@ -408,6 +409,8 @@ function OverviewTab({ project, stage }: { project: any; stage: string }) {
 }
 
 function IssuesTab({ issues }: { issues: any[] }) {
+  const [viewMode, setViewMode] = useState<"graph" | "list">("graph");
+
   if (issues.length === 0) {
     return (
       <View style={styles.emptyTab}>
@@ -423,87 +426,95 @@ function IssuesTab({ issues }: { issues: any[] }) {
   const latestVersion = Math.max(...issues.map((n) => n.version));
   const latestIssues = issues.filter((n) => n.version === latestVersion);
   const roots = latestIssues.filter((n) => !n.parentId);
-  const children = latestIssues.filter((n) => !!n.parentId);
+
+  function getDescendants(parentId: number): any[] {
+    const directChildren = latestIssues.filter((n) => n.parentId === parentId);
+    return directChildren;
+  }
+
+  function renderIssueNode(node: any, depth: number): React.ReactNode {
+    const nodeChildren = getDescendants(node.id);
+    const priorityColor =
+      node.priority === "high"
+        ? Colors.error
+        : node.priority === "medium"
+        ? Colors.warning
+        : Colors.textMuted;
+
+    return (
+      <View key={node.id} style={[depth > 0 && styles.issueChild]}>
+        {depth > 0 && <View style={styles.issueChildLine} />}
+        <View style={depth === 0 ? styles.issueRootHeader : styles.issueChildContent}>
+          <View style={[styles.priorityDot, { backgroundColor: priorityColor }]} />
+          <Text style={depth === 0 ? styles.issueRootText : styles.issueChildText}>
+            {node.text}
+          </Text>
+          <View
+            style={[
+              styles.priorityBadge,
+              {
+                backgroundColor:
+                  node.priority === "high"
+                    ? Colors.errorBg
+                    : node.priority === "medium"
+                    ? Colors.warningBg
+                    : Colors.bg,
+              },
+            ]}
+          >
+            <Text style={[styles.priorityText, { color: priorityColor }]}>
+              {node.priority}
+            </Text>
+          </View>
+        </View>
+        {nodeChildren.length > 0 && (
+          <View style={{ marginLeft: 16 }}>
+            {nodeChildren.map((child) => renderIssueNode(child, depth + 1))}
+          </View>
+        )}
+      </View>
+    );
+  }
 
   return (
     <View style={styles.tabContent}>
-      <View style={styles.versionBadgeRow}>
-        <Text style={styles.versionBadge}>Version {latestVersion}</Text>
-      </View>
-      {roots.map((root) => (
-        <View key={root.id} style={styles.issueRoot}>
-          <View style={styles.issueRootHeader}>
-            <View
-              style={[
-                styles.priorityDot,
-                {
-                  backgroundColor:
-                    root.priority === "high"
-                      ? Colors.error
-                      : root.priority === "medium"
-                      ? Colors.warning
-                      : Colors.textMuted,
-                },
-              ]}
-            />
-            <Text style={styles.issueRootText}>{root.text}</Text>
-            <View
-              style={[
-                styles.priorityBadge,
-                {
-                  backgroundColor:
-                    root.priority === "high"
-                      ? Colors.errorBg
-                      : root.priority === "medium"
-                      ? Colors.warningBg
-                      : Colors.bg,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.priorityText,
-                  {
-                    color:
-                      root.priority === "high"
-                        ? Colors.error
-                        : root.priority === "medium"
-                        ? Colors.warning
-                        : Colors.textMuted,
-                  },
-                ]}
-              >
-                {root.priority}
-              </Text>
-            </View>
-          </View>
-          {children
-            .filter((c) => c.parentId === root.id)
-            .map((child) => (
-              <View key={child.id} style={styles.issueChild}>
-                <View style={styles.issueChildLine} />
-                <View style={styles.issueChildContent}>
-                  <Text style={styles.issueChildText}>{child.text}</Text>
-                  <Text
-                    style={[
-                      styles.issueChildPriority,
-                      {
-                        color:
-                          child.priority === "high"
-                            ? Colors.error
-                            : child.priority === "medium"
-                            ? Colors.warning
-                            : Colors.textMuted,
-                      },
-                    ]}
-                  >
-                    {child.priority}
-                  </Text>
-                </View>
-              </View>
-            ))}
+      <View style={styles.viewToggleRow}>
+        <View style={styles.versionBadgeRow}>
+          <Text style={styles.versionBadge}>Version {latestVersion}</Text>
         </View>
-      ))}
+        <View style={styles.viewToggle}>
+          <Pressable
+            style={[styles.viewToggleBtn, viewMode === "graph" && styles.viewToggleBtnActive]}
+            onPress={() => setViewMode("graph")}
+          >
+            <MaterialCommunityIcons
+              name="graph-outline"
+              size={16}
+              color={viewMode === "graph" ? Colors.accent : Colors.textMuted}
+            />
+          </Pressable>
+          <Pressable
+            style={[styles.viewToggleBtn, viewMode === "list" && styles.viewToggleBtnActive]}
+            onPress={() => setViewMode("list")}
+          >
+            <Feather
+              name="list"
+              size={16}
+              color={viewMode === "list" ? Colors.accent : Colors.textMuted}
+            />
+          </Pressable>
+        </View>
+      </View>
+
+      {viewMode === "graph" ? (
+        <IssuesGraph issues={latestIssues} />
+      ) : (
+        roots.map((root) => (
+          <View key={root.id} style={styles.issueRoot}>
+            {renderIssueNode(root, 0)}
+          </View>
+        ))
+      )}
     </View>
   );
 }
@@ -997,6 +1008,26 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 6,
     overflow: "hidden",
+  },
+  viewToggleRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  viewToggle: {
+    flexDirection: "row",
+    backgroundColor: Colors.surface,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    overflow: "hidden",
+  },
+  viewToggleBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  viewToggleBtnActive: {
+    backgroundColor: Colors.bg,
   },
   issueRoot: {
     backgroundColor: Colors.surface,
