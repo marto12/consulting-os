@@ -88,6 +88,19 @@ function canApprove(stage: string): boolean {
   return ["issues_draft", "hypotheses_draft", "execution_done", "summary_draft", "presentation_draft"].includes(stage);
 }
 
+const STAGE_TO_TAB: Record<string, TabKey> = {
+  issues_draft: "issues",
+  issues_approved: "issues",
+  hypotheses_draft: "hypotheses",
+  hypotheses_approved: "hypotheses",
+  execution_done: "runs",
+  execution_approved: "runs",
+  summary_draft: "summary",
+  summary_approved: "summary",
+  presentation_draft: "presentation",
+  complete: "overview",
+};
+
 const STAGE_AGENT_INFO: Record<string, { agent: string; description: string }> = {
   created: {
     agent: "Issues Tree Agent",
@@ -126,6 +139,7 @@ export default function ProjectDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const [hasAutoNavigated, setHasAutoNavigated] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [runElapsed, setRunElapsed] = useState(0);
 
@@ -185,7 +199,7 @@ export default function ProjectDetailScreen() {
       const res = await apiRequest("POST", `/api/projects/${id}/run-next`);
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       setRunElapsed(0);
       queryClient.invalidateQueries({ queryKey: ["/api/projects", id] });
       queryClient.invalidateQueries({
@@ -194,6 +208,10 @@ export default function ProjectDetailScreen() {
       queryClient.invalidateQueries({
         queryKey: ["/api/projects", id, "logs"],
       });
+      const newStage = data?.stage;
+      if (newStage && STAGE_TO_TAB[newStage]) {
+        setActiveTab(STAGE_TO_TAB[newStage]);
+      }
     },
     onError: (err: Error) => {
       setRunElapsed(0);
@@ -218,14 +236,22 @@ export default function ProjectDetailScreen() {
       const res = await apiRequest("POST", `/api/projects/${id}/approve`);
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects", id] });
       queryClient.invalidateQueries({
         queryKey: ["/api/projects", id, "artifacts"],
       });
+      const newStage = data?.stage;
+      if (newStage === "complete") {
+        setActiveTab("overview");
+      }
     },
     onError: (err: Error) => {
-      Alert.alert("Error", err.message);
+      if (Platform.OS === "web") {
+        window.alert(err.message);
+      } else {
+        Alert.alert("Error", err.message);
+      }
     },
   });
 
@@ -242,6 +268,16 @@ export default function ProjectDetailScreen() {
     ]);
     setRefreshing(false);
   }, [id]);
+
+  useEffect(() => {
+    if (project && !hasAutoNavigated) {
+      const tab = STAGE_TO_TAB[project.stage];
+      if (tab) {
+        setActiveTab(tab);
+      }
+      setHasAutoNavigated(true);
+    }
+  }, [project, hasAutoNavigated]);
 
   if (projectLoading || !project) {
     return (
@@ -319,22 +355,45 @@ export default function ProjectDetailScreen() {
           />
         )}
         {activeTab === "issues" && (
-          <IssuesTab issues={artifacts?.issueNodes || []} />
+          <IssuesTab
+            issues={artifacts?.issueNodes || []}
+            showApprove={showApprove && stage === "issues_draft"}
+            onApprove={() => approveMutation.mutate()}
+            approvePending={approveMutation.isPending}
+          />
         )}
         {activeTab === "hypotheses" && (
           <HypothesesTab
             hypotheses={artifacts?.hypotheses || []}
             plans={artifacts?.analysisPlan || []}
+            showApprove={showApprove && stage === "hypotheses_draft"}
+            onApprove={() => approveMutation.mutate()}
+            approvePending={approveMutation.isPending}
           />
         )}
         {activeTab === "runs" && (
-          <RunsTab runs={artifacts?.modelRuns || []} />
+          <RunsTab
+            runs={artifacts?.modelRuns || []}
+            showApprove={showApprove && stage === "execution_done"}
+            onApprove={() => approveMutation.mutate()}
+            approvePending={approveMutation.isPending}
+          />
         )}
         {activeTab === "summary" && (
-          <SummaryTab narratives={artifacts?.narratives || []} />
+          <SummaryTab
+            narratives={artifacts?.narratives || []}
+            showApprove={showApprove && stage === "summary_draft"}
+            onApprove={() => approveMutation.mutate()}
+            approvePending={approveMutation.isPending}
+          />
         )}
         {activeTab === "presentation" && (
-          <PresentationTab slides={artifacts?.slides || []} />
+          <PresentationTab
+            slides={artifacts?.slides || []}
+            showApprove={showApprove && stage === "presentation_draft"}
+            onApprove={() => approveMutation.mutate()}
+            approvePending={approveMutation.isPending}
+          />
         )}
         {activeTab === "logs" && <LogsTab logs={logs || []} />}
       </ScrollView>
@@ -347,7 +406,7 @@ export default function ProjectDetailScreen() {
         />
       )}
 
-      {!runNextMutation.isPending && (showRunNext || showApprove) && !isComplete && (
+      {!runNextMutation.isPending && showRunNext && !isComplete && (
         <View
           style={[
             styles.actionBar,
@@ -357,42 +416,20 @@ export default function ProjectDetailScreen() {
             },
           ]}
         >
-          {showApprove && (
-            <Pressable
-              style={({ pressed }) => [
-                styles.actionButton,
-                styles.approveButton,
-                pressed && { opacity: 0.85 },
-              ]}
-              onPress={() => approveMutation.mutate()}
-              disabled={approveMutation.isPending}
-            >
-              {approveMutation.isPending ? (
-                <ActivityIndicator color="#FFF" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="checkmark-circle" size={20} color="#FFF" />
-                  <Text style={styles.actionText}>Approve</Text>
-                </>
-              )}
-            </Pressable>
-          )}
-          {showRunNext && (
-            <Pressable
-              style={({ pressed }) => [
-                styles.actionButton,
-                styles.runButton,
-                pressed && { opacity: 0.85 },
-              ]}
-              onPress={() => runNextMutation.mutate()}
-              disabled={runNextMutation.isPending}
-            >
-              <>
-                <Ionicons name="play-circle" size={20} color="#FFF" />
-                <Text style={styles.actionText}>Run Next Stage</Text>
-              </>
-            </Pressable>
-          )}
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionButton,
+              styles.runButton,
+              pressed && { opacity: 0.85 },
+            ]}
+            onPress={() => runNextMutation.mutate()}
+            disabled={runNextMutation.isPending}
+          >
+            <>
+              <Ionicons name="play-circle" size={20} color="#FFF" />
+              <Text style={styles.actionText}>Run Next Agent</Text>
+            </>
+          </Pressable>
         </View>
       )}
 
@@ -586,7 +623,36 @@ function OverviewTab({
   );
 }
 
-function IssuesTab({ issues }: { issues: any[] }) {
+interface ApproveProps {
+  showApprove: boolean;
+  onApprove: () => void;
+  approvePending: boolean;
+}
+
+function InlineApproveButton({ showApprove, onApprove, approvePending }: ApproveProps) {
+  if (!showApprove) return null;
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.inlineApproveBtn,
+        pressed && { opacity: 0.85 },
+      ]}
+      onPress={onApprove}
+      disabled={approvePending}
+    >
+      {approvePending ? (
+        <ActivityIndicator color="#FFF" size="small" />
+      ) : (
+        <>
+          <Ionicons name="checkmark-circle" size={20} color="#FFF" />
+          <Text style={styles.inlineApproveBtnText}>Approve & Continue</Text>
+        </>
+      )}
+    </Pressable>
+  );
+}
+
+function IssuesTab({ issues, showApprove, onApprove, approvePending }: { issues: any[] } & ApproveProps) {
   const [viewMode, setViewMode] = useState<"graph" | "list">("graph");
 
   if (issues.length === 0) {
@@ -693,6 +759,7 @@ function IssuesTab({ issues }: { issues: any[] }) {
           </View>
         ))
       )}
+      <InlineApproveButton showApprove={showApprove} onApprove={onApprove} approvePending={approvePending} />
     </View>
   );
 }
@@ -700,10 +767,13 @@ function IssuesTab({ issues }: { issues: any[] }) {
 function HypothesesTab({
   hypotheses,
   plans,
+  showApprove,
+  onApprove,
+  approvePending,
 }: {
   hypotheses: any[];
   plans: any[];
-}) {
+} & ApproveProps) {
   if (hypotheses.length === 0) {
     return (
       <View style={styles.emptyTab}>
@@ -757,11 +827,12 @@ function HypothesesTab({
           </View>
         );
       })}
+      <InlineApproveButton showApprove={showApprove} onApprove={onApprove} approvePending={approvePending} />
     </View>
   );
 }
 
-function RunsTab({ runs }: { runs: any[] }) {
+function RunsTab({ runs, showApprove, onApprove, approvePending }: { runs: any[] } & ApproveProps) {
   if (runs.length === 0) {
     return (
       <View style={styles.emptyTab}>
@@ -835,6 +906,7 @@ function RunsTab({ runs }: { runs: any[] }) {
           </View>
         );
       })}
+      <InlineApproveButton showApprove={showApprove} onApprove={onApprove} approvePending={approvePending} />
     </View>
   );
 }
@@ -944,7 +1016,7 @@ function MarkdownText({ text }: { text: string }) {
   return <View style={styles.mdContainer}>{elements}</View>;
 }
 
-function SummaryTab({ narratives }: { narratives: any[] }) {
+function SummaryTab({ narratives, showApprove, onApprove, approvePending }: { narratives: any[] } & ApproveProps) {
   if (narratives.length === 0) {
     return (
       <View style={styles.emptyTab}>
@@ -974,11 +1046,12 @@ function SummaryTab({ narratives }: { narratives: any[] }) {
           <MarkdownText text={narr.summaryText} />
         </View>
       ))}
+      <InlineApproveButton showApprove={showApprove} onApprove={onApprove} approvePending={approvePending} />
     </View>
   );
 }
 
-function PresentationTab({ slides }: { slides: any[] }) {
+function PresentationTab({ slides, showApprove, onApprove, approvePending }: { slides: any[] } & ApproveProps) {
   const [currentSlide, setCurrentSlide] = useState(0);
 
   if (slides.length === 0) {
@@ -1151,6 +1224,7 @@ function PresentationTab({ slides }: { slides: any[] }) {
           </Pressable>
         ))}
       </View>
+      <InlineApproveButton showApprove={showApprove} onApprove={onApprove} approvePending={approvePending} />
     </View>
   );
 }
@@ -1764,6 +1838,23 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: Colors.text,
     lineHeight: 22,
+  },
+  inlineApproveBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: Colors.success,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    marginTop: 20,
+    marginBottom: 8,
+  },
+  inlineApproveBtnText: {
+    fontSize: 16,
+    fontFamily: "Inter_600SemiBold",
+    color: "#FFFFFF",
   },
   mdContainer: {
     gap: 2,
