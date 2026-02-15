@@ -21,6 +21,7 @@ function RootLayoutNav() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="project/[id]" />
+      <Stack.Screen name="admin" />
     </Stack>
   );
 }
