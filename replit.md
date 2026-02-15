@@ -16,7 +16,7 @@ Preferred communication style: Simple, everyday language.
 
 - **Framework**: Expo SDK 54 with expo-router for file-based routing
 - **State Management**: TanStack React Query for server state, with `queryClient` and `apiRequest` helpers in `lib/query-client.ts`
-- **Routing**: Three main screens — `app/index.tsx` (project list/creation), `app/project/[id].tsx` (project detail with tabbed interface for overview, issues, hypotheses, runs, summary, and logs), and `app/admin.tsx` (agent configuration admin panel)
+- **Routing**: Tab-based navigation with two tabs — `app/(tabs)/index.tsx` (Projects: project list/creation) and `app/(tabs)/settings.tsx` (Settings: agent configuration admin panel). `app/project/[id].tsx` is a stack screen pushed above the tabs for project detail with tabbed interface for overview, issues, hypotheses, runs, summary, and logs
 - **Styling**: React Native StyleSheet with a centralized color palette in `constants/colors.ts`
 - **Fonts**: Inter (400, 500, 600, 700) via `@expo-google-fonts/inter`
 - **Key Libraries**: react-native-gesture-handler, react-native-reanimated, react-native-keyboard-controller, react-native-safe-area-context

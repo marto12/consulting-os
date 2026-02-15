@@ -19,9 +19,8 @@ SplashScreen.preventAutoHideAsync();
 function RootLayoutNav() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="index" />
+      <Stack.Screen name="(tabs)" />
       <Stack.Screen name="project/[id]" />
-      <Stack.Screen name="admin" />
     </Stack>
   );
 }

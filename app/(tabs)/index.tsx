@@ -159,31 +159,19 @@ export default function ProjectListScreen() {
       <StatusBar style="dark" />
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle}>Consulting OS</Text>
+          <Text style={styles.headerTitle}>Projects</Text>
           <Text style={styles.headerSubtitle}>AI-Powered Strategy Workflow</Text>
         </View>
-        <View style={styles.headerActions}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.settingsButton,
-              pressed && { opacity: 0.7 },
-            ]}
-            onPress={() => router.push("/admin")}
-            testID="admin-settings-btn"
-          >
-            <Feather name="settings" size={20} color={Colors.textSecondary} />
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [
-              styles.createButton,
-              pressed && { opacity: 0.8 },
-            ]}
-            onPress={() => setShowCreate(true)}
-            testID="create-project-btn"
-          >
-            <Feather name="plus" size={20} color="#FFF" />
-          </Pressable>
-        </View>
+        <Pressable
+          style={({ pressed }) => [
+            styles.createButton,
+            pressed && { opacity: 0.8 },
+          ]}
+          onPress={() => setShowCreate(true)}
+          testID="create-project-btn"
+        >
+          <Feather name="plus" size={20} color="#FFF" />
+        </Pressable>
       </View>
 
       {isLoading ? (
@@ -327,19 +315,6 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: Colors.textSecondary,
     marginTop: 2,
-  },
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  settingsButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: Colors.bg,
-    alignItems: "center",
-    justifyContent: "center",
   },
   createButton: {
     width: 44,

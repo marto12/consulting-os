@@ -14,7 +14,6 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/query-client";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, Feather, MaterialCommunityIcons } from "@expo/vector-icons";
-import { router } from "expo-router";
 import Colors from "@/constants/colors";
 import { StatusBar } from "expo-status-bar";
 
@@ -131,17 +130,10 @@ export default function AdminScreen() {
     <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
       <StatusBar style="dark" />
       <View style={styles.header}>
-        <Pressable
-          style={styles.backButton}
-          onPress={() => router.back()}
-          testID="admin-back-btn"
-        >
-          <Ionicons name="arrow-back" size={22} color={Colors.text} />
-        </Pressable>
         <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle}>Agent Configuration</Text>
+          <Text style={styles.headerTitle}>Settings</Text>
           <Text style={styles.headerSubtitle}>
-            Customize prompts, models, and parameters
+            Configure agents, prompts, and parameters
           </Text>
         </View>
       </View>
@@ -304,14 +296,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.surfaceBorder,
     backgroundColor: Colors.surface,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: Colors.bg,
-    alignItems: "center",
-    justifyContent: "center",
   },
   headerTitle: {
     fontSize: 20,
