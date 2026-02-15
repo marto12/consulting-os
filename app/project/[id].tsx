@@ -839,6 +839,111 @@ function RunsTab({ runs }: { runs: any[] }) {
   );
 }
 
+function MarkdownText({ text }: { text: string }) {
+  if (!text) return null;
+
+  const lines = text.split("\n");
+  const elements: React.ReactNode[] = [];
+
+  function renderInline(line: string, key: string): React.ReactNode {
+    const parts: React.ReactNode[] = [];
+    const regex = /(\*\*(.+?)\*\*)|(__(.+?)__)/g;
+    let lastIndex = 0;
+    let match;
+    let partIdx = 0;
+
+    while ((match = regex.exec(line)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(
+          <Text key={`${key}-t${partIdx++}`} style={styles.mdBody}>
+            {line.slice(lastIndex, match.index)}
+          </Text>
+        );
+      }
+      parts.push(
+        <Text key={`${key}-b${partIdx++}`} style={styles.mdBold}>
+          {match[2] || match[4]}
+        </Text>
+      );
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < line.length) {
+      parts.push(
+        <Text key={`${key}-t${partIdx++}`} style={styles.mdBody}>
+          {line.slice(lastIndex)}
+        </Text>
+      );
+    }
+    if (parts.length === 0) {
+      return <Text key={key} style={styles.mdBody}>{line}</Text>;
+    }
+    return <Text key={key}>{parts}</Text>;
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (trimmed === "") {
+      elements.push(<View key={`sp-${i}`} style={{ height: 8 }} />);
+      continue;
+    }
+
+    if (trimmed.startsWith("### ")) {
+      elements.push(
+        <Text key={`h3-${i}`} style={styles.mdH3}>
+          {trimmed.slice(4)}
+        </Text>
+      );
+    } else if (trimmed.startsWith("## ")) {
+      elements.push(
+        <Text key={`h2-${i}`} style={styles.mdH2}>
+          {trimmed.slice(3)}
+        </Text>
+      );
+    } else if (trimmed.startsWith("# ")) {
+      elements.push(
+        <Text key={`h1-${i}`} style={styles.mdH1}>
+          {trimmed.slice(2)}
+        </Text>
+      );
+    } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+      elements.push(
+        <View key={`li-${i}`} style={styles.mdBulletRow}>
+          <Text style={styles.mdBulletDot}>{"\u2022"}</Text>
+          <View style={{ flex: 1 }}>
+            {renderInline(trimmed.slice(2), `li-${i}`)}
+          </View>
+        </View>
+      );
+    } else if (/^\d+\.\s/.test(trimmed)) {
+      const numMatch = trimmed.match(/^(\d+)\.\s(.*)$/);
+      if (numMatch) {
+        elements.push(
+          <View key={`ol-${i}`} style={styles.mdBulletRow}>
+            <Text style={styles.mdOrderedNum}>{numMatch[1]}.</Text>
+            <View style={{ flex: 1 }}>
+              {renderInline(numMatch[2], `ol-${i}`)}
+            </View>
+          </View>
+        );
+      }
+    } else if (trimmed === "---" || trimmed === "***") {
+      elements.push(
+        <View key={`hr-${i}`} style={styles.mdHr} />
+      );
+    } else {
+      elements.push(
+        <View key={`p-${i}`}>
+          {renderInline(trimmed, `p-${i}`)}
+        </View>
+      );
+    }
+  }
+
+  return <View style={styles.mdContainer}>{elements}</View>;
+}
+
 function SummaryTab({ narratives }: { narratives: any[] }) {
   if (narratives.length === 0) {
     return (
@@ -866,7 +971,7 @@ function SummaryTab({ narratives }: { narratives: any[] }) {
               {new Date(narr.createdAt).toLocaleString()}
             </Text>
           </View>
-          <Text style={styles.narrativeText}>{narr.summaryText}</Text>
+          <MarkdownText text={narr.summaryText} />
         </View>
       ))}
     </View>
@@ -1659,6 +1764,67 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: Colors.text,
     lineHeight: 22,
+  },
+  mdContainer: {
+    gap: 2,
+  },
+  mdH1: {
+    fontSize: 20,
+    fontFamily: "Inter_700Bold",
+    color: Colors.text,
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  mdH2: {
+    fontSize: 17,
+    fontFamily: "Inter_700Bold",
+    color: Colors.text,
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  mdH3: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.text,
+    marginTop: 8,
+    marginBottom: 3,
+  },
+  mdBody: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    color: Colors.text,
+    lineHeight: 22,
+  },
+  mdBold: {
+    fontSize: 14,
+    fontFamily: "Inter_700Bold",
+    color: Colors.text,
+    lineHeight: 22,
+  },
+  mdBulletRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    paddingLeft: 4,
+  },
+  mdBulletDot: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    color: Colors.accent,
+    lineHeight: 22,
+    width: 12,
+  },
+  mdOrderedNum: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.accent,
+    lineHeight: 22,
+    width: 20,
+  },
+  mdHr: {
+    height: 1,
+    backgroundColor: Colors.surfaceBorder,
+    marginVertical: 10,
   },
   logCard: {
     backgroundColor: Colors.surface,
