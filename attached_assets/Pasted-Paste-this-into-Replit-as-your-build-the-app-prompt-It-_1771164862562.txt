@@ -1,0 +1,137 @@
+Paste this into Replit (as your “build the app” prompt). It tells Replit to choose the DB setup and still proves sequencing + shared state.
+
+⸻
+
+Replit build prompt
+
+Build a cloud-hosted MVP web app called Consulting OS MVP that demonstrates sequenced AI agents operating on shared, persistent project state with human approval gates.
+
+Core demo
+
+A user can:
+	1.	Create a project with objective + constraints
+	2.	Run a sequenced workflow:
+	•	Issues tree agent
+	•	Hypotheses + analysis plan agent
+	•	Execution agent (calls a real tool)
+	•	Executive summary agent
+	3.	Approve outputs between stages
+	4.	View artifacts + version history + run logs
+
+Tech choices (you decide)
+	•	Use whatever stack is easiest on Replit, but keep it production-ish and easy to run.
+	•	You must implement a backend API and a simple web UI.
+	•	Choose the database setup yourself (SQLite is fine if simplest; Postgres if easy). It must be persistent for the running app.
+	•	Use OpenAI-compatible LLM calls (env var OPENAI_API_KEY). If key missing, run in “mock mode” with deterministic stub outputs so the app still works.
+
+Required concepts (non-negotiable)
+	1.	Shared state persisted in the DB (not just in memory)
+	2.	Sequencing between agents (explicit workflow stages)
+	3.	Human checkpoint: user must approve stage output before next stage can run
+	4.	Tool calling: at least one real “analysis tool” that the agent invokes (even a simple scenario calculator is fine)
+	5.	Audit logging: store every agent run (inputs, outputs, timestamps, stage, status)
+
+Workflow stages
+
+Use these stages and enforce transitions:
+	•	issues_draft → (approve) → hypotheses_draft → (approve) → execution_done → summary_draft → (approve) → complete
+
+Rules:
+	•	“Run next stage” only allowed when current stage is approved (except initial run).
+	•	After an agent generates output for a stage, mark it pending approval.
+	•	Approval moves the project to the next stage.
+
+Data model (DB tables)
+
+Implement at least these tables (names flexible):
+	•	projects: id, name, objective, constraints, stage, created_at, updated_at
+	•	issue_nodes: id, project_id, parent_id, text, priority, version, created_at
+	•	hypotheses: id, project_id, issue_node_id, statement, metric, data_source, method, version, created_at
+	•	analysis_plan: id, project_id, hypothesis_id, method, parameters_json, required_dataset, created_at
+	•	model_runs: id, project_id, tool_name, inputs_json, outputs_json, created_at
+	•	narratives: id, project_id, summary_text, version, created_at
+	•	run_logs: id, project_id, stage, input_json, output_json, model_used, status, error_text, created_at
+
+Versioning:
+	•	Each time an artifact is regenerated, increment version.
+
+Agents (implement as functions with structured I/O)
+
+Each agent must produce structured JSON with predictable fields.
+	1.	IssuesTreeAgent
+
+	•	Input: project objective + constraints
+	•	Output: tree nodes with ids, parent_id, text, priority
+	•	Store into issue_nodes (versioned)
+
+	2.	HypothesisAgent
+
+	•	Input: issue tree
+	•	Output: hypotheses linked to issue_node_id + an analysis plan per hypothesis
+	•	Store into hypotheses + analysis_plan (versioned)
+
+	3.	ExecutionAgent
+
+	•	Input: analysis plan
+	•	Must call an internal tool: run_scenario_tool(parameters) (or regression tool)
+	•	Store outputs into model_runs
+
+	4.	SummaryAgent
+
+	•	Input: project + hypotheses + model_runs
+	•	Output: executive summary (bullet points + short narrative)
+	•	Store into narratives (versioned)
+
+Tool requirement (minimum)
+
+Implement run_scenario_tool that accepts structured inputs and returns structured outputs, e.g.:
+	•	A simple scenario model: baseline + optimistic + pessimistic
+	•	Or a toy regression on a sample dataset bundled in the repo
+	•	It must be called by ExecutionAgent, not manually by user
+
+API endpoints
+
+Implement:
+	•	POST /api/projects create project
+	•	GET /api/projects list
+	•	GET /api/projects/:id project detail
+	•	POST /api/projects/:id/run-next run next stage agent
+	•	POST /api/projects/:id/approve approve current pending stage
+	•	GET /api/projects/:id/artifacts issues/hypotheses/plan/runs/summary
+	•	GET /api/projects/:id/logs run logs
+
+UI requirements (simple, clean)
+
+A single-page app is fine.
+
+Must include:
+	•	Project list + create form
+	•	Project detail view showing:
+	•	Objective + constraints
+	•	Current stage and whether pending approval
+	•	Buttons: Run next stage, Approve
+	•	Tabs/sections: Issues tree, Hypotheses + plan, Model runs, Executive summary, Logs
+	•	Display artifact versions and timestamps
+
+Implementation details
+	•	Use strong JSON schemas for agent outputs (validate before persisting).
+	•	Store raw model inputs/outputs in run_logs.
+	•	Add error handling: failed run sets status=failed and shows error in UI.
+	•	Provide a README with:
+	•	How to run
+	•	Required env vars
+	•	How to demo (step-by-step clicks)
+
+Deliverable
+
+Produce a working Replit project with:
+	•	backend + frontend
+	•	DB persistence
+	•	sequenced agents with approvals
+	•	tool calling
+	•	logs
+	•	mock mode if no API key
+
+⸻
+
+If you want, tell me whether you prefer Python (FastAPI) or Node (Next.js API routes / Express) and I’ll tighten this prompt to that stack (and include a minimal schema + agent JSON contracts).
