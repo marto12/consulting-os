@@ -8,6 +8,7 @@ import {
   modelRuns,
   narratives,
   runLogs,
+  slides,
   agentConfigs,
   type Project,
   type InsertProject,
@@ -17,6 +18,7 @@ import {
   type ModelRun,
   type Narrative,
   type RunLog,
+  type Slide,
   type AgentConfig,
 } from "@shared/schema";
 
@@ -236,6 +238,49 @@ export const storage = {
       .from(runLogs)
       .where(eq(runLogs.projectId, projectId))
       .orderBy(desc(runLogs.createdAt));
+  },
+
+  async getLatestSlideVersion(projectId: number): Promise<number> {
+    const s = await db
+      .select()
+      .from(slides)
+      .where(eq(slides.projectId, projectId))
+      .orderBy(desc(slides.version));
+    return s[0]?.version || 0;
+  },
+
+  async insertSlides(
+    projectId: number,
+    version: number,
+    slideData: {
+      slideIndex: number;
+      layout: string;
+      title: string;
+      subtitle?: string;
+      bodyJson: any;
+      notesText?: string;
+    }[]
+  ): Promise<Slide[]> {
+    if (slideData.length === 0) return [];
+    const values = slideData.map((s) => ({
+      projectId,
+      slideIndex: s.slideIndex,
+      layout: s.layout,
+      title: s.title,
+      subtitle: s.subtitle || null,
+      bodyJson: s.bodyJson,
+      notesText: s.notesText || null,
+      version,
+    }));
+    return db.insert(slides).values(values).returning();
+  },
+
+  async getSlides(projectId: number): Promise<Slide[]> {
+    return db
+      .select()
+      .from(slides)
+      .where(eq(slides.projectId, projectId))
+      .orderBy(desc(slides.version), slides.slideIndex);
   },
 
   async getAllAgentConfigs(): Promise<AgentConfig[]> {

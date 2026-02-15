@@ -93,6 +93,21 @@ export const runLogs = pgTable("run_logs", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+export const slides = pgTable("slides", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  slideIndex: integer("slide_index").notNull(),
+  layout: text("layout").notNull().default("title_body"),
+  title: text("title").notNull(),
+  subtitle: text("subtitle"),
+  bodyJson: jsonb("body_json").notNull(),
+  notesText: text("notes_text"),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const agentConfigs = pgTable("agent_configs", {
   id: serial("id").primaryKey(),
   agentType: text("agent_type").notNull().unique(),
@@ -133,4 +148,5 @@ export type AnalysisPlan = typeof analysisPlan.$inferSelect;
 export type ModelRun = typeof modelRuns.$inferSelect;
 export type Narrative = typeof narratives.$inferSelect;
 export type RunLog = typeof runLogs.$inferSelect;
+export type Slide = typeof slides.$inferSelect;
 export type AgentConfig = typeof agentConfigs.$inferSelect;
