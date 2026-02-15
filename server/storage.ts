@@ -8,6 +8,7 @@ import {
   modelRuns,
   narratives,
   runLogs,
+  agentConfigs,
   type Project,
   type InsertProject,
   type IssueNode,
@@ -16,6 +17,7 @@ import {
   type ModelRun,
   type Narrative,
   type RunLog,
+  type AgentConfig,
 } from "@shared/schema";
 
 export const storage = {
@@ -234,5 +236,44 @@ export const storage = {
       .from(runLogs)
       .where(eq(runLogs.projectId, projectId))
       .orderBy(desc(runLogs.createdAt));
+  },
+
+  async getAllAgentConfigs(): Promise<AgentConfig[]> {
+    return db.select().from(agentConfigs);
+  },
+
+  async getAgentConfig(agentType: string): Promise<AgentConfig | undefined> {
+    const [config] = await db
+      .select()
+      .from(agentConfigs)
+      .where(eq(agentConfigs.agentType, agentType));
+    return config;
+  },
+
+  async upsertAgentConfig(data: {
+    agentType: string;
+    systemPrompt: string;
+    model: string;
+    maxTokens: number;
+  }): Promise<AgentConfig> {
+    const existing = await this.getAgentConfig(data.agentType);
+    if (existing) {
+      const [updated] = await db
+        .update(agentConfigs)
+        .set({
+          systemPrompt: data.systemPrompt,
+          model: data.model,
+          maxTokens: data.maxTokens,
+          updatedAt: new Date(),
+        })
+        .where(eq(agentConfigs.agentType, data.agentType))
+        .returning();
+      return updated;
+    }
+    const [created] = await db
+      .insert(agentConfigs)
+      .values(data)
+      .returning();
+    return created;
   },
 };

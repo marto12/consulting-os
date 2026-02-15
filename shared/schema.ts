@@ -93,6 +93,15 @@ export const runLogs = pgTable("run_logs", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+export const agentConfigs = pgTable("agent_configs", {
+  id: serial("id").primaryKey(),
+  agentType: text("agent_type").notNull().unique(),
+  systemPrompt: text("system_prompt").notNull(),
+  model: text("model").notNull().default("gpt-5-nano"),
+  maxTokens: integer("max_tokens").notNull().default(8192),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
   title: text("title").notNull(),
@@ -124,3 +133,4 @@ export type AnalysisPlan = typeof analysisPlan.$inferSelect;
 export type ModelRun = typeof modelRuns.$inferSelect;
 export type Narrative = typeof narratives.$inferSelect;
 export type RunLog = typeof runLogs.$inferSelect;
+export type AgentConfig = typeof agentConfigs.$inferSelect;
