@@ -106,32 +106,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const version = (await storage.getLatestIssueVersion(projectId)) + 1;
 
           const idMap = new Map<string, number>();
-          const rootNodes = result.issues.filter((n) => !n.parentId);
-          const childNodes = result.issues.filter((n) => !!n.parentId);
 
-          const insertedRoots = await storage.insertIssueNodes(
-            projectId,
-            version,
-            rootNodes.map((n) => ({
-              parentId: null,
-              text: n.text,
-              priority: n.priority,
-            }))
-          );
-          rootNodes.forEach((n, i) => {
-            idMap.set(n.id, insertedRoots[i].id);
-          });
+          let remaining = [...result.issues];
+          let inserted = 0;
+          const maxPasses = 10;
+          let pass = 0;
 
-          if (childNodes.length > 0) {
-            await storage.insertIssueNodes(
+          while (remaining.length > 0 && pass < maxPasses) {
+            pass++;
+            const canInsert = remaining.filter(
+              (n) => !n.parentId || idMap.has(n.parentId)
+            );
+            const cannotInsert = remaining.filter(
+              (n) => n.parentId && !idMap.has(n.parentId)
+            );
+
+            if (canInsert.length === 0) break;
+
+            const insertedNodes = await storage.insertIssueNodes(
               projectId,
               version,
-              childNodes.map((n) => ({
+              canInsert.map((n) => ({
                 parentId: n.parentId ? (idMap.get(n.parentId) || null) : null,
                 text: n.text,
                 priority: n.priority,
               }))
             );
+
+            canInsert.forEach((n, i) => {
+              idMap.set(n.id, insertedNodes[i].id);
+            });
+
+            remaining = cannotInsert;
           }
 
           await storage.updateRunLog(runLog.id, result, "success");
@@ -306,7 +312,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/agent-configs/:agentType", async (req: Request, res: Response) => {
     try {
       const agentType = req.params.agentType as string;
-      const validTypes = ["issues_tree", "hypothesis", "execution", "summary"];
+      const validTypes = ["issues_tree", "hypothesis", "execution", "summary", "mece_critic"];
       if (!validTypes.includes(agentType)) {
         return res.status(400).json({ error: "Invalid agent type" });
       }

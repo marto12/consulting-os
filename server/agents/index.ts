@@ -60,6 +60,38 @@ Priority must be "high", "medium", or "low". Use string IDs. parentId is null fo
 }
 Generate 2-4 hypotheses linked to the most important issues. Each hypothesis must have a corresponding analysis plan entry. The parameters must have all fields: baselineRevenue (number), growthRate (0-1), costReduction (0-1), timeHorizonYears (integer), volatility (0-1). Use realistic business numbers.`,
 
+  mece_critic: `You are a rigorous MECE quality auditor for consulting issues trees. Your job is to evaluate an issues tree and either approve it or return specific revision instructions.
+
+Evaluate the tree against these 5 criteria:
+
+1. OVERLAP: Check for semantic overlap between sibling branches at each level. Siblings must be mutually exclusive — no branch should partially restate or subsume another.
+
+2. COVERAGE: Check for material gaps. Are there important dimensions of the governing question that are completely missing? Would a senior partner say "you forgot about X"?
+
+3. MIXED LOGICS: Check whether branches at the same level mix different types of decomposition — e.g., mixing drivers with symptoms, or actions with conditions. Each level should use one consistent logic.
+
+4. BRANCH BALANCE: Check whether any single branch has significantly more children than its siblings (more than 2x). An unbalanced tree suggests the decomposition logic is wrong.
+
+5. LABEL QUALITY: Check for vague or generic labels like "Other factors", "Miscellaneous", "General considerations". Every branch must be specific and descriptive.
+
+Return ONLY valid JSON matching this schema:
+{
+  "verdict": "approved" | "revise",
+  "scores": {
+    "overlap": { "score": 1-5, "details": "explanation" },
+    "coverage": { "score": 1-5, "details": "explanation" },
+    "mixedLogics": { "score": 1-5, "details": "explanation" },
+    "branchBalance": { "score": 1-5, "details": "explanation" },
+    "labelQuality": { "score": 1-5, "details": "explanation" }
+  },
+  "overallScore": 1-5,
+  "revisionInstructions": "Specific instructions for what to fix. Empty string if approved."
+}
+
+Score guide: 1=critical failure, 2=major issues, 3=acceptable, 4=good, 5=excellent.
+Set verdict to "approved" if overallScore >= 4. Set to "revise" if overallScore < 4.
+Be strict but fair. Provide actionable, specific revision instructions when verdict is "revise".`,
+
   execution: `Execute the analysis plan using the scenario calculator tool.`,
 
   summary: `You are a senior consulting partner writing an executive summary. Produce a clear, structured summary with: Key Findings (bullet points), Recommendation (2-3 sentences), and Next Steps (numbered list). Use markdown formatting. Be concise and actionable. Return ONLY the summary text, not JSON.`,
@@ -134,10 +166,42 @@ export interface IssueNodeOutput {
   priority: "high" | "medium" | "low";
 }
 
+export interface CriticResult {
+  verdict: "approved" | "revise";
+  scores: {
+    overlap: { score: number; details: string };
+    coverage: { score: number; details: string };
+    mixedLogics: { score: number; details: string };
+    branchBalance: { score: number; details: string };
+    labelQuality: { score: number; details: string };
+  };
+  overallScore: number;
+  revisionInstructions: string;
+}
+
+function formatTreeForCritic(issues: IssueNodeOutput[], objective: string): string {
+  const roots = issues.filter((n) => !n.parentId);
+  function renderBranch(parentId: string | null, indent: number): string {
+    const children = issues.filter((n) => n.parentId === parentId);
+    return children
+      .map((c) => {
+        const prefix = "  ".repeat(indent) + "- ";
+        const line = `${prefix}[${c.priority.toUpperCase()}] ${c.text}`;
+        const sub = renderBranch(c.id, indent + 1);
+        return sub ? `${line}\n${sub}` : line;
+      })
+      .join("\n");
+  }
+  const treeText = renderBranch(null, 0);
+  return `Governing Question / Objective: ${objective}\n\nIssues Tree (${issues.length} nodes):\n${treeText}`;
+}
+
+const MAX_REVISIONS = 2;
+
 export async function issuesTreeAgent(
   objective: string,
   constraints: string
-): Promise<{ issues: IssueNodeOutput[] }> {
+): Promise<{ issues: IssueNodeOutput[]; criticLog: { iteration: number; critic: CriticResult }[] }> {
   if (!openai) {
     return {
       issues: [
@@ -163,16 +227,73 @@ export async function issuesTreeAgent(
         { id: "20", parentId: "19", text: "Platform Architecture", priority: "low" },
         { id: "21", parentId: "19", text: "Data Pipeline Setup", priority: "medium" },
       ],
+      criticLog: [{
+        iteration: 0,
+        critic: {
+          verdict: "approved",
+          scores: {
+            overlap: { score: 5, details: "No overlap between sibling branches" },
+            coverage: { score: 4, details: "Key dimensions covered: market, revenue, operations" },
+            mixedLogics: { score: 4, details: "Consistent strategic decomposition at each level" },
+            branchBalance: { score: 4, details: "Balanced across 3 root branches (7/7/7 nodes)" },
+            labelQuality: { score: 5, details: "All labels are specific and descriptive" },
+          },
+          overallScore: 4,
+          revisionInstructions: "",
+        },
+      }],
     };
   }
 
-  const systemPrompt = await getAgentPrompt("issues_tree");
-  const model = await getAgentModel("issues_tree");
-  const maxTokens = await getAgentMaxTokens("issues_tree");
+  const generatorPrompt = await getAgentPrompt("issues_tree");
+  const generatorModel = await getAgentModel("issues_tree");
+  const generatorMaxTokens = await getAgentMaxTokens("issues_tree");
+  const criticPrompt = await getAgentPrompt("mece_critic");
+  const criticModel = await getAgentModel("mece_critic");
+  const criticMaxTokens = await getAgentMaxTokens("mece_critic");
 
-  const userPrompt = `Objective: ${objective}\nConstraints: ${constraints}`;
-  const raw = await callLLM(systemPrompt, userPrompt, model, maxTokens);
-  return extractJson(raw);
+  const baseUserPrompt = `Objective: ${objective}\nConstraints: ${constraints}`;
+  const criticLog: { iteration: number; critic: CriticResult }[] = [];
+
+  let currentTree: { issues: IssueNodeOutput[] };
+  let raw = await callLLM(generatorPrompt, baseUserPrompt, generatorModel, generatorMaxTokens);
+  currentTree = extractJson(raw);
+
+  for (let iteration = 0; iteration <= MAX_REVISIONS; iteration++) {
+    const treeDescription = formatTreeForCritic(currentTree.issues, objective);
+    const criticRaw = await callLLM(criticPrompt, treeDescription, criticModel, criticMaxTokens);
+
+    let criticResult: CriticResult;
+    try {
+      criticResult = extractJson(criticRaw);
+    } catch {
+      criticResult = {
+        verdict: "approved",
+        scores: {
+          overlap: { score: 3, details: "Could not parse critic response" },
+          coverage: { score: 3, details: "Could not parse critic response" },
+          mixedLogics: { score: 3, details: "Could not parse critic response" },
+          branchBalance: { score: 3, details: "Could not parse critic response" },
+          labelQuality: { score: 3, details: "Could not parse critic response" },
+        },
+        overallScore: 3,
+        revisionInstructions: "",
+      };
+    }
+
+    criticLog.push({ iteration, critic: criticResult });
+
+    if (criticResult.verdict === "approved" || iteration === MAX_REVISIONS) {
+      break;
+    }
+
+    const revisionPrompt = `${baseUserPrompt}\n\n---\nPREVIOUS TREE (needs revision):\n${formatTreeForCritic(currentTree.issues, objective)}\n\n---\nMECE CRITIC FEEDBACK (iteration ${iteration + 1}):\nOverall Score: ${criticResult.overallScore}/5\nOverlap: ${criticResult.scores.overlap.score}/5 — ${criticResult.scores.overlap.details}\nCoverage: ${criticResult.scores.coverage.score}/5 — ${criticResult.scores.coverage.details}\nMixed Logics: ${criticResult.scores.mixedLogics.score}/5 — ${criticResult.scores.mixedLogics.details}\nBranch Balance: ${criticResult.scores.branchBalance.score}/5 — ${criticResult.scores.branchBalance.details}\nLabel Quality: ${criticResult.scores.labelQuality.score}/5 — ${criticResult.scores.labelQuality.details}\n\nREVISION INSTRUCTIONS:\n${criticResult.revisionInstructions}\n\nPlease produce a REVISED issues tree that addresses ALL the critic's feedback. Return the full tree in the same JSON format.`;
+
+    raw = await callLLM(generatorPrompt, revisionPrompt, generatorModel, generatorMaxTokens);
+    currentTree = extractJson(raw);
+  }
+
+  return { ...currentTree, criticLog };
 }
 
 export interface HypothesisOutput {

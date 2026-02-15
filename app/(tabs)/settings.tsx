@@ -33,6 +33,11 @@ const AGENT_LABELS: Record<string, { label: string; description: string; icon: s
     description: "Runs scenario analysis tools on the plan",
     icon: "play-circle-outline",
   },
+  mece_critic: {
+    label: "MECE Critic",
+    description: "Audits issues trees for quality, overlap, and coverage",
+    icon: "check-decagram-outline",
+  },
   summary: {
     label: "Summary Agent",
     description: "Writes executive summary from results",
