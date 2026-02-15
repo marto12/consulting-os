@@ -712,7 +712,7 @@ function IssuesTab({ issues, showApprove, onApprove, approvePending }: { issues:
           </View>
         </View>
         {nodeChildren.length > 0 && (
-          <View style={{ marginLeft: 16 }}>
+          <View style={{ marginLeft: 8 }}>
             {nodeChildren.map((child) => renderIssueNode(child, depth + 1))}
           </View>
         )}
@@ -1643,20 +1643,21 @@ const styles = StyleSheet.create({
     color: Colors.text,
   },
   priorityBadge: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
+    flexShrink: 0,
   },
   priorityText: {
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: "Inter_600SemiBold",
     textTransform: "capitalize" as const,
   },
   issueChild: {
     flexDirection: "row",
     marginTop: 10,
-    marginLeft: 12,
-    gap: 10,
+    marginLeft: 4,
+    gap: 6,
   },
   issueChildLine: {
     width: 2,
@@ -1666,13 +1667,13 @@ const styles = StyleSheet.create({
   issueChildContent: {
     flex: 1,
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
+    gap: 6,
     paddingVertical: 4,
   },
   issueChildText: {
     flex: 1,
-    fontSize: 14,
+    fontSize: 13,
     fontFamily: "Inter_400Regular",
     color: Colors.textSecondary,
   },
