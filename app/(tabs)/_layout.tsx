@@ -34,6 +34,16 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="pipeline"
+        options={{
+          title: "Pipeline",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="git-network-outline" size={size} color={color} />
+          ),
+          tabBarTestID: "tab-pipeline",
+        }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{
           title: "Settings",
