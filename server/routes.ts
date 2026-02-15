@@ -263,6 +263,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  const REDO_MAP: Record<string, string> = {
+    issues_draft: "created",
+    issues_approved: "created",
+    hypotheses_draft: "issues_approved",
+    hypotheses_approved: "issues_approved",
+    execution_done: "hypotheses_approved",
+    execution_approved: "hypotheses_approved",
+    summary_draft: "execution_approved",
+    complete: "execution_approved",
+  };
+
+  app.post("/api/projects/:id/redo", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const { step } = req.body;
+      const project = await storage.getProject(projectId);
+      if (!project) return res.status(404).json({ error: "Not found" });
+
+      const stageMap: Record<string, string> = {
+        issues: "created",
+        hypotheses: "issues_approved",
+        execution: "hypotheses_approved",
+        summary: "execution_approved",
+      };
+
+      const targetStage = stageMap[step];
+      if (!targetStage) {
+        return res.status(400).json({ error: `Invalid step "${step}"` });
+      }
+
+      const currentIdx = STAGE_ORDER.indexOf(project.stage);
+      const stepDraftStages: Record<string, string> = {
+        issues: "issues_draft",
+        hypotheses: "hypotheses_draft",
+        execution: "execution_done",
+        summary: "summary_draft",
+      };
+      const draftIdx = STAGE_ORDER.indexOf(stepDraftStages[step]);
+
+      if (currentIdx < draftIdx) {
+        return res.status(400).json({
+          error: `Cannot redo "${step}" — that step hasn't been run yet.`,
+        });
+      }
+
+      const updated = await storage.updateProjectStage(projectId, targetStage);
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/projects/:id/artifacts", async (req: Request, res: Response) => {
     try {
       const projectId = Number(req.params.id);

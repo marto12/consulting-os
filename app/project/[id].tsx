@@ -106,6 +106,39 @@ export default function ProjectDetailScreen() {
     refetchInterval: 5000,
   });
 
+  const redoMutation = useMutation({
+    mutationFn: async (step: string) => {
+      const res = await apiRequest("POST", `/api/projects/${id}/redo`, { step });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", id, "artifacts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", id, "logs"] });
+    },
+    onError: (err: Error) => {
+      if (Platform.OS === "web") {
+        window.alert(err.message);
+      } else {
+        Alert.alert("Error", err.message);
+      }
+    },
+  });
+
+  const handleRedo = (step: string, label: string) => {
+    const msg = `This will reset the workflow back before "${label}" and re-run the analysis. Any later results will need to be regenerated. Continue?`;
+    if (Platform.OS === "web") {
+      if (window.confirm(msg)) {
+        redoMutation.mutate(step);
+      }
+    } else {
+      Alert.alert("Redo Analysis", msg, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Redo", style: "destructive", onPress: () => redoMutation.mutate(step) },
+      ]);
+    }
+  };
+
   const runNextMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", `/api/projects/${id}/run-next`);
@@ -226,6 +259,8 @@ export default function ProjectDetailScreen() {
           <OverviewTab
             project={project}
             stage={stage}
+            onRedo={handleRedo}
+            redoPending={redoMutation.isPending}
           />
         )}
         {activeTab === "issues" && (
@@ -318,7 +353,17 @@ export default function ProjectDetailScreen() {
   );
 }
 
-function OverviewTab({ project, stage }: { project: any; stage: string }) {
+function OverviewTab({
+  project,
+  stage,
+  onRedo,
+  redoPending,
+}: {
+  project: any;
+  stage: string;
+  onRedo: (step: string, label: string) => void;
+  redoPending: boolean;
+}) {
   return (
     <View style={styles.tabContent}>
       <View style={styles.section}>
@@ -362,22 +407,46 @@ function OverviewTab({ project, stage }: { project: any; stage: string }) {
                 )}
               </View>
               <View style={styles.stepInfo}>
-                <Text
-                  style={[
-                    styles.stepLabel,
-                    status === "active" && styles.stepLabelActive,
-                    status === "complete" && styles.stepLabelComplete,
-                  ]}
-                >
-                  {step.label}
-                </Text>
-                <Text style={styles.stepStatus}>
-                  {status === "complete"
-                    ? "Done"
-                    : status === "active"
-                    ? STAGE_LABELS[stage] || stage
-                    : "Pending"}
-                </Text>
+                <View style={styles.stepInfoRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.stepLabel,
+                        status === "active" && styles.stepLabelActive,
+                        status === "complete" && styles.stepLabelComplete,
+                      ]}
+                    >
+                      {step.label}
+                    </Text>
+                    <Text style={styles.stepStatus}>
+                      {status === "complete"
+                        ? "Done"
+                        : status === "active"
+                        ? STAGE_LABELS[stage] || stage
+                        : "Pending"}
+                    </Text>
+                  </View>
+                  {(status === "complete" || status === "active") && (
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.redoButton,
+                        pressed && { opacity: 0.7 },
+                      ]}
+                      onPress={() => onRedo(step.key, step.label)}
+                      disabled={redoPending}
+                      testID={`redo-${step.key}`}
+                    >
+                      {redoPending ? (
+                        <ActivityIndicator size={12} color={Colors.textMuted} />
+                      ) : (
+                        <>
+                          <Ionicons name="refresh" size={13} color={Colors.textSecondary} />
+                          <Text style={styles.redoButtonText}>Redo</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  )}
+                </View>
               </View>
             </View>
           );
@@ -896,6 +965,27 @@ const styles = StyleSheet.create({
   stepInfo: {
     flex: 1,
     paddingTop: 4,
+  },
+  stepInfoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  redoButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    backgroundColor: Colors.surface,
+  },
+  redoButtonText: {
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
+    color: Colors.textSecondary,
   },
   stepLabel: {
     fontSize: 15,
