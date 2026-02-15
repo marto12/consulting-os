@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -83,11 +83,42 @@ function canApprove(stage: string): boolean {
   return ["issues_draft", "hypotheses_draft", "execution_done", "summary_draft"].includes(stage);
 }
 
+const STAGE_AGENT_INFO: Record<string, { agent: string; description: string }> = {
+  created: {
+    agent: "Issues Tree Agent",
+    description: "Decomposing objective into MECE issues tree...",
+  },
+  issues_approved: {
+    agent: "Hypothesis Agent",
+    description: "Generating hypotheses and analysis plans...",
+  },
+  hypotheses_approved: {
+    agent: "Execution Agent",
+    description: "Running scenario analysis with calculator tool...",
+  },
+  execution_approved: {
+    agent: "Summary Agent",
+    description: "Writing executive summary from results...",
+  },
+};
+
+function useAnimatedDots() {
+  const [dots, setDots] = useState("");
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setDots((prev) => (prev.length >= 3 ? "" : prev + "."));
+    }, 500);
+    return () => clearInterval(interval);
+  }, []);
+  return dots;
+}
+
 export default function ProjectDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [refreshing, setRefreshing] = useState(false);
+  const [runElapsed, setRunElapsed] = useState(0);
 
   const webTopInset = Platform.OS === "web" ? 67 : 0;
 
@@ -141,10 +172,12 @@ export default function ProjectDetailScreen() {
 
   const runNextMutation = useMutation({
     mutationFn: async () => {
+      setRunElapsed(0);
       const res = await apiRequest("POST", `/api/projects/${id}/run-next`);
       return res.json();
     },
     onSuccess: () => {
+      setRunElapsed(0);
       queryClient.invalidateQueries({ queryKey: ["/api/projects", id] });
       queryClient.invalidateQueries({
         queryKey: ["/api/projects", id, "artifacts"],
@@ -154,9 +187,22 @@ export default function ProjectDetailScreen() {
       });
     },
     onError: (err: Error) => {
-      Alert.alert("Error", err.message);
+      setRunElapsed(0);
+      if (Platform.OS === "web") {
+        window.alert(err.message);
+      } else {
+        Alert.alert("Error", err.message);
+      }
     },
   });
+
+  useEffect(() => {
+    if (!runNextMutation.isPending) return;
+    const interval = setInterval(() => {
+      setRunElapsed((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [runNextMutation.isPending]);
 
   const approveMutation = useMutation({
     mutationFn: async () => {
@@ -281,7 +327,15 @@ export default function ProjectDetailScreen() {
         {activeTab === "logs" && <LogsTab logs={logs || []} />}
       </ScrollView>
 
-      {(showRunNext || showApprove) && !isComplete && (
+      {runNextMutation.isPending && (
+        <RunningStatusBar
+          stage={stage}
+          elapsed={runElapsed}
+          bottomPadding={Platform.OS === "web" ? 34 + 16 : insets.bottom + 16}
+        />
+      )}
+
+      {!runNextMutation.isPending && (showRunNext || showApprove) && !isComplete && (
         <View
           style={[
             styles.actionBar,
@@ -321,14 +375,10 @@ export default function ProjectDetailScreen() {
               onPress={() => runNextMutation.mutate()}
               disabled={runNextMutation.isPending}
             >
-              {runNextMutation.isPending ? (
-                <ActivityIndicator color="#FFF" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="play-circle" size={20} color="#FFF" />
-                  <Text style={styles.actionText}>Run Next Stage</Text>
-                </>
-              )}
+              <>
+                <Ionicons name="play-circle" size={20} color="#FFF" />
+                <Text style={styles.actionText}>Run Next Stage</Text>
+              </>
             </Pressable>
           )}
         </View>
@@ -349,6 +399,53 @@ export default function ProjectDetailScreen() {
           <Text style={styles.completeText}>Workflow Complete</Text>
         </View>
       )}
+    </View>
+  );
+}
+
+function RunningStatusBar({
+  stage,
+  elapsed,
+  bottomPadding,
+}: {
+  stage: string;
+  elapsed: number;
+  bottomPadding: number;
+}) {
+  const dots = useAnimatedDots();
+  const info = STAGE_AGENT_INFO[stage];
+  const agentName = info?.agent || "Agent";
+  const description = info?.description || "Processing...";
+
+  const phases = [
+    { threshold: 0, label: "Initializing" },
+    { threshold: 3, label: description.replace("...", "") },
+    { threshold: 15, label: "Analyzing with AI" },
+    { threshold: 30, label: "Reviewing quality" },
+    { threshold: 50, label: "Finalizing output" },
+  ];
+
+  let currentPhase = phases[0].label;
+  for (const p of phases) {
+    if (elapsed >= p.threshold) currentPhase = p.label;
+  }
+
+  const minutes = Math.floor(elapsed / 60);
+  const seconds = elapsed % 60;
+  const timeStr = minutes > 0
+    ? `${minutes}m ${seconds.toString().padStart(2, "0")}s`
+    : `${seconds}s`;
+
+  return (
+    <View style={[styles.runningBar, { paddingBottom: bottomPadding }]}>
+      <View style={styles.runningBarContent}>
+        <View style={styles.runningBarTop}>
+          <ActivityIndicator size="small" color="#FFF" />
+          <Text style={styles.runningBarAgent}>{agentName}</Text>
+          <Text style={styles.runningBarTime}>{timeStr}</Text>
+        </View>
+        <Text style={styles.runningBarStatus}>{currentPhase}{dots}</Text>
+      </View>
     </View>
   );
 }
@@ -1022,6 +1119,41 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Inter_500Medium",
     color: Colors.text,
+  },
+  runningBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    backgroundColor: Colors.accent,
+  },
+  runningBarContent: {
+    gap: 6,
+  },
+  runningBarTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  runningBarAgent: {
+    flex: 1,
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    color: "#FFF",
+  },
+  runningBarTime: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: "rgba(255,255,255,0.7)",
+  },
+  runningBarStatus: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.85)",
+    marginLeft: 30,
+    marginBottom: 2,
   },
   actionBar: {
     position: "absolute",
