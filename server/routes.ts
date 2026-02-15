@@ -22,7 +22,6 @@ const STAGE_ORDER = [
   "summary_draft",
   "summary_approved",
   "presentation_draft",
-  "presentation_approved",
   "complete",
 ];
 
@@ -39,7 +38,7 @@ const APPROVE_MAP: Record<string, string> = {
   hypotheses_draft: "hypotheses_approved",
   execution_done: "execution_approved",
   summary_draft: "summary_approved",
-  presentation_draft: "presentation_approved",
+  presentation_draft: "complete",
 };
 
 const RUN_NEXT_MAP: Record<string, string> = {
@@ -316,7 +315,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     summary_draft: "execution_approved",
     summary_approved: "execution_approved",
     presentation_draft: "summary_approved",
-    presentation_approved: "summary_approved",
     complete: "summary_approved",
   };
 

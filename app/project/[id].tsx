@@ -30,7 +30,6 @@ const STAGE_LABELS: Record<string, string> = {
   summary_draft: "Summary Draft",
   summary_approved: "Summary Approved",
   presentation_draft: "Presentation Draft",
-  presentation_approved: "Presentation Approved",
   complete: "Complete",
 };
 
@@ -39,7 +38,7 @@ const WORKFLOW_STEPS = [
   { key: "hypotheses", label: "Hypotheses", stages: ["hypotheses_draft", "hypotheses_approved"] },
   { key: "execution", label: "Execution", stages: ["execution_done", "execution_approved"] },
   { key: "summary", label: "Summary", stages: ["summary_draft", "summary_approved"] },
-  { key: "presentation", label: "Presentation", stages: ["presentation_draft", "presentation_approved", "complete"] },
+  { key: "presentation", label: "Presentation", stages: ["presentation_draft", "complete"] },
 ];
 
 const TABS = ["overview", "issues", "hypotheses", "runs", "summary", "presentation", "logs"] as const;
@@ -70,7 +69,6 @@ function getStepStatus(
     "summary_draft",
     "summary_approved",
     "presentation_draft",
-    "presentation_approved",
     "complete",
   ];
   const currentIdx = stageOrder.indexOf(currentStage);
