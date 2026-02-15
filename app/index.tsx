@@ -9,6 +9,8 @@ import {
   ActivityIndicator,
   Platform,
   Modal,
+  KeyboardAvoidingView,
+  ScrollView,
 } from "react-native";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/query-client";
@@ -204,77 +206,88 @@ export default function ProjectListScreen() {
         transparent
         onRequestClose={() => setShowCreate(false)}
       >
-        <Pressable
-          style={styles.modalOverlay}
-          onPress={() => setShowCreate(false)}
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
         >
           <Pressable
-            style={[
-              styles.modalContent,
-              { paddingBottom: insets.bottom + 24 },
-            ]}
-            onPress={() => {}}
+            style={styles.modalOverlay}
+            onPress={() => setShowCreate(false)}
           >
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>New Project</Text>
-
-            <Text style={styles.inputLabel}>Project Name</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g., Market Entry Strategy"
-              placeholderTextColor={Colors.textMuted}
-              value={name}
-              onChangeText={setName}
-              testID="project-name-input"
-            />
-
-            <Text style={styles.inputLabel}>Objective</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="What should this project achieve?"
-              placeholderTextColor={Colors.textMuted}
-              value={objective}
-              onChangeText={setObjective}
-              multiline
-              numberOfLines={3}
-              testID="project-objective-input"
-            />
-
-            <Text style={styles.inputLabel}>Constraints</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Budget limits, timeline, resources..."
-              placeholderTextColor={Colors.textMuted}
-              value={constraints}
-              onChangeText={setConstraints}
-              multiline
-              numberOfLines={3}
-              testID="project-constraints-input"
-            />
-
             <Pressable
-              style={({ pressed }) => [
-                styles.submitButton,
-                pressed && { opacity: 0.85 },
-                (!name || !objective || !constraints) && styles.submitDisabled,
+              style={[
+                styles.modalContent,
+                { paddingBottom: insets.bottom + 24 },
               ]}
-              onPress={() => createMutation.mutate()}
-              disabled={
-                !name ||
-                !objective ||
-                !constraints ||
-                createMutation.isPending
-              }
-              testID="submit-project-btn"
+              onPress={() => {}}
             >
-              {createMutation.isPending ? (
-                <ActivityIndicator color="#FFF" />
-              ) : (
-                <Text style={styles.submitText}>Create Project</Text>
-              )}
+              <View style={styles.modalHandle} />
+              <Text style={styles.modalTitle}>New Project</Text>
+
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                bounces={false}
+              >
+                <Text style={styles.inputLabel}>Project Name</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g., Market Entry Strategy"
+                  placeholderTextColor={Colors.textMuted}
+                  value={name}
+                  onChangeText={setName}
+                  testID="project-name-input"
+                />
+
+                <Text style={styles.inputLabel}>Objective</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  placeholder="What should this project achieve?"
+                  placeholderTextColor={Colors.textMuted}
+                  value={objective}
+                  onChangeText={setObjective}
+                  multiline
+                  numberOfLines={3}
+                  testID="project-objective-input"
+                />
+
+                <Text style={styles.inputLabel}>Constraints</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  placeholder="Budget limits, timeline, resources..."
+                  placeholderTextColor={Colors.textMuted}
+                  value={constraints}
+                  onChangeText={setConstraints}
+                  multiline
+                  numberOfLines={3}
+                  testID="project-constraints-input"
+                />
+
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.submitButton,
+                    pressed && { opacity: 0.85 },
+                    (!name || !objective || !constraints) && styles.submitDisabled,
+                  ]}
+                  onPress={() => createMutation.mutate()}
+                  disabled={
+                    !name ||
+                    !objective ||
+                    !constraints ||
+                    createMutation.isPending
+                  }
+                  testID="submit-project-btn"
+                >
+                  {createMutation.isPending ? (
+                    <ActivityIndicator color="#FFF" />
+                  ) : (
+                    <Text style={styles.submitText}>Create Project</Text>
+                  )}
+                </Pressable>
+              </ScrollView>
             </Pressable>
           </Pressable>
-        </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
