@@ -133,6 +133,14 @@ export const messages = pgTable("messages", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+export const pipelineConfigs = pgTable("pipeline_configs", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  agentsJson: jsonb("agents_json").notNull(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const insertProjectSchema = createInsertSchema(projects).omit({
   id: true,
   stage: true,
@@ -150,3 +158,4 @@ export type Narrative = typeof narratives.$inferSelect;
 export type RunLog = typeof runLogs.$inferSelect;
 export type Slide = typeof slides.$inferSelect;
 export type AgentConfig = typeof agentConfigs.$inferSelect;
+export type PipelineConfig = typeof pipelineConfigs.$inferSelect;

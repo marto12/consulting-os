@@ -432,6 +432,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/pipelines", async (_req: Request, res: Response) => {
+    try {
+      const pipelines = await storage.listPipelines();
+      res.json(pipelines);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/pipelines", async (req: Request, res: Response) => {
+    try {
+      const { name, agentsJson } = req.body;
+      if (!name || !agentsJson) {
+        return res.status(400).json({ error: "name and agentsJson are required" });
+      }
+      const pipeline = await storage.createPipeline({ name, agentsJson });
+      res.status(201).json(pipeline);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/pipelines/:id", async (req: Request, res: Response) => {
+    try {
+      const pipeline = await storage.getPipeline(Number(req.params.id));
+      if (!pipeline) return res.status(404).json({ error: "Not found" });
+      res.json(pipeline);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/pipelines/:id", async (req: Request, res: Response) => {
+    try {
+      const { name, agentsJson } = req.body;
+      const pipeline = await storage.updatePipeline(Number(req.params.id), {
+        name,
+        agentsJson,
+      });
+      res.json(pipeline);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/pipelines/:id", async (req: Request, res: Response) => {
+    try {
+      await storage.deletePipeline(Number(req.params.id));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

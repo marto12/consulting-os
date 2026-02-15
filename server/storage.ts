@@ -10,6 +10,7 @@ import {
   runLogs,
   slides,
   agentConfigs,
+  pipelineConfigs,
   type Project,
   type InsertProject,
   type IssueNode,
@@ -20,6 +21,7 @@ import {
   type RunLog,
   type Slide,
   type AgentConfig,
+  type PipelineConfig,
 } from "@shared/schema";
 
 export const storage = {
@@ -320,5 +322,38 @@ export const storage = {
       .values(data)
       .returning();
     return created;
+  },
+
+  async createPipeline(data: { name: string; agentsJson: any }): Promise<PipelineConfig> {
+    const [pipeline] = await db
+      .insert(pipelineConfigs)
+      .values(data)
+      .returning();
+    return pipeline;
+  },
+
+  async listPipelines(): Promise<PipelineConfig[]> {
+    return db.select().from(pipelineConfigs).orderBy(desc(pipelineConfigs.updatedAt));
+  },
+
+  async getPipeline(id: number): Promise<PipelineConfig | undefined> {
+    const [pipeline] = await db
+      .select()
+      .from(pipelineConfigs)
+      .where(eq(pipelineConfigs.id, id));
+    return pipeline;
+  },
+
+  async updatePipeline(id: number, data: { name?: string; agentsJson?: any }): Promise<PipelineConfig> {
+    const [pipeline] = await db
+      .update(pipelineConfigs)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(pipelineConfigs.id, id))
+      .returning();
+    return pipeline;
+  },
+
+  async deletePipeline(id: number): Promise<void> {
+    await db.delete(pipelineConfigs).where(eq(pipelineConfigs.id, id));
   },
 };
