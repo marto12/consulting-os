@@ -6,6 +6,7 @@ import {
   hypothesisAgent,
   executionAgent,
   summaryAgent,
+  presentationAgent,
   getModelUsed,
   getDefaultConfigs,
 } from "./agents";
@@ -20,6 +21,8 @@ const STAGE_ORDER = [
   "execution_approved",
   "summary_draft",
   "summary_approved",
+  "presentation_draft",
+  "presentation_approved",
   "complete",
 ];
 
@@ -28,13 +31,15 @@ const PENDING_STAGES = [
   "hypotheses_draft",
   "execution_done",
   "summary_draft",
+  "presentation_draft",
 ];
 
 const APPROVE_MAP: Record<string, string> = {
   issues_draft: "issues_approved",
   hypotheses_draft: "hypotheses_approved",
   execution_done: "execution_approved",
-  summary_draft: "complete",
+  summary_draft: "summary_approved",
+  presentation_draft: "presentation_approved",
 };
 
 const RUN_NEXT_MAP: Record<string, string> = {
@@ -42,6 +47,7 @@ const RUN_NEXT_MAP: Record<string, string> = {
   issues_approved: "hypotheses_draft",
   hypotheses_approved: "execution_done",
   execution_approved: "summary_draft",
+  summary_approved: "presentation_draft",
 };
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -224,6 +230,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await storage.insertNarrative(projectId, version, result.summaryText);
 
           await storage.updateRunLog(runLog.id, result, "success");
+        } else if (nextStage === "presentation_draft") {
+          const narrs = await storage.getNarratives(projectId);
+          const hyps = await storage.getHypotheses(projectId);
+          const runs = await storage.getModelRuns(projectId);
+          const latestVersion = hyps[0]?.version || 1;
+          const latestHyps = hyps.filter((h) => h.version === latestVersion);
+          const latestNarr = narrs[0];
+
+          const result = await presentationAgent(
+            project.name,
+            project.objective,
+            latestNarr?.summaryText || "No summary available",
+            latestHyps.map((h) => ({
+              statement: h.statement,
+              metric: h.metric,
+            })),
+            runs.map((r) => ({
+              inputsJson: r.inputsJson,
+              outputsJson: r.outputsJson,
+            }))
+          );
+
+          const version = (await storage.getLatestSlideVersion(projectId)) + 1;
+          await storage.insertSlides(
+            projectId,
+            version,
+            result.slides.map((s) => ({
+              slideIndex: s.slideIndex,
+              layout: s.layout,
+              title: s.title,
+              subtitle: s.subtitle || undefined,
+              bodyJson: s.bodyJson,
+              notesText: s.notesText || undefined,
+            }))
+          );
+
+          await storage.updateRunLog(runLog.id, result, "success");
         }
 
         const updated = await storage.updateProjectStage(projectId, nextStage);
@@ -271,7 +314,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     execution_done: "hypotheses_approved",
     execution_approved: "hypotheses_approved",
     summary_draft: "execution_approved",
-    complete: "execution_approved",
+    summary_approved: "execution_approved",
+    presentation_draft: "summary_approved",
+    presentation_approved: "summary_approved",
+    complete: "summary_approved",
   };
 
   app.post("/api/projects/:id/redo", async (req: Request, res: Response) => {
@@ -286,6 +332,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         hypotheses: "issues_approved",
         execution: "hypotheses_approved",
         summary: "execution_approved",
+        presentation: "summary_approved",
       };
 
       const targetStage = stageMap[step];
@@ -299,6 +346,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         hypotheses: "hypotheses_draft",
         execution: "execution_done",
         summary: "summary_draft",
+        presentation: "presentation_draft",
       };
       const draftIdx = STAGE_ORDER.indexOf(stepDraftStages[step]);
 
@@ -318,12 +366,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/projects/:id/artifacts", async (req: Request, res: Response) => {
     try {
       const projectId = Number(req.params.id);
-      const [issues, hyps, plans, runs, narrs] = await Promise.all([
+      const [issues, hyps, plans, runs, narrs, slds] = await Promise.all([
         storage.getIssueNodes(projectId),
         storage.getHypotheses(projectId),
         storage.getAnalysisPlan(projectId),
         storage.getModelRuns(projectId),
         storage.getNarratives(projectId),
+        storage.getSlides(projectId),
       ]);
       res.json({
         issueNodes: issues,
@@ -331,6 +380,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         analysisPlan: plans,
         modelRuns: runs,
         narratives: narrs,
+        slides: slds,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -364,7 +414,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/agent-configs/:agentType", async (req: Request, res: Response) => {
     try {
       const agentType = req.params.agentType as string;
-      const validTypes = ["issues_tree", "hypothesis", "execution", "summary", "mece_critic"];
+      const validTypes = ["issues_tree", "hypothesis", "execution", "summary", "mece_critic", "presentation"];
       if (!validTypes.includes(agentType)) {
         return res.status(400).json({ error: "Invalid agent type" });
       }

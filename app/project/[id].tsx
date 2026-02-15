@@ -29,6 +29,8 @@ const STAGE_LABELS: Record<string, string> = {
   execution_approved: "Execution Approved",
   summary_draft: "Summary Draft",
   summary_approved: "Summary Approved",
+  presentation_draft: "Presentation Draft",
+  presentation_approved: "Presentation Approved",
   complete: "Complete",
 };
 
@@ -36,10 +38,11 @@ const WORKFLOW_STEPS = [
   { key: "issues", label: "Issues Tree", stages: ["issues_draft", "issues_approved"] },
   { key: "hypotheses", label: "Hypotheses", stages: ["hypotheses_draft", "hypotheses_approved"] },
   { key: "execution", label: "Execution", stages: ["execution_done", "execution_approved"] },
-  { key: "summary", label: "Summary", stages: ["summary_draft", "complete"] },
+  { key: "summary", label: "Summary", stages: ["summary_draft", "summary_approved"] },
+  { key: "presentation", label: "Presentation", stages: ["presentation_draft", "presentation_approved", "complete"] },
 ];
 
-const TABS = ["overview", "issues", "hypotheses", "runs", "summary", "logs"] as const;
+const TABS = ["overview", "issues", "hypotheses", "runs", "summary", "presentation", "logs"] as const;
 type TabKey = (typeof TABS)[number];
 
 const TAB_CONFIG: Record<TabKey, { label: string; icon: string }> = {
@@ -48,6 +51,7 @@ const TAB_CONFIG: Record<TabKey, { label: string; icon: string }> = {
   hypotheses: { label: "Hypotheses", icon: "flask-outline" },
   runs: { label: "Runs", icon: "bar-chart-outline" },
   summary: { label: "Summary", icon: "document-text-outline" },
+  presentation: { label: "Slides", icon: "easel-outline" },
   logs: { label: "Logs", icon: "terminal-outline" },
 };
 
@@ -64,6 +68,9 @@ function getStepStatus(
     "execution_done",
     "execution_approved",
     "summary_draft",
+    "summary_approved",
+    "presentation_draft",
+    "presentation_approved",
     "complete",
   ];
   const currentIdx = stageOrder.indexOf(currentStage);
@@ -76,11 +83,11 @@ function getStepStatus(
 }
 
 function canRunNext(stage: string): boolean {
-  return ["created", "issues_approved", "hypotheses_approved", "execution_approved"].includes(stage);
+  return ["created", "issues_approved", "hypotheses_approved", "execution_approved", "summary_approved"].includes(stage);
 }
 
 function canApprove(stage: string): boolean {
-  return ["issues_draft", "hypotheses_draft", "execution_done", "summary_draft"].includes(stage);
+  return ["issues_draft", "hypotheses_draft", "execution_done", "summary_draft", "presentation_draft"].includes(stage);
 }
 
 const STAGE_AGENT_INFO: Record<string, { agent: string; description: string }> = {
@@ -99,6 +106,10 @@ const STAGE_AGENT_INFO: Record<string, { agent: string; description: string }> =
   execution_approved: {
     agent: "Summary Agent",
     description: "Writing executive summary from results...",
+  },
+  summary_approved: {
+    agent: "Presentation Agent",
+    description: "Generating 16:9 presentation slides...",
   },
 };
 
@@ -323,6 +334,9 @@ export default function ProjectDetailScreen() {
         )}
         {activeTab === "summary" && (
           <SummaryTab narratives={artifacts?.narratives || []} />
+        )}
+        {activeTab === "presentation" && (
+          <PresentationTab slides={artifacts?.slides || []} />
         )}
         {activeTab === "logs" && <LogsTab logs={logs || []} />}
       </ScrollView>
@@ -857,6 +871,183 @@ function SummaryTab({ narratives }: { narratives: any[] }) {
           <Text style={styles.narrativeText}>{narr.summaryText}</Text>
         </View>
       ))}
+    </View>
+  );
+}
+
+function PresentationTab({ slides }: { slides: any[] }) {
+  const [currentSlide, setCurrentSlide] = useState(0);
+
+  if (slides.length === 0) {
+    return (
+      <View style={styles.emptyTab}>
+        <Ionicons name="easel-outline" size={40} color={Colors.textMuted} />
+        <Text style={styles.emptyTabTitle}>No presentation yet</Text>
+        <Text style={styles.emptyTabText}>
+          Run the Presentation agent to generate a slide deck
+        </Text>
+      </View>
+    );
+  }
+
+  const latestVersion = Math.max(...slides.map((s: any) => s.version));
+  const latestSlides = slides
+    .filter((s: any) => s.version === latestVersion)
+    .sort((a: any, b: any) => a.slideIndex - b.slideIndex);
+
+  const slide = latestSlides[currentSlide];
+  if (!slide) return null;
+
+  const body = typeof slide.bodyJson === "string" ? JSON.parse(slide.bodyJson) : slide.bodyJson;
+
+  return (
+    <View style={styles.tabContent}>
+      <View style={styles.slideControls}>
+        <Pressable
+          onPress={() => setCurrentSlide(Math.max(0, currentSlide - 1))}
+          disabled={currentSlide === 0}
+          style={({ pressed }) => [
+            styles.slideNavBtn,
+            currentSlide === 0 && { opacity: 0.3 },
+            pressed && { opacity: 0.6 },
+          ]}
+        >
+          <Ionicons name="chevron-back" size={20} color={Colors.text} />
+        </Pressable>
+        <Text style={styles.slideCounter}>
+          {currentSlide + 1} / {latestSlides.length}
+        </Text>
+        <Pressable
+          onPress={() => setCurrentSlide(Math.min(latestSlides.length - 1, currentSlide + 1))}
+          disabled={currentSlide === latestSlides.length - 1}
+          style={({ pressed }) => [
+            styles.slideNavBtn,
+            currentSlide === latestSlides.length - 1 && { opacity: 0.3 },
+            pressed && { opacity: 0.6 },
+          ]}
+        >
+          <Ionicons name="chevron-forward" size={20} color={Colors.text} />
+        </Pressable>
+      </View>
+
+      <View style={styles.slideWrapper}>
+        <View style={styles.slideFrame}>
+          {slide.layout === "title_slide" && (
+            <View style={styles.slideTitleLayout}>
+              <View style={styles.slideTitleAccent} />
+              <Text style={styles.slideTitleMain}>{slide.title}</Text>
+              {slide.subtitle && (
+                <Text style={styles.slideTitleSub}>{slide.subtitle}</Text>
+              )}
+            </View>
+          )}
+
+          {slide.layout === "section_header" && (
+            <View style={styles.slideSectionLayout}>
+              <View style={styles.slideSectionBar} />
+              <Text style={styles.slideSectionTitle}>{slide.title}</Text>
+              {slide.subtitle && (
+                <Text style={styles.slideSectionSub}>{slide.subtitle}</Text>
+              )}
+            </View>
+          )}
+
+          {slide.layout === "title_body" && (
+            <View style={styles.slideBodyLayout}>
+              <Text style={styles.slideBodyTitle}>{slide.title}</Text>
+              {slide.subtitle && (
+                <Text style={styles.slideBodySubtitle}>{slide.subtitle}</Text>
+              )}
+              {body?.bullets && (
+                <View style={styles.slideBullets}>
+                  {body.bullets.map((b: string, i: number) => (
+                    <View key={i} style={styles.slideBulletRow}>
+                      <View style={styles.slideBulletDot} />
+                      <Text style={styles.slideBulletText}>{b}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
+
+          {slide.layout === "two_column" && (
+            <View style={styles.slideBodyLayout}>
+              <Text style={styles.slideBodyTitle}>{slide.title}</Text>
+              <View style={styles.slideTwoCol}>
+                <View style={styles.slideCol}>
+                  <Text style={styles.slideColTitle}>{body?.leftTitle || "Left"}</Text>
+                  {(body?.leftBullets || []).map((b: string, i: number) => (
+                    <View key={i} style={styles.slideBulletRow}>
+                      <View style={styles.slideBulletDot} />
+                      <Text style={styles.slideBulletText}>{b}</Text>
+                    </View>
+                  ))}
+                </View>
+                <View style={styles.slideColDivider} />
+                <View style={styles.slideCol}>
+                  <Text style={styles.slideColTitle}>{body?.rightTitle || "Right"}</Text>
+                  {(body?.rightBullets || []).map((b: string, i: number) => (
+                    <View key={i} style={styles.slideBulletRow}>
+                      <View style={styles.slideBulletDot} />
+                      <Text style={styles.slideBulletText}>{b}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            </View>
+          )}
+
+          {slide.layout === "metrics" && (
+            <View style={styles.slideBodyLayout}>
+              <Text style={styles.slideBodyTitle}>{slide.title}</Text>
+              <View style={styles.slideMetricsGrid}>
+                {(body?.metrics || []).map((m: any, i: number) => (
+                  <View key={i} style={styles.slideMetricCard}>
+                    <Text style={styles.slideMetricValue}>{m.value}</Text>
+                    <Text style={styles.slideMetricLabel}>{m.label}</Text>
+                    {m.change && (
+                      <Text style={[
+                        styles.slideMetricChange,
+                        { color: m.change.startsWith("+") ? Colors.success : m.change.startsWith("-") ? Colors.error : Colors.accent },
+                      ]}>
+                        {m.change}
+                      </Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+        </View>
+      </View>
+
+      {slide.notesText && (
+        <View style={styles.slideNotesBox}>
+          <Text style={styles.slideNotesLabel}>Speaker Notes</Text>
+          <Text style={styles.slideNotesText}>{slide.notesText}</Text>
+        </View>
+      )}
+
+      <View style={styles.slideThumbnails}>
+        {latestSlides.map((s: any, i: number) => (
+          <Pressable
+            key={s.id}
+            onPress={() => setCurrentSlide(i)}
+            style={[
+              styles.slideThumbnail,
+              i === currentSlide && styles.slideThumbnailActive,
+            ]}
+          >
+            <Text style={[
+              styles.slideThumbnailText,
+              i === currentSlide && styles.slideThumbnailTextActive,
+            ]} numberOfLines={2}>
+              {s.title}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
     </View>
   );
 }
@@ -1518,5 +1709,239 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.errorBg,
     padding: 8,
     borderRadius: 6,
+  },
+  slideControls: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    marginBottom: 12,
+  },
+  slideNavBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+  },
+  slideCounter: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.textSecondary,
+    minWidth: 50,
+    textAlign: "center" as const,
+  },
+  slideWrapper: {
+    width: "100%",
+    aspectRatio: 16 / 9,
+    borderRadius: 8,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    marginBottom: 12,
+  },
+  slideFrame: {
+    flex: 1,
+    backgroundColor: "#0F172A",
+    justifyContent: "center",
+    padding: 24,
+  },
+  slideTitleLayout: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 12,
+  },
+  slideTitleAccent: {
+    width: 60,
+    height: 4,
+    backgroundColor: Colors.accent,
+    borderRadius: 2,
+    marginBottom: 8,
+  },
+  slideTitleMain: {
+    fontSize: 22,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+    textAlign: "center" as const,
+  },
+  slideTitleSub: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.6)",
+    textAlign: "center" as const,
+  },
+  slideSectionLayout: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "flex-start",
+    paddingLeft: 16,
+  },
+  slideSectionBar: {
+    width: 4,
+    height: 40,
+    backgroundColor: Colors.accent,
+    borderRadius: 2,
+    marginBottom: 16,
+  },
+  slideSectionTitle: {
+    fontSize: 20,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+  },
+  slideSectionSub: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.5)",
+    marginTop: 8,
+  },
+  slideBodyLayout: {
+    flex: 1,
+    justifyContent: "flex-start",
+    gap: 8,
+  },
+  slideBodyTitle: {
+    fontSize: 17,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+    marginBottom: 4,
+  },
+  slideBodySubtitle: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.5)",
+    marginBottom: 4,
+  },
+  slideBullets: {
+    gap: 6,
+    marginTop: 4,
+  },
+  slideBulletRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  slideBulletDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.accent,
+    marginTop: 5,
+  },
+  slideBulletText: {
+    flex: 1,
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.85)",
+    lineHeight: 18,
+  },
+  slideTwoCol: {
+    flexDirection: "row",
+    flex: 1,
+    gap: 8,
+    marginTop: 4,
+  },
+  slideCol: {
+    flex: 1,
+    gap: 6,
+  },
+  slideColTitle: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.accent,
+    marginBottom: 4,
+  },
+  slideColDivider: {
+    width: 1,
+    backgroundColor: "rgba(255,255,255,0.1)",
+  },
+  slideMetricsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 8,
+    flex: 1,
+    alignContent: "center" as const,
+  },
+  slideMetricCard: {
+    flex: 1,
+    minWidth: "28%",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 10,
+    padding: 14,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  slideMetricValue: {
+    fontSize: 20,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+    marginBottom: 4,
+  },
+  slideMetricLabel: {
+    fontSize: 11,
+    fontFamily: "Inter_500Medium",
+    color: "rgba(255,255,255,0.5)",
+  },
+  slideMetricChange: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    marginTop: 4,
+  },
+  slideNotesBox: {
+    backgroundColor: Colors.surface,
+    borderRadius: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    marginBottom: 12,
+  },
+  slideNotesLabel: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.textSecondary,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  slideNotesText: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textSecondary,
+    lineHeight: 19,
+  },
+  slideThumbnails: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  slideThumbnail: {
+    width: 80,
+    height: 45,
+    borderRadius: 6,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 4,
+  },
+  slideThumbnailActive: {
+    borderColor: Colors.accent,
+    borderWidth: 2,
+    backgroundColor: "#EBF2FF",
+  },
+  slideThumbnailText: {
+    fontSize: 7,
+    fontFamily: "Inter_500Medium",
+    color: Colors.textMuted,
+    textAlign: "center" as const,
+  },
+  slideThumbnailTextActive: {
+    color: Colors.accent,
   },
 });

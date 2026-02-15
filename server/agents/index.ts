@@ -552,9 +552,9 @@ export interface SlideOutput {
   slideIndex: number;
   layout: string;
   title: string;
-  subtitle?: string;
+  subtitle?: string | null;
   bodyJson: any;
-  notesText?: string;
+  notesText?: string | null;
 }
 
 export async function presentationAgent(
