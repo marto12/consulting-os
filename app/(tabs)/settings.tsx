@@ -26,7 +26,7 @@ const PIPELINE_STEPS = [
     roleColor: "#3B82F6",
     roleBg: "#EFF6FF",
     description: "Breaks down the objective into a structured MECE issues tree",
-    icon: "file-tree",
+    icon: "robot-outline",
     detail: "Takes the project objective and constraints, produces a hierarchical tree of issues to investigate.",
   },
   {
@@ -37,7 +37,7 @@ const PIPELINE_STEPS = [
     roleColor: "#8B5CF6",
     roleBg: "#F5F3FF",
     description: "Audits the issues tree for overlap, gaps, and quality",
-    icon: "check-decagram-outline",
+    icon: "robot-outline",
     detail: "Scores the tree on 5 criteria (overlap, coverage, logic, balance, labels). Can send it back for up to 2 revisions.",
   },
   {
@@ -48,7 +48,7 @@ const PIPELINE_STEPS = [
     roleColor: "#0891B2",
     roleBg: "#ECFEFF",
     description: "Generates testable hypotheses and analysis plans",
-    icon: "flask-outline",
+    icon: "robot-outline",
     detail: "Reads the approved issues tree and generates hypotheses with specific metrics, data sources, and methods.",
   },
   {
@@ -59,7 +59,7 @@ const PIPELINE_STEPS = [
     roleColor: "#059669",
     roleBg: "#ECFDF5",
     description: "Runs the scenario calculator on each analysis plan",
-    icon: "play-circle-outline",
+    icon: "robot-outline",
     detail: "Calls the scenario calculator tool with financial parameters to produce baseline, optimistic, and pessimistic projections.",
   },
   {
@@ -70,7 +70,7 @@ const PIPELINE_STEPS = [
     roleColor: "#D97706",
     roleBg: "#FFFBEB",
     description: "Writes the executive summary from all results",
-    icon: "text-box-outline",
+    icon: "robot-outline",
     detail: "Produces a polished executive summary with key findings, recommendation, and next steps.",
   },
   {
@@ -81,7 +81,7 @@ const PIPELINE_STEPS = [
     roleColor: "#E11D48",
     roleBg: "#FFF1F2",
     description: "Generates a 16:9 slide deck from the analysis",
-    icon: "presentation",
+    icon: "robot-outline",
     detail: "Creates 6-10 structured slides with 5 layout types: title, section header, bullet points, two-column comparison, and metrics dashboard.",
   },
 ];

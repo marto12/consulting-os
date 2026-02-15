@@ -181,9 +181,12 @@ export default function AgentDetailScreen() {
         >
           <Feather name="arrow-left" size={20} color={Colors.text} />
         </Pressable>
-        <Text style={styles.topBarTitle} numberOfLines={1}>
-          {agent.label}
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1, justifyContent: "center" }}>
+          <MaterialCommunityIcons name="robot-outline" size={18} color={agent.roleColor} />
+          <Text style={styles.topBarTitle} numberOfLines={1}>
+            {agent.label}
+          </Text>
+        </View>
         <View style={{ width: 36 }} />
       </View>
 
@@ -217,7 +220,10 @@ export default function AgentDetailScreen() {
                 </Text>
               </View>
             </View>
-            <Text style={styles.heroTitle}>{agent.label} Agent</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 }}>
+              <MaterialCommunityIcons name="robot-outline" size={26} color={agent.roleColor} />
+              <Text style={[styles.heroTitle, { marginBottom: 0 }]}>{agent.label} Agent</Text>
+            </View>
             <Text style={styles.heroDesc}>{agent.description}</Text>
           </View>
         </View>

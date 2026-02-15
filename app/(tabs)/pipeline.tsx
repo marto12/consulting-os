@@ -39,7 +39,7 @@ const ALL_AGENTS: AgentDef[] = [
     roleColor: "#3B82F6",
     roleBg: "#EFF6FF",
     description: "Breaks down objective into MECE issues tree",
-    icon: "file-tree",
+    icon: "robot-outline",
   },
   {
     key: "mece_critic",
@@ -48,7 +48,7 @@ const ALL_AGENTS: AgentDef[] = [
     roleColor: "#8B5CF6",
     roleBg: "#F5F3FF",
     description: "Audits issues tree for overlap and gaps",
-    icon: "check-decagram-outline",
+    icon: "robot-outline",
   },
   {
     key: "hypothesis",
@@ -57,7 +57,7 @@ const ALL_AGENTS: AgentDef[] = [
     roleColor: "#0891B2",
     roleBg: "#ECFEFF",
     description: "Generates testable hypotheses and plans",
-    icon: "flask-outline",
+    icon: "robot-outline",
   },
   {
     key: "execution",
@@ -66,7 +66,7 @@ const ALL_AGENTS: AgentDef[] = [
     roleColor: "#059669",
     roleBg: "#ECFDF5",
     description: "Runs scenario calculator on each plan",
-    icon: "play-circle-outline",
+    icon: "robot-outline",
   },
   {
     key: "summary",
@@ -75,7 +75,7 @@ const ALL_AGENTS: AgentDef[] = [
     roleColor: "#D97706",
     roleBg: "#FFFBEB",
     description: "Writes executive summary from results",
-    icon: "text-box-outline",
+    icon: "robot-outline",
   },
   {
     key: "presentation",
@@ -84,7 +84,7 @@ const ALL_AGENTS: AgentDef[] = [
     roleColor: "#E11D48",
     roleBg: "#FFF1F2",
     description: "Generates 16:9 slide deck from analysis",
-    icon: "presentation",
+    icon: "robot-outline",
   },
 ];
 
@@ -241,35 +241,22 @@ function AgentNetworkGraph({
                 strokeDasharray={node.enabled ? undefined : "6,4"}
                 opacity={node.enabled ? 1 : 0.5}
               />
-              {node.enabled && (
-                <Circle
-                  cx={node.x}
-                  cy={node.y}
-                  r={8}
-                  fill={color}
-                />
-              )}
-              {!node.enabled && (
-                <>
-                  <Line
-                    x1={node.x - 6}
-                    y1={node.y - 6}
-                    x2={node.x + 6}
-                    y2={node.y + 6}
-                    stroke={Colors.textMuted}
-                    strokeWidth={2}
-                    strokeOpacity={0.4}
-                  />
-                  <Line
-                    x1={node.x + 6}
-                    y1={node.y - 6}
-                    x2={node.x - 6}
-                    y2={node.y + 6}
-                    stroke={Colors.textMuted}
-                    strokeWidth={2}
-                    strokeOpacity={0.4}
-                  />
-                </>
+              {Platform.OS === "web" && (
+                <ForeignObject
+                  x={node.x - 14}
+                  y={node.y - 14}
+                  width={28}
+                  height={28}
+                >
+                  <View style={{ alignItems: "center", justifyContent: "center", width: 28, height: 28 }}>
+                    <MaterialCommunityIcons
+                      name="robot-outline"
+                      size={20}
+                      color={node.enabled ? color : Colors.textMuted}
+                      style={{ opacity: node.enabled ? 1 : 0.4 }}
+                    />
+                  </View>
+                </ForeignObject>
               )}
               {Platform.OS === "web" && (
                 <ForeignObject
