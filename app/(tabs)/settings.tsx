@@ -17,33 +17,68 @@ import { Ionicons, Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { StatusBar } from "expo-status-bar";
 
-const AGENT_LABELS: Record<string, { label: string; description: string; icon: string }> = {
-  issues_tree: {
-    label: "Issues Tree Agent",
-    description: "Breaks down objectives into a MECE issues tree",
+const PIPELINE_STEPS = [
+  {
+    key: "issues_tree",
+    step: 1,
+    label: "Issues Tree",
+    role: "Generator",
+    roleColor: "#3B82F6",
+    roleBg: "#EFF6FF",
+    description: "Breaks down the objective into a structured MECE issues tree",
     icon: "file-tree",
+    detail: "Takes the project objective and constraints, produces a hierarchical tree of issues to investigate.",
   },
-  hypothesis: {
-    label: "Hypothesis Agent",
-    description: "Generates hypotheses and analysis plans from issues",
-    icon: "flask-outline",
-  },
-  execution: {
-    label: "Execution Agent",
-    description: "Runs scenario analysis tools on the plan",
-    icon: "play-circle-outline",
-  },
-  mece_critic: {
+  {
+    key: "mece_critic",
+    step: 2,
     label: "MECE Critic",
-    description: "Audits issues trees for quality, overlap, and coverage",
+    role: "Quality Gate",
+    roleColor: "#8B5CF6",
+    roleBg: "#F5F3FF",
+    description: "Audits the issues tree for overlap, gaps, and quality",
     icon: "check-decagram-outline",
+    detail: "Scores the tree on 5 criteria (overlap, coverage, logic, balance, labels). Can send it back for up to 2 revisions.",
   },
-  summary: {
-    label: "Summary Agent",
-    description: "Writes executive summary from results",
+  {
+    key: "hypothesis",
+    step: 3,
+    label: "Hypothesis",
+    role: "Analyst",
+    roleColor: "#0891B2",
+    roleBg: "#ECFEFF",
+    description: "Generates testable hypotheses and analysis plans",
+    icon: "flask-outline",
+    detail: "Reads the approved issues tree and generates hypotheses with specific metrics, data sources, and methods.",
+  },
+  {
+    key: "execution",
+    step: 4,
+    label: "Execution",
+    role: "Tool Caller",
+    roleColor: "#059669",
+    roleBg: "#ECFDF5",
+    description: "Runs the scenario calculator on each analysis plan",
+    icon: "play-circle-outline",
+    detail: "Calls the scenario calculator tool with financial parameters to produce baseline, optimistic, and pessimistic projections.",
+  },
+  {
+    key: "summary",
+    step: 5,
+    label: "Summary",
+    role: "Synthesizer",
+    roleColor: "#D97706",
+    roleBg: "#FFFBEB",
+    description: "Writes the executive summary from all results",
     icon: "text-box-outline",
+    detail: "Produces a polished executive summary with key findings, recommendation, and next steps.",
   },
-};
+];
+
+const AGENT_LABELS: Record<string, { label: string; description: string; icon: string }> = {};
+PIPELINE_STEPS.forEach((s) => {
+  AGENT_LABELS[s.key] = { label: s.label, description: s.description, icon: s.icon };
+});
 
 interface AgentConfig {
   id: number;
@@ -153,18 +188,58 @@ export default function AdminScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.infoCard}>
-            <Feather name="info" size={16} color={Colors.accent} />
-            <Text style={styles.infoText}>
-              Edit the system prompts that guide each AI agent. Changes apply to
-              all future runs. The default prompts are pre-filled if no custom
-              configuration exists.
+          <View style={styles.pipelineSection}>
+            <Text style={styles.pipelineSectionTitle}>Agent Pipeline</Text>
+            <Text style={styles.pipelineSectionSubtitle}>
+              Each project runs through these stages in order. Human approval is required between stages.
             </Text>
+            <View style={styles.pipelineTrack}>
+              {PIPELINE_STEPS.map((step, idx) => (
+                <View key={step.key}>
+                  <View style={styles.pipelineStep}>
+                    <View style={styles.pipelineStepLeft}>
+                      <View style={[styles.pipelineStepDot, { backgroundColor: step.roleColor }]}>
+                        <Text style={styles.pipelineStepNum}>{step.step}</Text>
+                      </View>
+                      {idx < PIPELINE_STEPS.length - 1 && (
+                        <View style={styles.pipelineConnector}>
+                          {step.key === "issues_tree" && (
+                            <View style={styles.pipelineLoopIndicator}>
+                              <Ionicons name="repeat" size={11} color="#8B5CF6" />
+                            </View>
+                          )}
+                        </View>
+                      )}
+                    </View>
+                    <View style={styles.pipelineStepContent}>
+                      <View style={styles.pipelineStepHeader}>
+                        <MaterialCommunityIcons
+                          name={step.icon as any}
+                          size={16}
+                          color={step.roleColor}
+                        />
+                        <Text style={styles.pipelineStepLabel}>{step.label}</Text>
+                        <View style={[styles.roleBadge, { backgroundColor: step.roleBg }]}>
+                          <Text style={[styles.roleBadgeText, { color: step.roleColor }]}>{step.role}</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.pipelineStepDetail}>{step.detail}</Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </View>
           </View>
 
-          {configs?.map((config) => {
-            const meta = AGENT_LABELS[config.agentType];
-            if (!meta) return null;
+          <Text style={styles.configSectionTitle}>Agent Configuration</Text>
+
+          {[...(configs || [])].sort((a, b) => {
+            const ai = PIPELINE_STEPS.findIndex((s) => s.key === a.agentType);
+            const bi = PIPELINE_STEPS.findIndex((s) => s.key === b.agentType);
+            return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+          }).map((config) => {
+            const pipelineStep = PIPELINE_STEPS.find((s) => s.key === config.agentType);
+            if (!pipelineStep) return null;
             const isExpanded = expandedAgent === config.agentType;
             const changed = hasChanges[config.agentType];
             const isSaving = saveMutation.isPending;
@@ -176,16 +251,23 @@ export default function AdminScreen() {
                   onPress={() => toggleExpand(config.agentType)}
                   testID={`agent-card-${config.agentType}`}
                 >
-                  <View style={styles.agentIcon}>
+                  <View style={[styles.agentIcon, { backgroundColor: pipelineStep.roleBg }]}>
                     <MaterialCommunityIcons
-                      name={meta.icon as any}
+                      name={pipelineStep.icon as any}
                       size={22}
-                      color={Colors.accent}
+                      color={pipelineStep.roleColor}
                     />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.agentLabel}>{meta.label}</Text>
-                    <Text style={styles.agentDesc}>{meta.description}</Text>
+                    <View style={styles.agentLabelRow}>
+                      <Text style={styles.agentLabel}>{pipelineStep.label}</Text>
+                      <View style={[styles.roleBadge, { backgroundColor: pipelineStep.roleBg }]}>
+                        <Text style={[styles.roleBadgeText, { color: pipelineStep.roleColor }]}>
+                          Step {pipelineStep.step} · {pipelineStep.role}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={styles.agentDesc}>{pipelineStep.description}</Text>
                   </View>
                   <View style={styles.headerRight}>
                     {changed && (
@@ -325,22 +407,110 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 16,
   },
-  infoCard: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-    backgroundColor: "#EFF6FF",
-    borderRadius: 12,
-    padding: 14,
+  pipelineSection: {
+    backgroundColor: Colors.surface,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#BFDBFE",
+    borderColor: Colors.surfaceBorder,
+    padding: 20,
+    marginBottom: 4,
   },
-  infoText: {
-    flex: 1,
+  pipelineSectionTitle: {
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+    color: Colors.text,
+    marginBottom: 4,
+  },
+  pipelineSectionSubtitle: {
     fontSize: 13,
     fontFamily: "Inter_400Regular",
+    color: Colors.textSecondary,
+    lineHeight: 19,
+    marginBottom: 18,
+  },
+  pipelineTrack: {
+    gap: 0,
+  },
+  pipelineStep: {
+    flexDirection: "row" as const,
+    gap: 14,
+  },
+  pipelineStepLeft: {
+    alignItems: "center" as const,
+    width: 28,
+  },
+  pipelineStepDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  pipelineStepNum: {
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+    color: "#FFF",
+  },
+  pipelineConnector: {
+    width: 2,
+    flex: 1,
+    backgroundColor: Colors.surfaceBorder,
+    alignSelf: "center" as const,
+    minHeight: 24,
+    position: "relative" as const,
+  },
+  pipelineLoopIndicator: {
+    position: "absolute" as const,
+    left: -8,
+    top: 6,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#F5F3FF",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  pipelineStepContent: {
+    flex: 1,
+    paddingBottom: 20,
+  },
+  pipelineStepHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
+    marginBottom: 4,
+  },
+  pipelineStepLabel: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
     color: Colors.text,
-    lineHeight: 20,
+  },
+  roleBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  roleBadgeText: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+  },
+  pipelineStepDetail: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textSecondary,
+    lineHeight: 18,
+  },
+  configSectionTitle: {
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+    color: Colors.text,
+    marginBottom: -4,
+  },
+  agentLabelRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+    flexWrap: "wrap" as const,
   },
   agentCard: {
     backgroundColor: Colors.surface,
