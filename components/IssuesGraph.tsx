@@ -35,7 +35,7 @@ interface Edge {
 
 const NODE_RADIUS = 28;
 const LEVEL_HEIGHT = 120;
-const MIN_NODE_SPACING = 140;
+const BASE_NODE_SPACING = 160;
 const PRIORITY_COLORS: Record<string, string> = {
   high: Colors.error,
   medium: Colors.warning,
@@ -91,7 +91,7 @@ function layoutTree(nodes: IssueNode[]): {
   function assignX(id: number): number {
     const node = nodeMap.get(id)!;
     if (node.children.length === 0) {
-      node.x = leafIndex * MIN_NODE_SPACING;
+      node.x = leafIndex * BASE_NODE_SPACING;
       leafIndex++;
       return node.x;
     }
@@ -146,7 +146,7 @@ export default function IssuesGraph({ issues }: { issues: IssueNode[] }) {
 
   const initialScale = useMemo(() => {
     const s = Math.min(screenWidth / width, 1);
-    return Math.max(s, 0.4);
+    return Math.max(s, 0.25);
   }, [screenWidth, width]);
 
   const effectiveScale = useMemo(() => scale * initialScale, [scale, initialScale]);
@@ -273,10 +273,10 @@ export default function IssuesGraph({ issues }: { issues: IssueNode[] }) {
                 />
                 {Platform.OS === "web" ? (
                   <ForeignObject
-                    x={node.x - 55}
+                    x={node.x - 70}
                     y={node.y + r + 4}
-                    width={110}
-                    height={40}
+                    width={140}
+                    height={44}
                   >
                     <View style={styles.labelContainer}>
                       <Text
@@ -302,7 +302,7 @@ export default function IssuesGraph({ issues }: { issues: IssueNode[] }) {
           {nodesArray.map((node) => {
             const isSelected = selectedNode?.id === node.id;
             const color = PRIORITY_COLORS[node.priority] || Colors.textMuted;
-            const labelX = node.x * effectiveScale + panOffset.x - 55;
+            const labelX = node.x * effectiveScale + panOffset.x - 70;
             const labelY =
               (node.y + NODE_RADIUS + 4) * effectiveScale + panOffset.y;
             return (
@@ -431,7 +431,7 @@ const styles = StyleSheet.create({
   },
   mobileLabelWrap: {
     position: "absolute",
-    width: 110,
+    width: 140,
     alignItems: "center",
   },
   detailCard: {

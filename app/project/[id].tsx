@@ -653,7 +653,9 @@ function InlineApproveButton({ showApprove, onApprove, approvePending }: Approve
 }
 
 function IssuesTab({ issues, showApprove, onApprove, approvePending }: { issues: any[] } & ApproveProps) {
-  const [viewMode, setViewMode] = useState<"graph" | "list">("graph");
+  const screenWidth = Dimensions.get("window").width;
+  const isMobile = screenWidth < 600;
+  const [viewMode, setViewMode] = useState<"graph" | "list">(isMobile ? "list" : "graph");
 
   if (issues.length === 0) {
     return (
