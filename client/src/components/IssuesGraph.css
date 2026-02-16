@@ -29,33 +29,92 @@
   border-radius: 50%;
 }
 
-.graph-zoom-controls {
-  display: flex;
-  gap: 8px;
-}
-
-.zoom-btn {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--color-accent);
-  background: var(--color-surface);
-  padding: 6px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--color-surface-border);
-  cursor: pointer;
-}
-
-.zoom-btn:hover {
-  background: var(--color-bg);
-}
-
 .graph-canvas {
   background: var(--color-surface);
   border-radius: 16px;
   border: 1px solid var(--color-surface-border);
   overflow: hidden;
   min-height: 300px;
-  user-select: none;
+}
+
+.graph-canvas .react-flow__controls {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  border-radius: 8px;
+  border: 1px solid var(--color-surface-border);
+}
+
+.graph-canvas .react-flow__controls button {
+  background: var(--color-surface);
+  border-color: var(--color-surface-border);
+  color: var(--color-text-secondary);
+}
+
+.graph-canvas .react-flow__controls button:hover {
+  background: var(--color-bg);
+}
+
+.rf-issue-node {
+  background: var(--color-surface);
+  border: 2px solid #CBD5E1;
+  border-radius: 12px;
+  padding: 10px 14px;
+  min-width: 140px;
+  max-width: 180px;
+  cursor: pointer;
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+
+.rf-issue-node:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.rf-issue-node.selected {
+  border-width: 2.5px;
+}
+
+.rf-issue-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-bottom: 6px;
+}
+
+.rf-issue-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.rf-issue-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rf-issue-priority {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: capitalize;
+}
+
+.rf-issue-children {
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.rf-handle {
+  width: 6px;
+  height: 6px;
+  background: #CBD5E1;
+  border: none;
 }
 
 .graph-detail-card {

@@ -1,4 +1,16 @@
-import { useMemo, useState, useRef, useCallback } from "react";
+import { useMemo, useState, useCallback } from "react";
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MiniMap,
+  Handle,
+  Position,
+  type Node,
+  type Edge,
+  type NodeProps,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 import "./IssuesGraph.css";
 
 interface IssueNode {
@@ -8,47 +20,49 @@ interface IssueNode {
   priority: string;
 }
 
-interface LayoutNode {
-  id: number;
-  parentId: number | null;
-  text: string;
-  priority: string;
-  x: number;
-  y: number;
-  depth: number;
-  children: number[];
-}
-
-interface Edge {
-  from: LayoutNode;
-  to: LayoutNode;
-}
-
-const NODE_RADIUS = 28;
-const LEVEL_HEIGHT = 120;
-const BASE_NODE_SPACING = 160;
 const PRIORITY_COLORS: Record<string, string> = {
   high: "#EF4444",
   medium: "#F59E0B",
   low: "#94A3B8",
 };
 
-function layoutTree(nodes: IssueNode[]): {
-  layoutNodes: Map<number, LayoutNode>;
-  edges: Edge[];
-  width: number;
-  height: number;
-} {
-  const nodeMap = new Map<number, LayoutNode>();
-  const childrenMap = new Map<number, number[]>();
+const LEVEL_HEIGHT = 140;
+const BASE_NODE_SPACING = 200;
 
-  nodes.forEach((n) => {
-    nodeMap.set(n.id, { ...n, x: 0, y: 0, depth: 0, children: [] });
+function IssueNodeComponent({ data }: NodeProps) {
+  const color = PRIORITY_COLORS[data.priority as string] || "#94A3B8";
+  const isSelected = data.isSelected as boolean;
+
+  return (
+    <div
+      className={`rf-issue-node${isSelected ? " selected" : ""}`}
+      style={{ borderColor: color, boxShadow: isSelected ? `0 0 0 3px ${color}30` : undefined }}
+    >
+      <Handle type="target" position={Position.Top} className="rf-handle" />
+      <div className="rf-issue-dot" style={{ background: color }} />
+      <div className="rf-issue-text">{data.label as string}</div>
+      <div className="rf-issue-meta">
+        <span className="rf-issue-priority" style={{ background: color + "20", color }}>
+          {data.priority as string}
+        </span>
+        {(data.childCount as number) > 0 && (
+          <span className="rf-issue-children">{data.childCount as number} sub</span>
+        )}
+      </div>
+      <Handle type="source" position={Position.Bottom} className="rf-handle" />
+    </div>
+  );
+}
+
+const nodeTypes = { issueNode: IssueNodeComponent };
+
+function buildFlowData(issues: IssueNode[]) {
+  const childrenMap = new Map<number, number[]>();
+  issues.forEach((n) => {
     childrenMap.set(n.id, []);
   });
-
   const roots: number[] = [];
-  nodes.forEach((n) => {
+  issues.forEach((n) => {
     if (n.parentId && childrenMap.has(n.parentId)) {
       childrenMap.get(n.parentId)!.push(n.id);
     } else if (!n.parentId) {
@@ -56,105 +70,84 @@ function layoutTree(nodes: IssueNode[]): {
     }
   });
 
-  nodeMap.forEach((node) => {
-    node.children = childrenMap.get(node.id) || [];
-  });
-
-  function setDepth(id: number, depth: number) {
-    const node = nodeMap.get(id)!;
-    node.depth = depth;
-    node.children.forEach((cid) => setDepth(cid, depth + 1));
+  const depthMap = new Map<number, number>();
+  function setDepth(id: number, d: number) {
+    depthMap.set(id, d);
+    (childrenMap.get(id) || []).forEach((c) => setDepth(c, d + 1));
   }
-  roots.forEach((rid) => setDepth(rid, 0));
-
-  let maxDepth = 0;
-  nodeMap.forEach((n) => {
-    if (n.depth > maxDepth) maxDepth = n.depth;
-  });
+  roots.forEach((r) => setDepth(r, 0));
 
   let leafIndex = 0;
+  const xMap = new Map<number, number>();
   function assignX(id: number): number {
-    const node = nodeMap.get(id)!;
-    if (node.children.length === 0) {
-      node.x = leafIndex * BASE_NODE_SPACING;
+    const children = childrenMap.get(id) || [];
+    if (children.length === 0) {
+      const x = leafIndex * BASE_NODE_SPACING;
       leafIndex++;
-      return node.x;
+      xMap.set(id, x);
+      return x;
     }
-    const childXs = node.children.map((cid) => assignX(cid));
-    node.x = (Math.min(...childXs) + Math.max(...childXs)) / 2;
-    return node.x;
+    const childXs = children.map((c) => assignX(c));
+    const x = (Math.min(...childXs) + Math.max(...childXs)) / 2;
+    xMap.set(id, x);
+    return x;
   }
-  roots.forEach((rid) => assignX(rid));
+  roots.forEach((r) => assignX(r));
 
-  nodeMap.forEach((node) => {
-    node.y = node.depth * LEVEL_HEIGHT + 60;
-  });
+  const issueMap = new Map(issues.map((n) => [n.id, n]));
 
-  const edges: Edge[] = [];
-  nodeMap.forEach((node) => {
-    if (node.parentId && nodeMap.has(node.parentId)) {
-      edges.push({ from: nodeMap.get(node.parentId)!, to: node });
-    }
-  });
+  const nodes: Node[] = issues.map((n) => ({
+    id: String(n.id),
+    type: "issueNode",
+    position: { x: xMap.get(n.id) || 0, y: (depthMap.get(n.id) || 0) * LEVEL_HEIGHT },
+    data: {
+      label: n.text,
+      priority: n.priority,
+      depth: depthMap.get(n.id) || 0,
+      childCount: (childrenMap.get(n.id) || []).length,
+      isSelected: false,
+    },
+  }));
 
-  let minX = Infinity, maxX = -Infinity;
-  nodeMap.forEach((n) => {
-    if (n.x < minX) minX = n.x;
-    if (n.x > maxX) maxX = n.x;
-  });
+  const edges: Edge[] = issues
+    .filter((n) => n.parentId && issueMap.has(n.parentId))
+    .map((n) => ({
+      id: `e-${n.parentId}-${n.id}`,
+      source: String(n.parentId),
+      target: String(n.id),
+      style: { stroke: "#CBD5E1", strokeWidth: 2 },
+      type: "smoothstep",
+    }));
 
-  const padding = 80;
-  const offsetX = -minX + padding;
-  nodeMap.forEach((n) => { n.x += offsetX; });
-
-  const width = maxX - minX + padding * 2;
-  const height = (maxDepth + 1) * LEVEL_HEIGHT + 100;
-
-  return { layoutNodes: nodeMap, edges, width, height };
+  return { nodes, edges };
 }
 
 export default function IssuesGraph({ issues }: { issues: IssueNode[] }) {
-  const [selectedNode, setSelectedNode] = useState<LayoutNode | null>(null);
-  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
-  const [scale, setScale] = useState(1);
-  const isDragging = useRef(false);
-  const lastMouse = useRef({ x: 0, y: 0 });
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const { layoutNodes, edges, width, height } = useMemo(() => layoutTree(issues), [issues]);
-  const nodesArray = useMemo(() => Array.from(layoutNodes.values()), [layoutNodes]);
+  const { nodes: baseNodes, edges } = useMemo(() => buildFlowData(issues), [issues]);
 
-  const containerWidth = 800;
-  const initialScale = useMemo(() => {
-    const s = Math.min(containerWidth / width, 1);
-    return Math.max(s, 0.25);
-  }, [containerWidth, width]);
+  const nodes = useMemo(
+    () =>
+      baseNodes.map((n) => ({
+        ...n,
+        data: { ...n.data, isSelected: n.id === selectedId },
+      })),
+    [baseNodes, selectedId]
+  );
 
-  const effectiveScale = scale * initialScale;
-  const svgWidth = Math.max(width * effectiveScale + 60, containerWidth);
-  const svgHeight = height * effectiveScale + 40;
+  const selectedIssue = useMemo(() => {
+    if (!selectedId) return null;
+    const issue = issues.find((i) => String(i.id) === selectedId);
+    if (!issue) return null;
+    const children = issues.filter((i) => i.parentId === issue.id);
+    const nodeData = nodes.find((n) => n.id === selectedId)?.data as Record<string, unknown> | undefined;
+    const depth = (nodeData?.depth as number) ?? 0;
+    return { ...issue, depth, childCount: children.length };
+  }, [selectedId, issues, nodes]);
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    isDragging.current = true;
-    lastMouse.current = { x: e.clientX, y: e.clientY };
-  }, []);
-
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isDragging.current) return;
-    setPanOffset(prev => ({
-      x: prev.x + (e.clientX - lastMouse.current.x),
-      y: prev.y + (e.clientY - lastMouse.current.y),
-    }));
-    lastMouse.current = { x: e.clientX, y: e.clientY };
-  }, []);
-
-  const handleMouseUp = useCallback(() => {
-    isDragging.current = false;
-  }, []);
-
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    setScale(s => Math.max(0.3, Math.min(2.5, s + delta)));
+  const onNodeClick = useCallback((_: any, node: Node) => {
+    setSelectedId((prev) => (prev === node.id ? null : node.id));
   }, []);
 
   return (
@@ -174,92 +167,48 @@ export default function IssuesGraph({ issues }: { issues: IssueNode[] }) {
             <span>Low</span>
           </div>
         </div>
-        <div className="graph-zoom-controls">
-          <button className="zoom-btn" onClick={() => setScale(s => Math.min(s + 0.15, 2.5))}>+</button>
-          <button className="zoom-btn" onClick={() => setScale(s => Math.max(s - 0.15, 0.3))}>-</button>
-          <button className="zoom-btn" onClick={() => { setScale(1); setPanOffset({ x: 0, y: 0 }); }}>Reset</button>
-        </div>
       </div>
 
-      <div
-        className="graph-canvas"
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        onWheel={handleWheel}
-        style={{ cursor: isDragging.current ? "grabbing" : "grab" }}
-      >
-        <svg
-          width={svgWidth}
-          height={svgHeight}
-          viewBox={`${-panOffset.x / effectiveScale} ${-panOffset.y / effectiveScale} ${svgWidth / effectiveScale} ${svgHeight / effectiveScale}`}
+      <div className="graph-canvas" style={{ height: 500 }}>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodeClick={onNodeClick}
+          fitView
+          fitViewOptions={{ padding: 0.3 }}
+          minZoom={0.2}
+          maxZoom={2.5}
+          proOptions={{ hideAttribution: true }}
         >
-          {edges.map((edge, i) => (
-            <line
-              key={`edge-${i}`}
-              x1={edge.from.x}
-              y1={edge.from.y}
-              x2={edge.to.x}
-              y2={edge.to.y}
-              stroke="#E2E8F0"
-              strokeWidth={2 / effectiveScale}
-              strokeOpacity={0.7}
-            />
-          ))}
-          {nodesArray.map((node) => {
-            const isSelected = selectedNode?.id === node.id;
-            const color = PRIORITY_COLORS[node.priority] || "#94A3B8";
-            const r = NODE_RADIUS;
-            return (
-              <g
-                key={`node-${node.id}`}
-                onClick={() => setSelectedNode(isSelected ? null : node)}
-                style={{ cursor: "pointer" }}
-              >
-                <circle cx={node.x} cy={node.y} r={r + 4} fill={isSelected ? color : "transparent"} opacity={0.15} />
-                <circle cx={node.x} cy={node.y} r={r} fill="#fff" stroke={color} strokeWidth={isSelected ? 3 : 2} />
-                <circle cx={node.x} cy={node.y} r={6} fill={color} />
-                <foreignObject x={node.x - 70} y={node.y + r + 4} width={140} height={44}>
-                  <div style={{ textAlign: "center" }}>
-                    <span style={{
-                      fontSize: 11,
-                      color: isSelected ? "#0F172A" : "#64748B",
-                      fontWeight: isSelected ? 600 : 400,
-                      lineHeight: "14px",
-                      display: "-webkit-box",
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: "vertical" as any,
-                      overflow: "hidden",
-                    }}>
-                      {node.text}
-                    </span>
-                  </div>
-                </foreignObject>
-              </g>
-            );
-          })}
-        </svg>
+          <Background gap={20} size={1} color="#F1F5F9" />
+          <Controls showInteractive={false} />
+          <MiniMap
+            nodeStrokeWidth={3}
+            nodeColor={(n) => PRIORITY_COLORS[(n.data?.priority as string)] || "#94A3B8"}
+            style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 8 }}
+          />
+        </ReactFlow>
       </div>
 
-      {selectedNode && (
+      {selectedIssue && (
         <div className="graph-detail-card">
           <div className="graph-detail-header">
             <span
               className="graph-detail-priority"
               style={{
-                background: PRIORITY_COLORS[selectedNode.priority] + "20",
-                color: PRIORITY_COLORS[selectedNode.priority],
+                background: PRIORITY_COLORS[selectedIssue.priority] + "20",
+                color: PRIORITY_COLORS[selectedIssue.priority],
               }}
             >
-              {selectedNode.priority}
+              {selectedIssue.priority}
             </span>
-            <span className="graph-detail-depth">Level {selectedNode.depth + 1}</span>
+            <span className="graph-detail-depth">Level {selectedIssue.depth + 1}</span>
           </div>
-          <p className="graph-detail-text">{selectedNode.text}</p>
-          {selectedNode.children.length > 0 && (
+          <p className="graph-detail-text">{selectedIssue.text}</p>
+          {selectedIssue.childCount > 0 && (
             <p className="graph-detail-children">
-              {selectedNode.children.length} sub-issue{selectedNode.children.length > 1 ? "s" : ""}
+              {selectedIssue.childCount} sub-issue{selectedIssue.childCount > 1 ? "s" : ""}
             </p>
           )}
         </div>
