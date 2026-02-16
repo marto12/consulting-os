@@ -22,6 +22,7 @@ import {
   List,
   Network,
 } from "lucide-react";
+import IssuesGraph from "../components/IssuesGraph";
 import "./ProjectDetail.css";
 
 const STAGE_LABELS: Record<string, string> = {
@@ -595,9 +596,7 @@ function IssuesTab({ issues, showApprove, onApprove, approvePending }: { issues:
       </div>
 
       {viewMode === "graph" ? (
-        <div className="pd-section" style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
-          Graph view — switch to list for details
-        </div>
+        <IssuesGraph issues={latestIssues.map((n: any) => ({ id: n.id, parentId: n.parentId, text: n.text, priority: n.priority }))} />
       ) : (
         roots.map((root: any) => (
           <div key={root.id} className="pd-issue-root">
