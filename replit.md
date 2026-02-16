@@ -2,31 +2,44 @@
 
 ## Overview
 
-Consulting OS is a cloud-hosted MVP that demonstrates sequenced AI agents operating on shared, persistent project state with human approval gates. It follows a consulting workflow pattern where users create projects with objectives and constraints, then run AI agents through a structured pipeline: Issues Tree → Hypotheses & Analysis Plan → Execution (with real tool calling) → Executive Summary. Each stage requires human approval before the next can proceed.
+Consulting OS is a cloud-hosted MVP that demonstrates sequenced AI agents operating on shared, persistent project state with human approval gates. It follows a consulting workflow pattern where users create projects with objectives and constraints, then run AI agents through a structured pipeline: Issues Tree → Hypotheses & Analysis Plan → Execution (with real tool calling) → Executive Summary → Presentation. Each stage requires human approval before the next can proceed.
 
-The app is built as an Expo React Native application (targeting web primarily) with an Express.js backend and PostgreSQL database. It supports both real OpenAI LLM calls and a mock mode when no API key is configured.
+The app is built as a pure React web application (Vite + React + TypeScript) with an Express.js backend and PostgreSQL database. It supports both real OpenAI LLM calls and a mock mode when no API key is configured.
 
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.
 
+## Recent Changes
+
+- **2026-02-16**: Converted frontend from Expo/React Native to pure React web app (Vite + React Router + standard HTML/CSS). Removed mobile-specific dependencies. Server now uses Vite dev middleware in development mode and serves static build in production.
+
 ## System Architecture
 
-### Frontend (Expo / React Native)
+### Frontend (Vite + React + TypeScript)
 
-- **Framework**: Expo SDK 54 with expo-router for file-based routing
-- **State Management**: TanStack React Query for server state, with `queryClient` and `apiRequest` helpers in `lib/query-client.ts`
-- **Routing**: Tab-based navigation with two tabs — `app/(tabs)/index.tsx` (Projects: project list/creation) and `app/(tabs)/settings.tsx` (Settings: agent configuration admin panel). `app/project/[id].tsx` is a stack screen pushed above the tabs for project detail with tabbed interface for overview, issues, hypotheses, runs, summary, slides (presentation viewer), and logs
-- **Styling**: React Native StyleSheet with a centralized color palette in `constants/colors.ts`
-- **Fonts**: Inter (400, 500, 600, 700) via `@expo-google-fonts/inter`
-- **Key Libraries**: react-native-gesture-handler, react-native-reanimated, react-native-keyboard-controller, react-native-safe-area-context
-- **API Communication**: All API calls go through `apiRequest()` which constructs URLs from `EXPO_PUBLIC_DOMAIN` environment variable
+- **Framework**: Vite with React 19 and TypeScript
+- **Routing**: React Router DOM v7 with BrowserRouter
+- **State Management**: TanStack React Query for server state, with `queryClient` and `apiRequest` helpers in `client/src/lib/query-client.ts`
+- **Pages**:
+  - `client/src/pages/Projects.tsx` — Project list with creation modal (tab: Projects)
+  - `client/src/pages/ProjectDetail.tsx` — Full project detail with 7 sub-tabs (overview, issues, hypotheses, runs, summary, presentation, logs)
+  - `client/src/pages/Pipeline.tsx` — SVG pipeline builder diagram (tab: Pipeline)
+  - `client/src/pages/Settings.tsx` — Agent configuration admin panel (tab: Settings)
+  - `client/src/pages/AgentDetail.tsx` — Individual agent detail page
+- **Components**: `client/src/components/IssuesGraph.tsx` — Interactive SVG tree visualization with pan/zoom
+- **Styling**: CSS files with CSS custom properties defined in `client/src/styles/index.css`
+- **Icons**: Lucide React (Bot, Briefcase, GitFork, Settings, etc.)
+- **Fonts**: Inter (400, 500, 600, 700) via Google Fonts
+- **Layout**: `App.tsx` defines Layout component with header (logo + tab nav) wrapping Projects, Pipeline, Settings. ProjectDetail and AgentDetail have their own headers with back buttons.
+- **API Communication**: All API calls go through relative paths via `apiRequest()` — works with Vite proxy in dev and same-origin in production
 
 ### Backend (Express.js)
 
-- **Server**: Express 5 running on the server, defined in `server/index.ts`
-- **Routes**: Registered in `server/routes.ts` — handles project CRUD, stage transitions (approve/run-next), and data retrieval for issues, hypotheses, analysis plans, model runs, narratives, and run logs
-- **CORS**: Dynamic CORS based on Replit domain environment variables, plus localhost support for development
+- **Server**: Express 5 running on port 5000, defined in `server/index.ts`
+- **Vite Integration**: In development (`NODE_ENV=development`), Express uses Vite's `createServer` middleware to serve the React frontend with HMR. In production, serves static files from `dist/public`.
+- **Routes**: Registered in `server/routes.ts` — handles project CRUD, stage transitions (approve/run-next/redo), and data retrieval for issues, hypotheses, analysis plans, model runs, narratives, slides, and run logs
+- **CORS**: Dynamic CORS based on Replit domain environment variables, plus localhost support
 
 ### Workflow Engine
 
@@ -65,10 +78,6 @@ created → issues_draft → issues_approved → hypotheses_draft → hypotheses
 - `slides` — presentation slides with layout, title, subtitle, bodyJson, notesText, version tracking
 - `run_logs` — detailed logging of every agent run
 
-**Additional Tables (from Replit integrations):**
-- `conversations` — chat conversation metadata
-- `messages` — chat messages linked to conversations
-
 ### Storage Layer
 
 - `server/storage.ts` exports a `storage` object with methods for all database operations (CRUD for each table, stage updates, etc.)
@@ -83,9 +92,9 @@ Pre-built integration modules included but not central to the consulting workflo
 
 ### Build System
 
-- **Development**: Two processes — `expo:dev` (Expo Metro bundler) and `server:dev` (tsx for server with hot reload)
-- **Production Build**: `expo:static:build` runs a custom build script (`scripts/build.js`), `server:build` uses esbuild to bundle server code
-- **Production Run**: `server:prod` serves the built application
+- **Development**: Single process — `npm run server:dev` runs Express with Vite dev middleware (tsx for server hot reload, Vite HMR for frontend)
+- **Production Build**: `vite build` (from client dir) builds to `dist/public`, `server:build` uses esbuild to bundle server code
+- **Production Run**: `server:prod` serves the built application with static file serving
 
 ## External Dependencies
 
@@ -94,8 +103,10 @@ Pre-built integration modules included but not central to the consulting workflo
 - **Replit AI Integrations (OpenAI-compatible)**: LLM calls for AI agents. Configured via `AI_INTEGRATIONS_OPENAI_API_KEY` and `AI_INTEGRATIONS_OPENAI_BASE_URL`. App works in mock mode without these.
 
 ### Key NPM Dependencies
-- **expo** (~54.0.27): React Native framework
-- **expo-router** (~6.0.17): File-based routing
+- **vite** (^7.3.1): Build tool and dev server
+- **react** (19.1.0) + **react-dom**: UI framework
+- **react-router-dom** (^7.13.0): Client-side routing
+- **lucide-react** (^0.564.0): Icon library
 - **express** (^5.0.1): Backend HTTP server
 - **drizzle-orm** (^0.39.3) + **drizzle-kit**: Database ORM and migration tooling
 - **openai** (^6.22.0): OpenAI API client for LLM calls
@@ -110,6 +121,5 @@ Pre-built integration modules included but not central to the consulting workflo
 | `DATABASE_URL` | PostgreSQL connection string (required) |
 | `AI_INTEGRATIONS_OPENAI_API_KEY` | OpenAI API key via Replit integrations (optional, mock mode without) |
 | `AI_INTEGRATIONS_OPENAI_BASE_URL` | OpenAI base URL via Replit integrations (optional) |
-| `EXPO_PUBLIC_DOMAIN` | Public domain for API calls from frontend |
 | `REPLIT_DEV_DOMAIN` | Replit development domain (set automatically) |
 | `REPLIT_DOMAINS` | Replit deployment domains for CORS (set automatically) |
