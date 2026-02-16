@@ -1,18 +1,40 @@
+"use strict";
+var __create = Object.create;
 var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
+var __copyProps = (to, from, except, desc2) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc2 = __getOwnPropDesc(from, key)) || desc2.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 
 // server/index.ts
-import express from "express";
+var import_express = __toESM(require("express"));
 
 // server/routes.ts
-import { createServer } from "node:http";
+var import_node_http = require("node:http");
 
 // server/db.ts
-import { drizzle } from "drizzle-orm/node-postgres";
-import pg from "pg";
+var import_node_postgres = require("drizzle-orm/node-postgres");
+var import_pg = __toESM(require("pg"));
 
 // shared/schema.ts
 var schema_exports = {};
@@ -31,120 +53,113 @@ __export(schema_exports, {
   runLogs: () => runLogs,
   slides: () => slides
 });
-import { sql } from "drizzle-orm";
-import {
-  pgTable,
-  serial,
-  text,
-  integer,
-  timestamp,
-  jsonb
-} from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
-var projects = pgTable("projects", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  objective: text("objective").notNull(),
-  constraints: text("constraints").notNull(),
-  stage: text("stage").notNull().default("created"),
-  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+var import_drizzle_orm = require("drizzle-orm");
+var import_pg_core = require("drizzle-orm/pg-core");
+var import_drizzle_zod = require("drizzle-zod");
+var projects = (0, import_pg_core.pgTable)("projects", {
+  id: (0, import_pg_core.serial)("id").primaryKey(),
+  name: (0, import_pg_core.text)("name").notNull(),
+  objective: (0, import_pg_core.text)("objective").notNull(),
+  constraints: (0, import_pg_core.text)("constraints").notNull(),
+  stage: (0, import_pg_core.text)("stage").notNull().default("created"),
+  createdAt: (0, import_pg_core.timestamp)("created_at").default(import_drizzle_orm.sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").default(import_drizzle_orm.sql`CURRENT_TIMESTAMP`).notNull()
 });
-var issueNodes = pgTable("issue_nodes", {
-  id: serial("id").primaryKey(),
-  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
-  parentId: integer("parent_id"),
-  text: text("text").notNull(),
-  priority: text("priority").notNull().default("medium"),
-  version: integer("version").notNull().default(1),
-  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+var issueNodes = (0, import_pg_core.pgTable)("issue_nodes", {
+  id: (0, import_pg_core.serial)("id").primaryKey(),
+  projectId: (0, import_pg_core.integer)("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  parentId: (0, import_pg_core.integer)("parent_id"),
+  text: (0, import_pg_core.text)("text").notNull(),
+  priority: (0, import_pg_core.text)("priority").notNull().default("medium"),
+  version: (0, import_pg_core.integer)("version").notNull().default(1),
+  createdAt: (0, import_pg_core.timestamp)("created_at").default(import_drizzle_orm.sql`CURRENT_TIMESTAMP`).notNull()
 });
-var hypotheses = pgTable("hypotheses", {
-  id: serial("id").primaryKey(),
-  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
-  issueNodeId: integer("issue_node_id"),
-  statement: text("statement").notNull(),
-  metric: text("metric").notNull(),
-  dataSource: text("data_source").notNull(),
-  method: text("method").notNull(),
-  version: integer("version").notNull().default(1),
-  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+var hypotheses = (0, import_pg_core.pgTable)("hypotheses", {
+  id: (0, import_pg_core.serial)("id").primaryKey(),
+  projectId: (0, import_pg_core.integer)("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  issueNodeId: (0, import_pg_core.integer)("issue_node_id"),
+  statement: (0, import_pg_core.text)("statement").notNull(),
+  metric: (0, import_pg_core.text)("metric").notNull(),
+  dataSource: (0, import_pg_core.text)("data_source").notNull(),
+  method: (0, import_pg_core.text)("method").notNull(),
+  version: (0, import_pg_core.integer)("version").notNull().default(1),
+  createdAt: (0, import_pg_core.timestamp)("created_at").default(import_drizzle_orm.sql`CURRENT_TIMESTAMP`).notNull()
 });
-var analysisPlan = pgTable("analysis_plan", {
-  id: serial("id").primaryKey(),
-  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
-  hypothesisId: integer("hypothesis_id"),
-  method: text("method").notNull(),
-  parametersJson: jsonb("parameters_json").notNull(),
-  requiredDataset: text("required_dataset").notNull(),
-  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+var analysisPlan = (0, import_pg_core.pgTable)("analysis_plan", {
+  id: (0, import_pg_core.serial)("id").primaryKey(),
+  projectId: (0, import_pg_core.integer)("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  hypothesisId: (0, import_pg_core.integer)("hypothesis_id"),
+  method: (0, import_pg_core.text)("method").notNull(),
+  parametersJson: (0, import_pg_core.jsonb)("parameters_json").notNull(),
+  requiredDataset: (0, import_pg_core.text)("required_dataset").notNull(),
+  createdAt: (0, import_pg_core.timestamp)("created_at").default(import_drizzle_orm.sql`CURRENT_TIMESTAMP`).notNull()
 });
-var modelRuns = pgTable("model_runs", {
-  id: serial("id").primaryKey(),
-  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
-  toolName: text("tool_name").notNull(),
-  inputsJson: jsonb("inputs_json").notNull(),
-  outputsJson: jsonb("outputs_json").notNull(),
-  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+var modelRuns = (0, import_pg_core.pgTable)("model_runs", {
+  id: (0, import_pg_core.serial)("id").primaryKey(),
+  projectId: (0, import_pg_core.integer)("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  toolName: (0, import_pg_core.text)("tool_name").notNull(),
+  inputsJson: (0, import_pg_core.jsonb)("inputs_json").notNull(),
+  outputsJson: (0, import_pg_core.jsonb)("outputs_json").notNull(),
+  createdAt: (0, import_pg_core.timestamp)("created_at").default(import_drizzle_orm.sql`CURRENT_TIMESTAMP`).notNull()
 });
-var narratives = pgTable("narratives", {
-  id: serial("id").primaryKey(),
-  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
-  summaryText: text("summary_text").notNull(),
-  version: integer("version").notNull().default(1),
-  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+var narratives = (0, import_pg_core.pgTable)("narratives", {
+  id: (0, import_pg_core.serial)("id").primaryKey(),
+  projectId: (0, import_pg_core.integer)("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  summaryText: (0, import_pg_core.text)("summary_text").notNull(),
+  version: (0, import_pg_core.integer)("version").notNull().default(1),
+  createdAt: (0, import_pg_core.timestamp)("created_at").default(import_drizzle_orm.sql`CURRENT_TIMESTAMP`).notNull()
 });
-var runLogs = pgTable("run_logs", {
-  id: serial("id").primaryKey(),
-  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
-  stage: text("stage").notNull(),
-  inputJson: jsonb("input_json").notNull(),
-  outputJson: jsonb("output_json"),
-  modelUsed: text("model_used").notNull(),
-  status: text("status").notNull().default("pending"),
-  errorText: text("error_text"),
-  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+var runLogs = (0, import_pg_core.pgTable)("run_logs", {
+  id: (0, import_pg_core.serial)("id").primaryKey(),
+  projectId: (0, import_pg_core.integer)("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  stage: (0, import_pg_core.text)("stage").notNull(),
+  inputJson: (0, import_pg_core.jsonb)("input_json").notNull(),
+  outputJson: (0, import_pg_core.jsonb)("output_json"),
+  modelUsed: (0, import_pg_core.text)("model_used").notNull(),
+  status: (0, import_pg_core.text)("status").notNull().default("pending"),
+  errorText: (0, import_pg_core.text)("error_text"),
+  createdAt: (0, import_pg_core.timestamp)("created_at").default(import_drizzle_orm.sql`CURRENT_TIMESTAMP`).notNull()
 });
-var slides = pgTable("slides", {
-  id: serial("id").primaryKey(),
-  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
-  slideIndex: integer("slide_index").notNull(),
-  layout: text("layout").notNull().default("title_body"),
-  title: text("title").notNull(),
-  subtitle: text("subtitle"),
-  bodyJson: jsonb("body_json").notNull(),
-  notesText: text("notes_text"),
-  version: integer("version").notNull().default(1),
-  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+var slides = (0, import_pg_core.pgTable)("slides", {
+  id: (0, import_pg_core.serial)("id").primaryKey(),
+  projectId: (0, import_pg_core.integer)("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  slideIndex: (0, import_pg_core.integer)("slide_index").notNull(),
+  layout: (0, import_pg_core.text)("layout").notNull().default("title_body"),
+  title: (0, import_pg_core.text)("title").notNull(),
+  subtitle: (0, import_pg_core.text)("subtitle"),
+  bodyJson: (0, import_pg_core.jsonb)("body_json").notNull(),
+  notesText: (0, import_pg_core.text)("notes_text"),
+  version: (0, import_pg_core.integer)("version").notNull().default(1),
+  createdAt: (0, import_pg_core.timestamp)("created_at").default(import_drizzle_orm.sql`CURRENT_TIMESTAMP`).notNull()
 });
-var agentConfigs = pgTable("agent_configs", {
-  id: serial("id").primaryKey(),
-  agentType: text("agent_type").notNull().unique(),
-  systemPrompt: text("system_prompt").notNull(),
-  model: text("model").notNull().default("gpt-5-nano"),
-  maxTokens: integer("max_tokens").notNull().default(8192),
-  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+var agentConfigs = (0, import_pg_core.pgTable)("agent_configs", {
+  id: (0, import_pg_core.serial)("id").primaryKey(),
+  agentType: (0, import_pg_core.text)("agent_type").notNull().unique(),
+  systemPrompt: (0, import_pg_core.text)("system_prompt").notNull(),
+  model: (0, import_pg_core.text)("model").notNull().default("gpt-5-nano"),
+  maxTokens: (0, import_pg_core.integer)("max_tokens").notNull().default(8192),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").default(import_drizzle_orm.sql`CURRENT_TIMESTAMP`).notNull()
 });
-var conversations = pgTable("conversations", {
-  id: serial("id").primaryKey(),
-  title: text("title").notNull(),
-  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+var conversations = (0, import_pg_core.pgTable)("conversations", {
+  id: (0, import_pg_core.serial)("id").primaryKey(),
+  title: (0, import_pg_core.text)("title").notNull(),
+  createdAt: (0, import_pg_core.timestamp)("created_at").default(import_drizzle_orm.sql`CURRENT_TIMESTAMP`).notNull()
 });
-var messages = pgTable("messages", {
-  id: serial("id").primaryKey(),
-  conversationId: integer("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
-  role: text("role").notNull(),
-  content: text("content").notNull(),
-  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+var messages = (0, import_pg_core.pgTable)("messages", {
+  id: (0, import_pg_core.serial)("id").primaryKey(),
+  conversationId: (0, import_pg_core.integer)("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+  role: (0, import_pg_core.text)("role").notNull(),
+  content: (0, import_pg_core.text)("content").notNull(),
+  createdAt: (0, import_pg_core.timestamp)("created_at").default(import_drizzle_orm.sql`CURRENT_TIMESTAMP`).notNull()
 });
-var pipelineConfigs = pgTable("pipeline_configs", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  agentsJson: jsonb("agents_json").notNull(),
-  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+var pipelineConfigs = (0, import_pg_core.pgTable)("pipeline_configs", {
+  id: (0, import_pg_core.serial)("id").primaryKey(),
+  name: (0, import_pg_core.text)("name").notNull(),
+  agentsJson: (0, import_pg_core.jsonb)("agents_json").notNull(),
+  createdAt: (0, import_pg_core.timestamp)("created_at").default(import_drizzle_orm.sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").default(import_drizzle_orm.sql`CURRENT_TIMESTAMP`).notNull()
 });
-var insertProjectSchema = createInsertSchema(projects).omit({
+var insertProjectSchema = (0, import_drizzle_zod.createInsertSchema)(projects).omit({
   id: true,
   stage: true,
   createdAt: true,
@@ -155,31 +170,31 @@ var insertProjectSchema = createInsertSchema(projects).omit({
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL is required");
 }
-var pool = new pg.Pool({
+var pool = new import_pg.default.Pool({
   connectionString: process.env.DATABASE_URL
 });
-var db = drizzle(pool, { schema: schema_exports });
+var db = (0, import_node_postgres.drizzle)(pool, { schema: schema_exports });
 
 // server/storage.ts
-import { eq, desc } from "drizzle-orm";
+var import_drizzle_orm2 = require("drizzle-orm");
 var storage = {
   async createProject(data) {
     const [project] = await db.insert(projects).values({ ...data, stage: "created" }).returning();
     return project;
   },
   async listProjects() {
-    return db.select().from(projects).orderBy(desc(projects.createdAt));
+    return db.select().from(projects).orderBy((0, import_drizzle_orm2.desc)(projects.createdAt));
   },
   async getProject(id) {
-    const [project] = await db.select().from(projects).where(eq(projects.id, id));
+    const [project] = await db.select().from(projects).where((0, import_drizzle_orm2.eq)(projects.id, id));
     return project;
   },
   async updateProjectStage(id, stage) {
-    const [project] = await db.update(projects).set({ stage, updatedAt: /* @__PURE__ */ new Date() }).where(eq(projects.id, id)).returning();
+    const [project] = await db.update(projects).set({ stage, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm2.eq)(projects.id, id)).returning();
     return project;
   },
   async getLatestIssueVersion(projectId) {
-    const nodes = await db.select().from(issueNodes).where(eq(issueNodes.projectId, projectId)).orderBy(desc(issueNodes.version));
+    const nodes = await db.select().from(issueNodes).where((0, import_drizzle_orm2.eq)(issueNodes.projectId, projectId)).orderBy((0, import_drizzle_orm2.desc)(issueNodes.version));
     return nodes[0]?.version || 0;
   },
   async insertIssueNodes(projectId, version, nodes) {
@@ -194,10 +209,10 @@ var storage = {
     return db.insert(issueNodes).values(values).returning();
   },
   async getIssueNodes(projectId) {
-    return db.select().from(issueNodes).where(eq(issueNodes.projectId, projectId)).orderBy(desc(issueNodes.version), issueNodes.id);
+    return db.select().from(issueNodes).where((0, import_drizzle_orm2.eq)(issueNodes.projectId, projectId)).orderBy((0, import_drizzle_orm2.desc)(issueNodes.version), issueNodes.id);
   },
   async getLatestHypothesisVersion(projectId) {
-    const hyps = await db.select().from(hypotheses).where(eq(hypotheses.projectId, projectId)).orderBy(desc(hypotheses.version));
+    const hyps = await db.select().from(hypotheses).where((0, import_drizzle_orm2.eq)(hypotheses.projectId, projectId)).orderBy((0, import_drizzle_orm2.desc)(hypotheses.version));
     return hyps[0]?.version || 0;
   },
   async insertHypotheses(projectId, version, hyps) {
@@ -214,7 +229,7 @@ var storage = {
     return db.insert(hypotheses).values(values).returning();
   },
   async getHypotheses(projectId) {
-    return db.select().from(hypotheses).where(eq(hypotheses.projectId, projectId)).orderBy(desc(hypotheses.version), hypotheses.id);
+    return db.select().from(hypotheses).where((0, import_drizzle_orm2.eq)(hypotheses.projectId, projectId)).orderBy((0, import_drizzle_orm2.desc)(hypotheses.version), hypotheses.id);
   },
   async insertAnalysisPlan(projectId, plans) {
     if (plans.length === 0) return [];
@@ -228,17 +243,17 @@ var storage = {
     return db.insert(analysisPlan).values(values).returning();
   },
   async getAnalysisPlan(projectId) {
-    return db.select().from(analysisPlan).where(eq(analysisPlan.projectId, projectId)).orderBy(analysisPlan.id);
+    return db.select().from(analysisPlan).where((0, import_drizzle_orm2.eq)(analysisPlan.projectId, projectId)).orderBy(analysisPlan.id);
   },
   async insertModelRun(projectId, toolName, inputsJson, outputsJson) {
     const [run] = await db.insert(modelRuns).values({ projectId, toolName, inputsJson, outputsJson }).returning();
     return run;
   },
   async getModelRuns(projectId) {
-    return db.select().from(modelRuns).where(eq(modelRuns.projectId, projectId)).orderBy(modelRuns.id);
+    return db.select().from(modelRuns).where((0, import_drizzle_orm2.eq)(modelRuns.projectId, projectId)).orderBy(modelRuns.id);
   },
   async getLatestNarrativeVersion(projectId) {
-    const narrs = await db.select().from(narratives).where(eq(narratives.projectId, projectId)).orderBy(desc(narratives.version));
+    const narrs = await db.select().from(narratives).where((0, import_drizzle_orm2.eq)(narratives.projectId, projectId)).orderBy((0, import_drizzle_orm2.desc)(narratives.version));
     return narrs[0]?.version || 0;
   },
   async insertNarrative(projectId, version, summaryText) {
@@ -246,21 +261,21 @@ var storage = {
     return narr;
   },
   async getNarratives(projectId) {
-    return db.select().from(narratives).where(eq(narratives.projectId, projectId)).orderBy(desc(narratives.version));
+    return db.select().from(narratives).where((0, import_drizzle_orm2.eq)(narratives.projectId, projectId)).orderBy((0, import_drizzle_orm2.desc)(narratives.version));
   },
   async insertRunLog(projectId, stage, inputJson, modelUsed, status = "pending") {
     const [log2] = await db.insert(runLogs).values({ projectId, stage, inputJson, modelUsed, status }).returning();
     return log2;
   },
   async updateRunLog(id, outputJson, status, errorText) {
-    const [log2] = await db.update(runLogs).set({ outputJson, status, errorText }).where(eq(runLogs.id, id)).returning();
+    const [log2] = await db.update(runLogs).set({ outputJson, status, errorText }).where((0, import_drizzle_orm2.eq)(runLogs.id, id)).returning();
     return log2;
   },
   async getRunLogs(projectId) {
-    return db.select().from(runLogs).where(eq(runLogs.projectId, projectId)).orderBy(desc(runLogs.createdAt));
+    return db.select().from(runLogs).where((0, import_drizzle_orm2.eq)(runLogs.projectId, projectId)).orderBy((0, import_drizzle_orm2.desc)(runLogs.createdAt));
   },
   async getLatestSlideVersion(projectId) {
-    const s = await db.select().from(slides).where(eq(slides.projectId, projectId)).orderBy(desc(slides.version));
+    const s = await db.select().from(slides).where((0, import_drizzle_orm2.eq)(slides.projectId, projectId)).orderBy((0, import_drizzle_orm2.desc)(slides.version));
     return s[0]?.version || 0;
   },
   async insertSlides(projectId, version, slideData) {
@@ -278,13 +293,13 @@ var storage = {
     return db.insert(slides).values(values).returning();
   },
   async getSlides(projectId) {
-    return db.select().from(slides).where(eq(slides.projectId, projectId)).orderBy(desc(slides.version), slides.slideIndex);
+    return db.select().from(slides).where((0, import_drizzle_orm2.eq)(slides.projectId, projectId)).orderBy((0, import_drizzle_orm2.desc)(slides.version), slides.slideIndex);
   },
   async getAllAgentConfigs() {
     return db.select().from(agentConfigs);
   },
   async getAgentConfig(agentType) {
-    const [config] = await db.select().from(agentConfigs).where(eq(agentConfigs.agentType, agentType));
+    const [config] = await db.select().from(agentConfigs).where((0, import_drizzle_orm2.eq)(agentConfigs.agentType, agentType));
     return config;
   },
   async upsertAgentConfig(data) {
@@ -295,7 +310,7 @@ var storage = {
         model: data.model,
         maxTokens: data.maxTokens,
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq(agentConfigs.agentType, data.agentType)).returning();
+      }).where((0, import_drizzle_orm2.eq)(agentConfigs.agentType, data.agentType)).returning();
       return updated;
     }
     const [created] = await db.insert(agentConfigs).values(data).returning();
@@ -306,23 +321,23 @@ var storage = {
     return pipeline;
   },
   async listPipelines() {
-    return db.select().from(pipelineConfigs).orderBy(desc(pipelineConfigs.updatedAt));
+    return db.select().from(pipelineConfigs).orderBy((0, import_drizzle_orm2.desc)(pipelineConfigs.updatedAt));
   },
   async getPipeline(id) {
-    const [pipeline] = await db.select().from(pipelineConfigs).where(eq(pipelineConfigs.id, id));
+    const [pipeline] = await db.select().from(pipelineConfigs).where((0, import_drizzle_orm2.eq)(pipelineConfigs.id, id));
     return pipeline;
   },
   async updatePipeline(id, data) {
-    const [pipeline] = await db.update(pipelineConfigs).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(pipelineConfigs.id, id)).returning();
+    const [pipeline] = await db.update(pipelineConfigs).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm2.eq)(pipelineConfigs.id, id)).returning();
     return pipeline;
   },
   async deletePipeline(id) {
-    await db.delete(pipelineConfigs).where(eq(pipelineConfigs.id, id));
+    await db.delete(pipelineConfigs).where((0, import_drizzle_orm2.eq)(pipelineConfigs.id, id));
   }
 };
 
 // server/agents/index.ts
-import OpenAI from "openai";
+var import_openai = __toESM(require("openai"));
 
 // server/agents/scenario-tool.ts
 function runScenarioTool(params) {
@@ -386,7 +401,7 @@ function runScenarioTool(params) {
 var hasApiKey = !!(process.env.AI_INTEGRATIONS_OPENAI_API_KEY && process.env.AI_INTEGRATIONS_OPENAI_BASE_URL);
 var openai = null;
 if (hasApiKey) {
-  openai = new OpenAI({
+  openai = new import_openai.default({
     apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
     baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
   });
@@ -1597,14 +1612,14 @@ async function registerRoutes(app2) {
       res.status(500).json({ error: err.message });
     }
   });
-  const httpServer = createServer(app2);
+  const httpServer = (0, import_node_http.createServer)(app2);
   return httpServer;
 }
 
 // server/index.ts
-import * as fs from "fs";
-import * as path from "path";
-var app = express();
+var fs = __toESM(require("fs"));
+var path = __toESM(require("path"));
+var app = (0, import_express.default)();
 var log = console.log;
 function setupCors(app2) {
   app2.use((req, res, next) => {
@@ -1636,13 +1651,13 @@ function setupCors(app2) {
 }
 function setupBodyParsing(app2) {
   app2.use(
-    express.json({
+    import_express.default.json({
       verify: (req, _res, buf) => {
         req.rawBody = buf;
       }
     })
   );
-  app2.use(express.urlencoded({ extended: false }));
+  app2.use(import_express.default.urlencoded({ extended: false }));
 }
 function setupRequestLogging(app2) {
   app2.use((req, res, next) => {
@@ -1682,8 +1697,8 @@ async function setupViteDevMiddleware(app2) {
 function serveProductionFrontend(app2) {
   const distPath = path.resolve(process.cwd(), "dist", "public");
   if (fs.existsSync(distPath)) {
-    app2.use(express.static(distPath));
-    app2.get("*", (req, res, next) => {
+    app2.use(import_express.default.static(distPath));
+    app2.get("/*", (req, res, next) => {
       if (req.path.startsWith("/api")) return next();
       res.sendFile(path.join(distPath, "index.html"));
     });

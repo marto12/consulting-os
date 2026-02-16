@@ -111,7 +111,7 @@ function serveProductionFrontend(app: express.Application) {
   const distPath = path.resolve(process.cwd(), "dist", "public");
   if (fs.existsSync(distPath)) {
     app.use(express.static(distPath));
-    app.get("*", (req, res, next) => {
+    app.get("/*", (req, res, next) => {
       if (req.path.startsWith("/api")) return next();
       res.sendFile(path.join(distPath, "index.html"));
     });
