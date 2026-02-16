@@ -1,0 +1,353 @@
+.agent-detail {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--color-bg);
+}
+
+.agent-detail .loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agent-detail .error-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.agent-detail .error-state h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0;
+}
+
+.agent-detail .error-state .btn-secondary {
+  margin-top: 8px;
+}
+
+.ad-top-bar {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  gap: 8px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-surface-border);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.ad-back-button {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--color-text);
+  flex-shrink: 0;
+}
+
+.ad-back-button:hover {
+  background: var(--color-bg);
+}
+
+.ad-top-bar-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.ad-top-bar-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ad-top-bar-spacer {
+  width: 32px;
+  flex-shrink: 0;
+}
+
+.ad-scroll-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 20px 60px;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.ad-hero-card {
+  background: var(--color-surface);
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--color-surface-border);
+  box-shadow: 0 2px 8px var(--color-card-shadow);
+  margin-bottom: 16px;
+}
+
+.ad-hero-accent {
+  height: 6px;
+}
+
+.ad-hero-body {
+  padding: 20px;
+}
+
+.ad-hero-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.ad-role-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ad-hero-meta {
+  text-align: right;
+}
+
+.ad-hero-meta-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ad-hero-meta-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-top: 2px;
+}
+
+.ad-hero-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.ad-hero-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.ad-hero-desc {
+  font-size: 15px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.ad-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.ad-info-pill {
+  background: var(--color-surface);
+  border-radius: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-surface-border);
+  min-width: 120px;
+}
+
+.ad-info-pill-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 3px;
+}
+
+.ad-info-pill-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.ad-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  margin-top: 12px;
+  color: var(--color-text-secondary);
+}
+
+.ad-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.ad-field-card {
+  background: var(--color-surface);
+  border-radius: 12px;
+  padding: 14px;
+  border: 1px solid var(--color-surface-border);
+  margin-bottom: 8px;
+}
+
+.ad-field-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.ad-field-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.ad-type-badge {
+  background: #EFF6FF;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-accent);
+}
+
+.ad-field-desc {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.ad-code-block {
+  background: #1E293B;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+
+.ad-code-text {
+  font-size: 12px;
+  font-family: 'Menlo', 'Consolas', monospace;
+  color: #E2E8F0;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.ad-tool-card {
+  background: var(--color-surface);
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid var(--color-surface-border);
+  border-left: 3px solid var(--color-success);
+  margin-bottom: 12px;
+}
+
+.ad-tool-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ad-tool-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.ad-tool-desc {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.ad-tool-params {
+  background: var(--color-bg);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.ad-tool-params-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.ad-tool-param-row {
+  margin-bottom: 6px;
+}
+
+.ad-tool-param-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.ad-tool-param-desc {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-top: 1px;
+}
+
+.ad-prompt-card {
+  background: var(--color-surface);
+  border-radius: 12px;
+  border: 1px solid var(--color-surface-border);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.ad-prompt-meta {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-surface-border);
+  background: var(--color-bg);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.ad-prompt-scroll {
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 14px;
+}
+
+.ad-prompt-text {
+  font-size: 13px;
+  font-family: 'Menlo', 'Consolas', monospace;
+  color: var(--color-text);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
