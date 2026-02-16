@@ -12,6 +12,7 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+- **2026-02-16**: Replaced custom SVG graph visualizations with React Flow (@xyflow/react) for both IssuesGraph (tree layout in ProjectDetail) and Pipeline Builder (agent nodes + approval gates + revision loop).
 - **2026-02-16**: Converted frontend from Expo/React Native to pure React web app (Vite + React Router + standard HTML/CSS). Removed mobile-specific dependencies. Server now uses Vite dev middleware in development mode and serves static build in production.
 
 ## System Architecture
