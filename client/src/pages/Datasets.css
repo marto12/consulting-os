@@ -1,0 +1,71 @@
+.datasets-page {
+  padding-bottom: 40px;
+}
+
+.datasets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.dataset-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.dataset-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px var(--color-card-shadow);
+}
+
+.dataset-card-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.dataset-card-info h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 4px;
+}
+
+.dataset-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.datasets-empty-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 40px;
+  color: var(--color-text-muted);
+  text-align: center;
+  background: var(--color-surface);
+  border-radius: 16px;
+  border: 1px dashed var(--color-surface-border);
+}
+
+.datasets-empty-hint p {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.datasets-hint-sub {
+  font-size: 12px !important;
+  color: var(--color-text-muted) !important;
+}

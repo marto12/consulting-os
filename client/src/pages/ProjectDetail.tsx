@@ -238,7 +238,7 @@ export default function ProjectDetail() {
   return (
     <div className="project-detail" data-testid="project-detail">
       <div className="pd-top-bar">
-        <button className="pd-back-button" onClick={() => navigate("/")} data-testid="back-button">
+        <button className="pd-back-button" onClick={() => navigate("/projects")} data-testid="back-button">
           <ChevronLeft size={24} />
         </button>
         <div className="pd-top-bar-title">{project.name}</div>

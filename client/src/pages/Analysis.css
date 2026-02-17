@@ -1,0 +1,67 @@
+.analysis-page {
+  padding-bottom: 40px;
+}
+
+.analysis-types-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 40px;
+}
+
+.analysis-type-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px;
+}
+
+.analysis-type-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.analysis-type-card h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.analysis-type-card p {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.analysis-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 16px;
+}
+
+.analysis-recent {
+  margin-top: 8px;
+}
+
+.analysis-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 40px;
+  color: var(--color-text-muted);
+  text-align: center;
+  background: var(--color-surface);
+  border-radius: 16px;
+  border: 1px dashed var(--color-surface-border);
+}
+
+.analysis-empty p {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
