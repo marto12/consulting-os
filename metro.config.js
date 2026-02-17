@@ -3,6 +3,8 @@ const { createProxyMiddleware } = require("http-proxy-middleware");
 
 const config = getDefaultConfig(__dirname);
 
+config.isCSSEnabled = true;
+
 config.server = {
   ...config.server,
   enhanceMiddleware: (middleware) => {
