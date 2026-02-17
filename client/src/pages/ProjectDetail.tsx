@@ -28,6 +28,8 @@ import { cn } from "../lib/utils";
 
 const STAGE_LABELS: Record<string, string> = {
   created: "New",
+  definition_draft: "Definition Draft",
+  definition_approved: "Definition Approved",
   issues_draft: "Issues Draft",
   issues_approved: "Issues Approved",
   hypotheses_draft: "Hypotheses Draft",
@@ -41,6 +43,7 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 const AGENT_COLORS: Record<string, string> = {
+  project_definition: "#F59E0B",
   issues_tree: "#3B82F6",
   mece_critic: "#8B5CF6",
   hypothesis: "#0891B2",

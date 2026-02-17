@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "../lib/query-client";
@@ -14,6 +14,9 @@ import {
   Lock,
   PanelRightClose,
   PanelRightOpen,
+  AlertCircle,
+  Sparkles,
+  User,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -24,6 +27,7 @@ import { Separator } from "../components/ui/separator";
 import { cn } from "../lib/utils";
 
 const AGENT_COLORS: Record<string, string> = {
+  project_definition: "#F59E0B",
   issues_tree: "#3B82F6",
   mece_critic: "#8B5CF6",
   hypothesis: "#0891B2",
@@ -31,6 +35,15 @@ const AGENT_COLORS: Record<string, string> = {
   summary: "#D97706",
   presentation: "#E11D48",
 };
+
+interface ChatMessage {
+  id?: number;
+  role: string;
+  content: string;
+  messageType: string;
+  createdAt?: string;
+  isStreaming?: boolean;
+}
 
 interface StepData {
   step: {
@@ -59,7 +72,10 @@ export default function WorkflowStepWorkspace() {
   const stepIdNum = Number(stepId);
   const [showPanel, setShowPanel] = useState(window.innerWidth >= 640);
   const [chatInput, setChatInput] = useState("");
+  const [streamMessages, setStreamMessages] = useState<ChatMessage[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { data: project } = useQuery<any>({
     queryKey: ["/api/projects", projectId],
@@ -67,7 +83,12 @@ export default function WorkflowStepWorkspace() {
 
   const { data: stepData, isLoading } = useQuery<StepData>({
     queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum],
-    refetchInterval: 3000,
+    refetchInterval: isStreaming ? false : 5000,
+  });
+
+  const { data: chatHistory } = useQuery<ChatMessage[]>({
+    queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum, "chat"],
+    refetchInterval: isStreaming ? false : 5000,
   });
 
   const { data: agentInfo } = useQuery<any>({
@@ -75,14 +96,99 @@ export default function WorkflowStepWorkspace() {
     enabled: !!stepData?.step?.agentKey,
   });
 
-  const runStepMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/projects/${projectId}/workflow/steps/${stepIdNum}/run`);
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [streamMessages, chatHistory]);
+
+  const startStreaming = useCallback(() => {
+    setIsStreaming(true);
+    setStreamMessages([]);
+
+    const eventSource = new EventSource(
+      `/api/projects/${projectId}/workflow/steps/${stepIdNum}/run-stream`
+    );
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        if (data.type === "connected") {
+          setStreamMessages([{
+            role: "assistant",
+            content: "Agent connected. Starting execution...",
+            messageType: "status",
+            isStreaming: true,
+          }]);
+          return;
+        }
+
+        if (data.type === "progress") {
+          setStreamMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: data.content,
+              messageType: "progress",
+              isStreaming: true,
+            },
+          ]);
+          return;
+        }
+
+        if (data.type === "complete") {
+          const result = JSON.parse(data.content);
+          setStreamMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: `Execution complete. Generated: ${result.deliverableTitle}`,
+              messageType: "complete",
+            },
+          ]);
+          setIsStreaming(false);
+          eventSource.close();
+          queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum] });
+          queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId] });
+          queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum, "chat"] });
+          return;
+        }
+
+        if (data.type === "error") {
+          setStreamMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: `Error: ${data.content}`,
+              messageType: "error",
+            },
+          ]);
+          setIsStreaming(false);
+          eventSource.close();
+          queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum] });
+          return;
+        }
+      } catch {}
+    };
+
+    eventSource.onerror = () => {
+      setIsStreaming(false);
+      eventSource.close();
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum, "chat"] });
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  }, [projectId, stepIdNum]);
+
+  const sendChatMutation = useMutation({
+    mutationFn: async (message: string) => {
+      const res = await apiRequest("POST", `/api/projects/${projectId}/workflow/steps/${stepIdNum}/chat`, { message });
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum] });
-      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum, "chat"] });
     },
   });
 
@@ -97,6 +203,20 @@ export default function WorkflowStepWorkspace() {
     },
   });
 
+  const handleSend = () => {
+    const msg = chatInput.trim();
+    if (!msg || sendChatMutation.isPending) return;
+    setChatInput("");
+    sendChatMutation.mutate(msg);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
   if (isLoading || !stepData) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -107,9 +227,61 @@ export default function WorkflowStepWorkspace() {
 
   const { step, deliverables } = stepData;
   const agentColor = AGENT_COLORS[step.agentKey] || "#6B7280";
-  const isRunning = step.status === "running" || runStepMutation.isPending;
   const canRun = step.status === "not_started" || step.status === "failed";
   const canApprove = step.status === "completed";
+  const hasHistory = (chatHistory && chatHistory.length > 0) || streamMessages.length > 0;
+
+  const allMessages: ChatMessage[] = [
+    ...(chatHistory || []),
+    ...streamMessages,
+  ];
+
+  function renderMessageIcon(msg: ChatMessage) {
+    if (msg.role === "user") {
+      return (
+        <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
+          <User size={14} className="text-primary" />
+        </div>
+      );
+    }
+    return (
+      <div
+        className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+        style={{ backgroundColor: agentColor + "20" }}
+      >
+        {msg.messageType === "error" ? (
+          <AlertCircle size={14} className="text-destructive" />
+        ) : msg.messageType === "complete" ? (
+          <CheckCircle size={14} style={{ color: agentColor }} />
+        ) : (
+          <Bot size={14} style={{ color: agentColor }} />
+        )}
+      </div>
+    );
+  }
+
+  function renderMessageContent(msg: ChatMessage) {
+    const isProgress = msg.messageType === "progress" || msg.messageType === "status";
+    const isComplete = msg.messageType === "complete";
+    const isError = msg.messageType === "error";
+
+    return (
+      <div
+        className={cn(
+          "text-sm leading-relaxed",
+          isProgress && "text-muted-foreground",
+          isComplete && "text-green-400 font-medium",
+          isError && "text-destructive font-medium",
+          msg.role === "user" && "text-foreground"
+        )}
+      >
+        {msg.content}
+        {msg.isStreaming && isProgress && (
+          <span className="inline-block ml-1 animate-pulse">...</span>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -140,13 +312,18 @@ export default function WorkflowStepWorkspace() {
             }
             className="text-[10px] sm:text-xs"
           >
-            {step.status}
+            {isStreaming ? "running" : step.status}
           </Badge>
         </div>
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-          {canRun && (
-            <Button size="sm" onClick={() => runStepMutation.mutate()} disabled={isRunning}>
-              {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <><PlayCircle size={14} /> <span className="hidden sm:inline">Run</span></>}
+          {canRun && !isStreaming && (
+            <Button size="sm" onClick={startStreaming}>
+              <PlayCircle size={14} /> <span className="hidden sm:inline">Run</span>
+            </Button>
+          )}
+          {isStreaming && (
+            <Button size="sm" disabled>
+              <Loader2 className="h-4 w-4 animate-spin" /> <span className="hidden sm:inline">Running</span>
             </Button>
           )}
           {canApprove && (
@@ -168,41 +345,102 @@ export default function WorkflowStepWorkspace() {
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6">
-            {step.status === "not_started" && (
+            {!hasHistory && step.status === "not_started" && (
               <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
-                <Bot size={48} strokeWidth={1.5} style={{ color: agentColor }} />
+                <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ backgroundColor: agentColor + "15" }}>
+                  <Sparkles size={32} style={{ color: agentColor }} />
+                </div>
                 <h2 className="text-lg font-semibold text-foreground">Ready to Run</h2>
                 <p className="text-sm text-center max-w-md">
-                  Click "Run" to execute the {step.name} agent. It will analyze your project data and produce deliverables.
+                  Click "Run" to execute the {step.name} agent. Progress will stream here in real-time.
                 </p>
-                <Button onClick={() => runStepMutation.mutate()} disabled={isRunning} className="mt-2">
-                  {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <><PlayCircle size={16} /> Run {step.name}</>}
+                <Button onClick={startStreaming} className="mt-2">
+                  <PlayCircle size={16} /> Run {step.name}
                 </Button>
               </div>
             )}
 
-            {step.status === "running" && (
-              <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
-                <Loader2 className="h-12 w-12 animate-spin" style={{ color: agentColor }} />
-                <h2 className="text-lg font-semibold text-foreground">Agent Running</h2>
-                <p className="text-sm">The {step.name} agent is processing your project data...</p>
-              </div>
-            )}
-
-            {step.status === "failed" && (
+            {!hasHistory && step.status === "failed" && (
               <div className="flex flex-col items-center justify-center h-full gap-3">
                 <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
-                  <Bot size={24} className="text-red-500" />
+                  <AlertCircle size={24} className="text-red-500" />
                 </div>
                 <h2 className="text-lg font-semibold text-foreground">Step Failed</h2>
                 <p className="text-sm text-muted-foreground">The agent encountered an error. You can retry.</p>
-                <Button onClick={() => runStepMutation.mutate()} disabled={isRunning} variant="outline" className="mt-2">
-                  {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <><PlayCircle size={16} /> Retry</>}
+                <Button onClick={startStreaming} variant="outline" className="mt-2">
+                  <PlayCircle size={16} /> Retry
                 </Button>
               </div>
             )}
 
-            {(step.status === "completed" || step.status === "approved") && deliverables.length > 0 && (
+            {hasHistory && (
+              <div className="max-w-3xl mx-auto space-y-4">
+                {allMessages.map((msg, i) => (
+                  <div key={msg.id || `stream-${i}`} className="flex gap-3 items-start">
+                    {renderMessageIcon(msg)}
+                    <div className="flex-1 min-w-0 pt-0.5">
+                      {renderMessageContent(msg)}
+                    </div>
+                  </div>
+                ))}
+
+                {isStreaming && (
+                  <div className="flex gap-3 items-start">
+                    <div
+                      className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: agentColor + "20" }}
+                    >
+                      <Loader2 size={14} className="animate-spin" style={{ color: agentColor }} />
+                    </div>
+                    <div className="text-sm text-muted-foreground pt-0.5">
+                      Working<span className="animate-pulse">...</span>
+                    </div>
+                  </div>
+                )}
+
+                {!isStreaming && deliverables.length > 0 && (step.status === "completed" || step.status === "approved") && (
+                  <div className="border-t border-border pt-4 mt-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <FileText size={16} className="text-primary" />
+                      <span className="text-sm font-semibold">Deliverables</span>
+                    </div>
+                    {deliverables.map((d) => (
+                      <Card key={d.id} className="p-4 mb-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <FileText size={14} className="text-primary" />
+                          <h3 className="font-semibold text-sm flex-1">{d.title}</h3>
+                          <Badge variant="default">v{d.version}</Badge>
+                          {d.locked && (
+                            <Badge variant="default" className="gap-1"><Lock size={10} /> Locked</Badge>
+                          )}
+                        </div>
+                        <div className="bg-muted rounded-lg p-3 text-sm font-mono overflow-auto max-h-[300px] max-w-full">
+                          <pre className="whitespace-pre-wrap text-xs break-words">
+                            {typeof d.contentJson === "string"
+                              ? d.contentJson
+                              : JSON.stringify(d.contentJson, null, 2)}
+                          </pre>
+                        </div>
+                      </Card>
+                    ))}
+
+                    {step.status === "completed" && (
+                      <div className="flex justify-center mt-3">
+                        <Button onClick={() => approveStepMutation.mutate()} disabled={approveStepMutation.isPending}>
+                          {approveStepMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <><Check size={16} /> Approve & Lock Deliverables</>
+                          )}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!hasHistory && (step.status === "completed" || step.status === "approved") && deliverables.length > 0 && (
               <div className="max-w-3xl mx-auto">
                 <div className="flex items-center gap-3 mb-4">
                   <div
@@ -251,7 +489,7 @@ export default function WorkflowStepWorkspace() {
               </div>
             )}
 
-            {(step.status === "completed" || step.status === "approved") && deliverables.length === 0 && (
+            {!hasHistory && (step.status === "completed" || step.status === "approved") && deliverables.length === 0 && (
               <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
                 <CheckCircle size={48} className="text-green-500" />
                 <h2 className="text-lg font-semibold text-foreground">Step Complete</h2>
@@ -262,26 +500,41 @@ export default function WorkflowStepWorkspace() {
             <div ref={messagesEndRef} />
           </div>
 
-          <div className="border-t border-border p-4">
+          <div className="border-t border-border p-3 sm:p-4">
             <div className="flex items-end gap-2 max-w-3xl mx-auto">
               <Textarea
-                className="flex-1 resize-none min-h-[40px]"
-                placeholder={`Ask the ${step.name} agent...`}
+                ref={textareaRef}
+                className="flex-1 resize-none min-h-[40px] max-h-[120px]"
+                placeholder={
+                  isStreaming
+                    ? "Agent is running..."
+                    : step.status === "not_started"
+                    ? "Run the agent first, then ask follow-up questions here"
+                    : `Ask the ${step.name} agent a question...`
+                }
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={handleKeyDown}
                 rows={1}
-                disabled
+                disabled={isStreaming || step.status === "not_started"}
               />
-              <Button size="icon" disabled>
-                <Send size={18} />
+              <Button
+                size="icon"
+                onClick={handleSend}
+                disabled={!chatInput.trim() || sendChatMutation.isPending || isStreaming || step.status === "not_started"}
+              >
+                {sendChatMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send size={18} />
+                )}
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground text-center mt-1">Agent chat coming soon</p>
           </div>
         </div>
 
         {showPanel && (
-          <div className="w-[320px] border-l border-border bg-muted/30 overflow-y-auto shrink-0">
+          <div className="w-[320px] border-l border-border bg-muted/30 overflow-y-auto shrink-0 hidden sm:block">
             <div className="p-4">
               <h3 className="font-semibold text-sm mb-3">Deliverables</h3>
               {deliverables.length === 0 ? (
@@ -336,4 +589,3 @@ export default function WorkflowStepWorkspace() {
     </div>
   );
 }
-

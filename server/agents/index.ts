@@ -2,6 +2,9 @@ import OpenAI from "openai";
 import { runScenarioTool, type ScenarioInput, type ScenarioOutput } from "./scenario-tool";
 import { storage } from "../storage";
 
+export type ProgressCallback = (message: string, type?: string) => void;
+const noopProgress: ProgressCallback = () => {};
+
 const hasApiKey = !!(
   process.env.AI_INTEGRATIONS_OPENAI_API_KEY &&
   process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
@@ -407,10 +410,13 @@ export interface ProjectDefinitionOutput {
 
 export async function projectDefinitionAgent(
   objective: string,
-  constraints: string
+  constraints: string,
+  onProgress: ProgressCallback = noopProgress
 ): Promise<ProjectDefinitionOutput> {
+  onProgress("Starting Project Definition agent...", "status");
   if (!openai) {
-    return {
+    onProgress("Running in mock mode (no API key configured)", "status");
+    const result: ProjectDefinitionOutput = {
       decision_statement: `Determine the optimal strategic approach to: ${objective}`,
       governing_question: `Should we pursue the proposed strategy in order to achieve ${objective}, given ${constraints || "current resource constraints"}, by the next 12-month planning cycle?`,
       decision_owner: "Executive Leadership / Project Sponsor",
@@ -453,26 +459,34 @@ export async function projectDefinitionAgent(
         "Regulatory timeline for any required approvals",
       ],
     };
+    onProgress("Analysis complete. Generated project definition with " + result.success_metrics.length + " success metrics.", "status");
+    return result;
   }
 
   const systemPrompt = await getAgentPrompt("project_definition");
   const model = await getAgentModel("project_definition");
   const maxTokens = await getAgentMaxTokens("project_definition");
 
+  onProgress(`Calling LLM with model ${model}...`, "llm");
   const userPrompt = `Project Objective: ${objective}\n\nConstraints & Context: ${constraints}`;
   const raw = await callLLM(systemPrompt, userPrompt, model, maxTokens);
-  return extractJson(raw);
+  onProgress("LLM response received, parsing output...", "llm");
+  const parsed = extractJson(raw);
+  onProgress("Analysis complete. Generated project definition with " + (parsed.success_metrics?.length || 0) + " success metrics.", "status");
+  return parsed;
 }
 
 const MAX_REVISIONS = 2;
 
 export async function issuesTreeAgent(
   objective: string,
-  constraints: string
+  constraints: string,
+  onProgress: ProgressCallback = noopProgress
 ): Promise<{ issues: IssueNodeOutput[]; criticLog: { iteration: number; critic: CriticResult }[] }> {
+  onProgress("Starting Issues Tree agent...", "status");
   if (!openai) {
-    return {
-      issues: [
+    onProgress("Running in mock mode (no API key configured)", "status");
+    const mockIssues: IssueNodeOutput[] = [
         { id: "1", parentId: null, text: "Market Entry Strategy", priority: "high" },
         { id: "2", parentId: "1", text: "Target Market Sizing", priority: "high" },
         { id: "3", parentId: "2", text: "Addressable Market Segments", priority: "high" },
@@ -494,11 +508,13 @@ export async function issuesTreeAgent(
         { id: "19", parentId: "15", text: "Technology Infrastructure", priority: "low" },
         { id: "20", parentId: "19", text: "Platform Architecture", priority: "low" },
         { id: "21", parentId: "19", text: "Data Pipeline Setup", priority: "medium" },
-      ],
+    ];
+    const mockResult = {
+      issues: mockIssues,
       criticLog: [{
         iteration: 0,
         critic: {
-          verdict: "approved",
+          verdict: "approved" as const,
           scores: {
             overlap: { score: 5, details: "No overlap between sibling branches" },
             coverage: { score: 4, details: "Key dimensions covered: market, revenue, operations" },
@@ -511,6 +527,8 @@ export async function issuesTreeAgent(
         },
       }],
     };
+    onProgress("Analysis complete. Generated " + mockResult.issues.length + " issue nodes.", "status");
+    return mockResult;
   }
 
   const generatorPrompt = await getAgentPrompt("issues_tree");
@@ -524,10 +542,13 @@ export async function issuesTreeAgent(
   const criticLog: { iteration: number; critic: CriticResult }[] = [];
 
   let currentTree: { issues: IssueNodeOutput[] };
+  onProgress(`Calling LLM with model ${generatorModel}...`, "llm");
   let raw = await callLLM(generatorPrompt, baseUserPrompt, generatorModel, generatorMaxTokens);
+  onProgress("LLM response received, parsing output...", "llm");
   currentTree = extractJson(raw);
 
   for (let iteration = 0; iteration <= MAX_REVISIONS; iteration++) {
+    onProgress(`Running MECE Critic evaluation (iteration ${iteration + 1})...`, "critic");
     const treeDescription = formatTreeForCritic(currentTree.issues, objective);
     const criticRaw = await callLLM(criticPrompt, treeDescription, criticModel, criticMaxTokens);
 
@@ -550,17 +571,20 @@ export async function issuesTreeAgent(
     }
 
     criticLog.push({ iteration, critic: criticResult });
+    onProgress(`Critic verdict: ${criticResult.verdict}, score: ${criticResult.overallScore}/5`, "critic");
 
     if (criticResult.verdict === "approved" || iteration === MAX_REVISIONS) {
       break;
     }
 
+    onProgress("Revising tree based on critic feedback...", "critic");
     const revisionPrompt = `${baseUserPrompt}\n\n---\nPREVIOUS TREE (needs revision):\n${formatTreeForCritic(currentTree.issues, objective)}\n\n---\nMECE CRITIC FEEDBACK (iteration ${iteration + 1}):\nOverall Score: ${criticResult.overallScore}/5\nOverlap: ${criticResult.scores.overlap.score}/5 — ${criticResult.scores.overlap.details}\nCoverage: ${criticResult.scores.coverage.score}/5 — ${criticResult.scores.coverage.details}\nMixed Logics: ${criticResult.scores.mixedLogics.score}/5 — ${criticResult.scores.mixedLogics.details}\nBranch Balance: ${criticResult.scores.branchBalance.score}/5 — ${criticResult.scores.branchBalance.details}\nLabel Quality: ${criticResult.scores.labelQuality.score}/5 — ${criticResult.scores.labelQuality.details}\n\nREVISION INSTRUCTIONS:\n${criticResult.revisionInstructions}\n\nPlease produce a REVISED issues tree that addresses ALL the critic's feedback. Return the full tree in the same JSON format.`;
 
     raw = await callLLM(generatorPrompt, revisionPrompt, generatorModel, generatorMaxTokens);
     currentTree = extractJson(raw);
   }
 
+  onProgress("Analysis complete. Generated " + currentTree.issues.length + " issue nodes.", "status");
   return { ...currentTree, criticLog };
 }
 
@@ -580,12 +604,15 @@ export interface AnalysisPlanOutput {
 }
 
 export async function hypothesisAgent(
-  issues: { id: number; text: string; priority: string }[]
+  issues: { id: number; text: string; priority: string }[],
+  onProgress: ProgressCallback = noopProgress
 ): Promise<{
   hypotheses: HypothesisOutput[];
   analysisPlan: AnalysisPlanOutput[];
 }> {
+  onProgress("Starting Hypothesis agent...", "status");
   if (!openai) {
+    onProgress("Running in mock mode (no API key configured)", "status");
     const topIssues = issues.slice(0, 3);
     const hyps: HypothesisOutput[] = topIssues.map((issue, i) => ({
       issueNodeId: String(issue.id),
@@ -608,6 +635,7 @@ export async function hypothesisAgent(
       requiredDataset: "Financial projections + market data",
     }));
 
+    onProgress("Analysis complete. Generated " + hyps.length + " hypotheses.", "status");
     return { hypotheses: hyps, analysisPlan: plans };
   }
 
@@ -617,16 +645,24 @@ export async function hypothesisAgent(
   const model = await getAgentModel("hypothesis");
   const maxTokens = await getAgentMaxTokens("hypothesis");
 
+  onProgress(`Calling LLM with model ${model}...`, "llm");
   const raw = await callLLM(systemPrompt, `Issues:\n${issuesList}`, model, maxTokens);
-  return extractJson(raw);
+  onProgress("LLM response received, parsing output...", "llm");
+  const parsed = extractJson(raw);
+  onProgress("Analysis complete. Generated " + (parsed.hypotheses?.length || 0) + " hypotheses.", "status");
+  return parsed;
 }
 
 export async function executionAgent(
-  plans: { method: string; parameters: any; requiredDataset: string }[]
+  plans: { method: string; parameters: any; requiredDataset: string }[],
+  onProgress: ProgressCallback = noopProgress
 ): Promise<{ toolName: string; inputs: ScenarioInput; outputs: ScenarioOutput }[]> {
+  onProgress("Starting Execution agent...", "status");
   const results: { toolName: string; inputs: ScenarioInput; outputs: ScenarioOutput }[] = [];
 
-  for (const plan of plans) {
+  for (let idx = 0; idx < plans.length; idx++) {
+    const plan = plans[idx];
+    onProgress(`Running scenario ${idx + 1} of ${plans.length}...`, "status");
     const params: ScenarioInput = {
       baselineRevenue: plan.parameters.baselineRevenue || 1000000,
       growthRate: plan.parameters.growthRate || 0.1,
@@ -643,6 +679,7 @@ export async function executionAgent(
     });
   }
 
+  onProgress("Analysis complete. Generated " + results.length + " scenario results.", "status");
   return results;
 }
 
@@ -650,9 +687,12 @@ export async function summaryAgent(
   objective: string,
   constraints: string,
   hypotheses: { statement: string; metric: string }[],
-  modelRuns: { inputsJson: any; outputsJson: any }[]
+  modelRuns: { inputsJson: any; outputsJson: any }[],
+  onProgress: ProgressCallback = noopProgress
 ): Promise<{ summaryText: string }> {
+  onProgress("Starting Summary agent...", "status");
   if (!openai) {
+    onProgress("Running in mock mode (no API key configured)", "status");
     const bullets = hypotheses
       .map((h, i) => {
         const run = modelRuns[i];
@@ -664,6 +704,7 @@ export async function summaryAgent(
       })
       .join("\n");
 
+    onProgress("Analysis complete. Generated executive summary.", "status");
     return {
       summaryText: `# Executive Summary\n\n## Objective\n${objective}\n\n## Key Findings\n${bullets}\n\n## Recommendation\nBased on scenario analysis across baseline, optimistic, and pessimistic cases, the proposed strategy shows positive expected returns. The risk-adjusted analysis suggests proceeding with a phased implementation approach, prioritizing the highest-NPV initiatives first.\n\n## Next Steps\n1. Validate assumptions with stakeholder interviews\n2. Develop detailed implementation roadmap\n3. Establish KPI tracking framework\n4. Begin Phase 1 execution within 30 days`,
     };
@@ -680,8 +721,11 @@ export async function summaryAgent(
   const model = await getAgentModel("summary");
   const maxTokens = await getAgentMaxTokens("summary");
 
+  onProgress(`Calling LLM with model ${model}...`, "llm");
   const userPrompt = `Objective: ${objective}\nConstraints: ${constraints}\n\nHypotheses & Results:\n${hypList}`;
   const summaryText = await callLLM(systemPrompt, userPrompt, model, maxTokens);
+  onProgress("LLM response received, parsing output...", "llm");
+  onProgress("Analysis complete. Generated executive summary.", "status");
 
   return { summaryText: summaryText || "Summary generation failed." };
 }
@@ -700,9 +744,12 @@ export async function presentationAgent(
   objective: string,
   summaryText: string,
   hypotheses: { statement: string; metric: string }[],
-  modelRuns: { inputsJson: any; outputsJson: any }[]
+  modelRuns: { inputsJson: any; outputsJson: any }[],
+  onProgress: ProgressCallback = noopProgress
 ): Promise<{ slides: SlideOutput[] }> {
+  onProgress("Starting Presentation agent...", "status");
   if (!openai) {
+    onProgress("Running in mock mode (no API key configured)", "status");
     const mockSlides: SlideOutput[] = [
       {
         slideIndex: 0,
@@ -825,6 +872,7 @@ export async function presentationAgent(
       },
     ];
 
+    onProgress("Analysis complete. Generated " + mockSlides.length + " slides.", "status");
     return { slides: mockSlides };
   }
 
@@ -842,9 +890,13 @@ export async function presentationAgent(
   const model = await getAgentModel("presentation");
   const maxTokens = await getAgentMaxTokens("presentation");
 
+  onProgress(`Calling LLM with model ${model}...`, "llm");
   const userPrompt = `Project: ${projectName}\nObjective: ${objective}\n\nExecutive Summary:\n${summaryText}\n\nHypotheses & Results:\n${hypSummary}`;
   const raw = await callLLM(systemPrompt, userPrompt, model, maxTokens);
-  return extractJson(raw);
+  onProgress("LLM response received, parsing output...", "llm");
+  const parsed = extractJson(raw);
+  onProgress("Analysis complete. Generated " + (parsed.slides?.length || 0) + " slides.", "status");
+  return parsed;
 }
 
 export { getModelUsed, runScenarioTool };
