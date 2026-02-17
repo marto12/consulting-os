@@ -18,18 +18,26 @@ import pg from "pg";
 var schema_exports = {};
 __export(schema_exports, {
   agentConfigs: () => agentConfigs,
+  agents: () => agents,
   analysisPlan: () => analysisPlan,
   conversations: () => conversations,
+  datasets: () => datasets,
+  deliverables: () => deliverables,
   hypotheses: () => hypotheses,
   insertProjectSchema: () => insertProjectSchema,
   issueNodes: () => issueNodes,
   messages: () => messages,
   modelRuns: () => modelRuns,
+  models: () => models,
   narratives: () => narratives,
   pipelineConfigs: () => pipelineConfigs,
   projects: () => projects,
   runLogs: () => runLogs,
-  slides: () => slides
+  slides: () => slides,
+  workflowInstanceSteps: () => workflowInstanceSteps,
+  workflowInstances: () => workflowInstances,
+  workflowTemplateSteps: () => workflowTemplateSteps,
+  workflowTemplates: () => workflowTemplates
 });
 import { sql } from "drizzle-orm";
 import {
@@ -38,17 +46,109 @@ import {
   text,
   integer,
   timestamp,
-  jsonb
+  jsonb,
+  boolean
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
+var workflowTemplates = pgTable("workflow_templates", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+var workflowTemplateSteps = pgTable("workflow_template_steps", {
+  id: serial("id").primaryKey(),
+  workflowTemplateId: integer("workflow_template_id").notNull().references(() => workflowTemplates.id, { onDelete: "cascade" }),
+  stepOrder: integer("step_order").notNull(),
+  name: text("name").notNull(),
+  agentKey: text("agent_key").notNull(),
+  description: text("description").notNull().default(""),
+  configJson: jsonb("config_json"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+var agents = pgTable("agents", {
+  id: serial("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  role: text("role").notNull().default(""),
+  roleColor: text("role_color").notNull().default("#3B82F6"),
+  promptTemplate: text("prompt_template").notNull().default(""),
+  inputSchema: jsonb("input_schema"),
+  outputSchema: jsonb("output_schema"),
+  toolRefs: jsonb("tool_refs").default(sql`'[]'::jsonb`),
+  datasetRefs: jsonb("dataset_refs").default(sql`'[]'::jsonb`),
+  modelRefs: jsonb("model_refs").default(sql`'[]'::jsonb`),
+  model: text("model").notNull().default("gpt-5-nano"),
+  maxTokens: integer("max_tokens").notNull().default(8192),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+var datasets = pgTable("datasets", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  owner: text("owner").notNull().default("system"),
+  accessLevel: text("access_level").notNull().default("private"),
+  schemaJson: jsonb("schema_json"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+var models = pgTable("models", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  inputSchema: jsonb("input_schema"),
+  outputSchema: jsonb("output_schema"),
+  apiConfig: jsonb("api_config"),
+  linkedWorkflowIds: jsonb("linked_workflow_ids").default(sql`'[]'::jsonb`),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
 var projects = pgTable("projects", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   objective: text("objective").notNull(),
   constraints: text("constraints").notNull(),
   stage: text("stage").notNull().default("created"),
+  workflowTemplateId: integer("workflow_template_id"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+var workflowInstances = pgTable("workflow_instances", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  workflowTemplateId: integer("workflow_template_id").notNull(),
+  currentStepOrder: integer("current_step_order").notNull().default(0),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+var workflowInstanceSteps = pgTable("workflow_instance_steps", {
+  id: serial("id").primaryKey(),
+  workflowInstanceId: integer("workflow_instance_id").notNull().references(() => workflowInstances.id, { onDelete: "cascade" }),
+  stepOrder: integer("step_order").notNull(),
+  name: text("name").notNull(),
+  agentKey: text("agent_key").notNull(),
+  status: text("status").notNull().default("not_started"),
+  configJson: jsonb("config_json"),
+  outputSummary: jsonb("output_summary"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+var deliverables = pgTable("deliverables", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  stepId: integer("step_id").notNull().references(() => workflowInstanceSteps.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  contentJson: jsonb("content_json").notNull(),
+  version: integer("version").notNull().default(1),
+  locked: boolean("locked").notNull().default(false),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
 var issueNodes = pgTable("issue_nodes", {
   id: serial("id").primaryKey(),
@@ -128,6 +228,7 @@ var agentConfigs = pgTable("agent_configs", {
 var conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
   title: text("title").notNull(),
+  projectId: integer("project_id"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
 var messages = pgTable("messages", {
@@ -161,7 +262,7 @@ var pool = new pg.Pool({
 var db = drizzle(pool, { schema: schema_exports });
 
 // server/storage.ts
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, asc } from "drizzle-orm";
 var storage = {
   async createProject(data) {
     const [project] = await db.insert(projects).values({ ...data, stage: "created" }).returning();
@@ -177,6 +278,181 @@ var storage = {
   async updateProjectStage(id, stage) {
     const [project] = await db.update(projects).set({ stage, updatedAt: /* @__PURE__ */ new Date() }).where(eq(projects.id, id)).returning();
     return project;
+  },
+  async createWorkflowTemplate(data) {
+    const [template] = await db.insert(workflowTemplates).values({ name: data.name, description: data.description || "" }).returning();
+    return template;
+  },
+  async listWorkflowTemplates() {
+    return db.select().from(workflowTemplates).orderBy(desc(workflowTemplates.updatedAt));
+  },
+  async getWorkflowTemplate(id) {
+    const [template] = await db.select().from(workflowTemplates).where(eq(workflowTemplates.id, id));
+    return template;
+  },
+  async updateWorkflowTemplate(id, data) {
+    const [template] = await db.update(workflowTemplates).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(workflowTemplates.id, id)).returning();
+    return template;
+  },
+  async getWorkflowTemplateSteps(templateId) {
+    return db.select().from(workflowTemplateSteps).where(eq(workflowTemplateSteps.workflowTemplateId, templateId)).orderBy(asc(workflowTemplateSteps.stepOrder));
+  },
+  async addWorkflowTemplateStep(data) {
+    const [step] = await db.insert(workflowTemplateSteps).values({
+      workflowTemplateId: data.workflowTemplateId,
+      stepOrder: data.stepOrder,
+      name: data.name,
+      agentKey: data.agentKey,
+      description: data.description || "",
+      configJson: data.configJson || null
+    }).returning();
+    return step;
+  },
+  async deleteWorkflowTemplateStep(id) {
+    await db.delete(workflowTemplateSteps).where(eq(workflowTemplateSteps.id, id));
+  },
+  async listAgents() {
+    return db.select().from(agents).orderBy(asc(agents.key));
+  },
+  async getAgent(id) {
+    const [agent] = await db.select().from(agents).where(eq(agents.id, id));
+    return agent;
+  },
+  async getAgentByKey(key) {
+    const [agent] = await db.select().from(agents).where(eq(agents.key, key));
+    return agent;
+  },
+  async upsertAgent(data) {
+    const existing = await this.getAgentByKey(data.key);
+    if (existing) {
+      const [updated] = await db.update(agents).set({
+        name: data.name,
+        description: data.description ?? existing.description,
+        role: data.role ?? existing.role,
+        roleColor: data.roleColor ?? existing.roleColor,
+        promptTemplate: data.promptTemplate ?? existing.promptTemplate,
+        model: data.model ?? existing.model,
+        maxTokens: data.maxTokens ?? existing.maxTokens,
+        inputSchema: data.inputSchema ?? existing.inputSchema,
+        outputSchema: data.outputSchema ?? existing.outputSchema,
+        toolRefs: data.toolRefs ?? existing.toolRefs,
+        datasetRefs: data.datasetRefs ?? existing.datasetRefs,
+        modelRefs: data.modelRefs ?? existing.modelRefs,
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where(eq(agents.key, data.key)).returning();
+      return updated;
+    }
+    const [created] = await db.insert(agents).values({
+      key: data.key,
+      name: data.name,
+      description: data.description || "",
+      role: data.role || "",
+      roleColor: data.roleColor || "#3B82F6",
+      promptTemplate: data.promptTemplate || "",
+      model: data.model || "gpt-5-nano",
+      maxTokens: data.maxTokens || 8192,
+      inputSchema: data.inputSchema || null,
+      outputSchema: data.outputSchema || null,
+      toolRefs: data.toolRefs || [],
+      datasetRefs: data.datasetRefs || [],
+      modelRefs: data.modelRefs || []
+    }).returning();
+    return created;
+  },
+  async listDatasets() {
+    return db.select().from(datasets).orderBy(desc(datasets.createdAt));
+  },
+  async getDataset(id) {
+    const [d] = await db.select().from(datasets).where(eq(datasets.id, id));
+    return d;
+  },
+  async createDataset(data) {
+    const [d] = await db.insert(datasets).values({
+      name: data.name,
+      description: data.description || "",
+      owner: data.owner || "system",
+      accessLevel: data.accessLevel || "private",
+      schemaJson: data.schemaJson || null,
+      metadata: data.metadata || null
+    }).returning();
+    return d;
+  },
+  async listModels() {
+    return db.select().from(models).orderBy(desc(models.createdAt));
+  },
+  async getModel(id) {
+    const [m] = await db.select().from(models).where(eq(models.id, id));
+    return m;
+  },
+  async createModel(data) {
+    const [m] = await db.insert(models).values({
+      name: data.name,
+      description: data.description || "",
+      inputSchema: data.inputSchema || null,
+      outputSchema: data.outputSchema || null,
+      apiConfig: data.apiConfig || null
+    }).returning();
+    return m;
+  },
+  async createWorkflowInstance(data) {
+    const [instance] = await db.insert(workflowInstances).values({
+      projectId: data.projectId,
+      workflowTemplateId: data.workflowTemplateId,
+      currentStepOrder: 0,
+      status: "active"
+    }).returning();
+    if (data.steps.length > 0) {
+      await db.insert(workflowInstanceSteps).values(
+        data.steps.map((s) => ({
+          workflowInstanceId: instance.id,
+          stepOrder: s.stepOrder,
+          name: s.name,
+          agentKey: s.agentKey,
+          status: "not_started",
+          configJson: s.configJson || null
+        }))
+      );
+    }
+    return instance;
+  },
+  async getWorkflowInstance(projectId) {
+    const [instance] = await db.select().from(workflowInstances).where(eq(workflowInstances.projectId, projectId)).orderBy(desc(workflowInstances.createdAt));
+    return instance;
+  },
+  async getWorkflowInstanceSteps(instanceId) {
+    return db.select().from(workflowInstanceSteps).where(eq(workflowInstanceSteps.workflowInstanceId, instanceId)).orderBy(asc(workflowInstanceSteps.stepOrder));
+  },
+  async getWorkflowInstanceStep(stepId) {
+    const [step] = await db.select().from(workflowInstanceSteps).where(eq(workflowInstanceSteps.id, stepId));
+    return step;
+  },
+  async updateWorkflowInstanceStep(stepId, data) {
+    const [step] = await db.update(workflowInstanceSteps).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(workflowInstanceSteps.id, stepId)).returning();
+    return step;
+  },
+  async updateWorkflowInstanceCurrentStep(instanceId, stepOrder) {
+    const [instance] = await db.update(workflowInstances).set({ currentStepOrder: stepOrder, updatedAt: /* @__PURE__ */ new Date() }).where(eq(workflowInstances.id, instanceId)).returning();
+    return instance;
+  },
+  async createDeliverable(data) {
+    const [d] = await db.insert(deliverables).values({
+      projectId: data.projectId,
+      stepId: data.stepId,
+      title: data.title,
+      contentJson: data.contentJson,
+      version: data.version || 1,
+      locked: false
+    }).returning();
+    return d;
+  },
+  async getDeliverables(projectId) {
+    return db.select().from(deliverables).where(eq(deliverables.projectId, projectId)).orderBy(desc(deliverables.createdAt));
+  },
+  async getStepDeliverables(stepId) {
+    return db.select().from(deliverables).where(eq(deliverables.stepId, stepId)).orderBy(desc(deliverables.version));
+  },
+  async lockDeliverables(stepId) {
+    await db.update(deliverables).set({ locked: true }).where(eq(deliverables.stepId, stepId));
   },
   async getLatestIssueVersion(projectId) {
     const nodes = await db.select().from(issueNodes).where(eq(issueNodes.projectId, projectId)).orderBy(desc(issueNodes.version));
@@ -359,8 +635,8 @@ var openai = new OpenAI({
 function registerChatRoutes(app2) {
   app2.get("/api/conversations", async (req, res) => {
     try {
-      const conversations2 = await chatStorage.getAllConversations();
-      res.json(conversations2);
+      const conversations3 = await chatStorage.getAllConversations();
+      res.json(conversations3);
     } catch (error) {
       console.error("Error fetching conversations:", error);
       res.status(500).json({ error: "Failed to fetch conversations" });
@@ -373,8 +649,8 @@ function registerChatRoutes(app2) {
       if (!conversation) {
         return res.status(404).json({ error: "Conversation not found" });
       }
-      const messages2 = await chatStorage.getMessagesByConversation(id);
-      res.json({ ...conversation, messages: messages2 });
+      const messages3 = await chatStorage.getMessagesByConversation(id);
+      res.json({ ...conversation, messages: messages3 });
     } catch (error) {
       console.error("Error fetching conversation:", error);
       res.status(500).json({ error: "Failed to fetch conversation" });
@@ -405,8 +681,8 @@ function registerChatRoutes(app2) {
       const conversationId = parseInt(req.params.id);
       const { content } = req.body;
       await chatStorage.createMessage(conversationId, "user", content);
-      const messages2 = await chatStorage.getMessagesByConversation(conversationId);
-      const chatMessages = messages2.map((m) => ({
+      const messages3 = await chatStorage.getMessagesByConversation(conversationId);
+      const chatMessages = messages3.map((m) => ({
         role: m.role,
         content: m.content
       }));
@@ -696,7 +972,7 @@ async function callLLM(systemPrompt, userPrompt, model, maxTokens, retries = 1) 
   const resolvedModel = model || DEFAULT_MODEL;
   const resolvedTokens = maxTokens || 8192;
   for (let attempt = 0; attempt <= retries; attempt++) {
-    const messages2 = [
+    const messages3 = [
       { role: "system", content: systemPrompt },
       {
         role: "user",
@@ -707,7 +983,7 @@ IMPORTANT: Your previous response was truncated. Please produce a SHORTER, more 
     ];
     const response = await openai2.chat.completions.create({
       model: resolvedModel,
-      messages: messages2,
+      messages: messages3,
       max_completion_tokens: resolvedTokens
     });
     const content = response.choices[0]?.message?.content || "";
@@ -1162,14 +1438,68 @@ var RUN_NEXT_MAP = {
   execution_approved: "summary_draft",
   summary_approved: "presentation_draft"
 };
+var DEFAULT_AGENTS = [
+  { key: "issues_tree", name: "Issues Tree", role: "Generator", roleColor: "#3B82F6", description: "Builds MECE issues tree from project objective" },
+  { key: "mece_critic", name: "MECE Critic", role: "Quality Gate", roleColor: "#8B5CF6", description: "Validates MECE structure and compliance" },
+  { key: "hypothesis", name: "Hypothesis", role: "Analyst", roleColor: "#0891B2", description: "Generates testable hypotheses and analysis plans" },
+  { key: "execution", name: "Execution", role: "Tool Caller", roleColor: "#059669", description: "Runs scenario analysis with calculator tool" },
+  { key: "summary", name: "Summary", role: "Synthesizer", roleColor: "#D97706", description: "Synthesizes findings into executive summary" },
+  { key: "presentation", name: "Presentation", role: "Designer", roleColor: "#E11D48", description: "Creates professional slide deck" }
+];
+var DEFAULT_WORKFLOW_STEPS = [
+  { stepOrder: 1, name: "Issues Tree", agentKey: "issues_tree" },
+  { stepOrder: 2, name: "Hypotheses & Analysis Plan", agentKey: "hypothesis" },
+  { stepOrder: 3, name: "Execution", agentKey: "execution" },
+  { stepOrder: 4, name: "Executive Summary", agentKey: "summary" },
+  { stepOrder: 5, name: "Presentation", agentKey: "presentation" }
+];
+async function ensureDefaults() {
+  for (const a of DEFAULT_AGENTS) {
+    await storage.upsertAgent(a);
+  }
+  const templates = await storage.listWorkflowTemplates();
+  if (templates.length === 0) {
+    const template = await storage.createWorkflowTemplate({
+      name: "Consulting Analysis",
+      description: "Standard consulting workflow: Issues Tree -> Hypotheses -> Execution -> Summary -> Presentation"
+    });
+    for (const step of DEFAULT_WORKFLOW_STEPS) {
+      await storage.addWorkflowTemplateStep({
+        workflowTemplateId: template.id,
+        ...step
+      });
+    }
+  }
+}
 async function registerRoutes(app2) {
+  await ensureDefaults();
   app2.post("/api/projects", async (req, res) => {
     try {
-      const { name, objective, constraints } = req.body;
+      const { name, objective, constraints, workflowTemplateId } = req.body;
       if (!name || !objective || !constraints) {
         return res.status(400).json({ error: "name, objective, and constraints are required" });
       }
-      const project = await storage.createProject({ name, objective, constraints });
+      const templates = await storage.listWorkflowTemplates();
+      const templateId = workflowTemplateId || templates[0]?.id;
+      const project = await storage.createProject({
+        name,
+        objective,
+        constraints,
+        workflowTemplateId: templateId || null
+      });
+      if (templateId) {
+        const templateSteps = await storage.getWorkflowTemplateSteps(templateId);
+        await storage.createWorkflowInstance({
+          projectId: project.id,
+          workflowTemplateId: templateId,
+          steps: templateSteps.map((s) => ({
+            stepOrder: s.stepOrder,
+            name: s.name,
+            agentKey: s.agentKey,
+            configJson: s.configJson
+          }))
+        });
+      }
       res.status(201).json(project);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -1192,41 +1522,75 @@ async function registerRoutes(app2) {
       res.status(500).json({ error: err.message });
     }
   });
-  app2.post("/api/projects/:id/run-next", async (req, res) => {
+  app2.get("/api/projects/:id/workflow", async (req, res) => {
     try {
       const projectId = Number(req.params.id);
+      const instance = await storage.getWorkflowInstance(projectId);
+      if (!instance) return res.json({ instance: null, steps: [] });
+      const steps = await storage.getWorkflowInstanceSteps(instance.id);
+      res.json({ instance, steps });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/projects/:id/deliverables", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const dels = await storage.getDeliverables(projectId);
+      res.json(dels);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/projects/:id/run-logs", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const logs = await storage.getRunLogs(projectId);
+      res.json(logs);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/projects/:id/workflow/steps/:stepId", async (req, res) => {
+    try {
+      const stepId = Number(req.params.stepId);
+      const step = await storage.getWorkflowInstanceStep(stepId);
+      if (!step) return res.status(404).json({ error: "Step not found" });
+      const stepDeliverables = await storage.getStepDeliverables(stepId);
+      res.json({ step, deliverables: stepDeliverables });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/projects/:id/workflow/steps/:stepId/run", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const stepId = Number(req.params.stepId);
       const project = await storage.getProject(projectId);
-      if (!project) return res.status(404).json({ error: "Not found" });
-      const nextStage = RUN_NEXT_MAP[project.stage];
-      if (!nextStage) {
-        return res.status(400).json({
-          error: `Cannot run next stage from "${project.stage}". Current stage must be approved first or workflow is complete.`
-        });
-      }
+      if (!project) return res.status(404).json({ error: "Project not found" });
+      const step = await storage.getWorkflowInstanceStep(stepId);
+      if (!step) return res.status(404).json({ error: "Step not found" });
+      await storage.updateWorkflowInstanceStep(stepId, { status: "running" });
       const modelUsed = getModelUsed();
       const runLog = await storage.insertRunLog(
         projectId,
-        nextStage,
-        { currentStage: project.stage },
+        step.agentKey,
+        { stepId, agentKey: step.agentKey },
         modelUsed
       );
       try {
-        if (nextStage === "issues_draft") {
+        let deliverableContent = null;
+        let deliverableTitle = step.name;
+        if (step.agentKey === "issues_tree") {
           const result = await issuesTreeAgent(project.objective, project.constraints);
           const version = await storage.getLatestIssueVersion(projectId) + 1;
           const idMap = /* @__PURE__ */ new Map();
           let remaining = [...result.issues];
-          let inserted = 0;
-          const maxPasses = 10;
           let pass = 0;
-          while (remaining.length > 0 && pass < maxPasses) {
+          while (remaining.length > 0 && pass < 10) {
             pass++;
-            const canInsert = remaining.filter(
-              (n) => !n.parentId || idMap.has(n.parentId)
-            );
-            const cannotInsert = remaining.filter(
-              (n) => n.parentId && !idMap.has(n.parentId)
-            );
+            const canInsert = remaining.filter((n) => !n.parentId || idMap.has(n.parentId));
+            const cannotInsert = remaining.filter((n) => n.parentId && !idMap.has(n.parentId));
             if (canInsert.length === 0) break;
             const insertedNodes = await storage.insertIssueNodes(
               projectId,
@@ -1242,20 +1606,14 @@ async function registerRoutes(app2) {
             });
             remaining = cannotInsert;
           }
-          await storage.updateRunLog(runLog.id, result, "success");
-        } else if (nextStage === "hypotheses_draft") {
+          deliverableContent = result;
+          deliverableTitle = "Issues Tree";
+          await storage.updateProjectStage(projectId, "issues_draft");
+        } else if (step.agentKey === "hypothesis") {
           const issueNodesData = await storage.getIssueNodes(projectId);
           const latestVersion = issueNodesData[0]?.version || 1;
-          const latestIssues = issueNodesData.filter(
-            (n) => n.version === latestVersion
-          );
-          const result = await hypothesisAgent(
-            latestIssues.map((n) => ({
-              id: n.id,
-              text: n.text,
-              priority: n.priority
-            }))
-          );
+          const latestIssues = issueNodesData.filter((n) => n.version === latestVersion);
+          const result = await hypothesisAgent(latestIssues.map((n) => ({ id: n.id, text: n.text, priority: n.priority })));
           const version = await storage.getLatestHypothesisVersion(projectId) + 1;
           const insertedHyps = await storage.insertHypotheses(
             projectId,
@@ -1277,23 +1635,197 @@ async function registerRoutes(app2) {
               requiredDataset: p.requiredDataset
             }))
           );
-          await storage.updateRunLog(runLog.id, result, "success");
-        } else if (nextStage === "execution_done") {
+          deliverableContent = result;
+          deliverableTitle = "Hypotheses & Analysis Plan";
+          await storage.updateProjectStage(projectId, "hypotheses_draft");
+        } else if (step.agentKey === "execution") {
           const plans = await storage.getAnalysisPlan(projectId);
           const results = await executionAgent(
-            plans.map((p) => ({
+            plans.map((p) => ({ method: p.method, parameters: p.parametersJson, requiredDataset: p.requiredDataset }))
+          );
+          for (const r of results) {
+            await storage.insertModelRun(projectId, r.toolName, r.inputs, r.outputs);
+          }
+          deliverableContent = results;
+          deliverableTitle = "Scenario Analysis Results";
+          await storage.updateProjectStage(projectId, "execution_done");
+        } else if (step.agentKey === "summary") {
+          const hyps = await storage.getHypotheses(projectId);
+          const runs = await storage.getModelRuns(projectId);
+          const latestVersion = hyps[0]?.version || 1;
+          const latestHyps = hyps.filter((h) => h.version === latestVersion);
+          const result = await summaryAgent(
+            project.objective,
+            project.constraints,
+            latestHyps.map((h) => ({ statement: h.statement, metric: h.metric })),
+            runs.map((r) => ({ inputsJson: r.inputsJson, outputsJson: r.outputsJson }))
+          );
+          const version = await storage.getLatestNarrativeVersion(projectId) + 1;
+          await storage.insertNarrative(projectId, version, result.summaryText);
+          deliverableContent = result;
+          deliverableTitle = "Executive Summary";
+          await storage.updateProjectStage(projectId, "summary_draft");
+        } else if (step.agentKey === "presentation") {
+          const narrs = await storage.getNarratives(projectId);
+          const hyps = await storage.getHypotheses(projectId);
+          const runs = await storage.getModelRuns(projectId);
+          const latestVersion = hyps[0]?.version || 1;
+          const latestHyps = hyps.filter((h) => h.version === latestVersion);
+          const latestNarr = narrs[0];
+          const result = await presentationAgent(
+            project.name,
+            project.objective,
+            latestNarr?.summaryText || "No summary available",
+            latestHyps.map((h) => ({ statement: h.statement, metric: h.metric })),
+            runs.map((r) => ({ inputsJson: r.inputsJson, outputsJson: r.outputsJson }))
+          );
+          const slideVersion = await storage.getLatestSlideVersion(projectId) + 1;
+          await storage.insertSlides(
+            projectId,
+            slideVersion,
+            result.slides.map((s) => ({
+              slideIndex: s.slideIndex,
+              layout: s.layout,
+              title: s.title,
+              subtitle: s.subtitle || void 0,
+              bodyJson: s.bodyJson,
+              notesText: s.notesText || void 0
+            }))
+          );
+          deliverableContent = result;
+          deliverableTitle = "Presentation Deck";
+          await storage.updateProjectStage(projectId, "presentation_draft");
+        }
+        if (deliverableContent) {
+          await storage.createDeliverable({
+            projectId,
+            stepId,
+            title: deliverableTitle,
+            contentJson: deliverableContent
+          });
+        }
+        await storage.updateWorkflowInstanceStep(stepId, {
+          status: "completed",
+          outputSummary: { title: deliverableTitle }
+        });
+        await storage.updateRunLog(runLog.id, deliverableContent, "success");
+        const updatedProject = await storage.getProject(projectId);
+        const instance = await storage.getWorkflowInstance(projectId);
+        if (instance) {
+          await storage.updateWorkflowInstanceCurrentStep(instance.id, step.stepOrder);
+        }
+        res.json({ project: updatedProject, step: await storage.getWorkflowInstanceStep(stepId) });
+      } catch (agentErr) {
+        await storage.updateWorkflowInstanceStep(stepId, { status: "failed" });
+        await storage.updateRunLog(runLog.id, null, "failed", agentErr.message);
+        res.status(500).json({ error: `Agent failed: ${agentErr.message}` });
+      }
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/projects/:id/workflow/steps/:stepId/approve", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const stepId = Number(req.params.stepId);
+      const project = await storage.getProject(projectId);
+      if (!project) return res.status(404).json({ error: "Project not found" });
+      await storage.updateWorkflowInstanceStep(stepId, { status: "approved" });
+      await storage.lockDeliverables(stepId);
+      const nextStage = APPROVE_MAP[project.stage];
+      if (nextStage) {
+        await storage.updateProjectStage(projectId, nextStage);
+      }
+      const updatedProject = await storage.getProject(projectId);
+      res.json(updatedProject);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/projects/:id/run-next", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const project = await storage.getProject(projectId);
+      if (!project) return res.status(404).json({ error: "Not found" });
+      const nextStage = RUN_NEXT_MAP[project.stage];
+      if (!nextStage) {
+        return res.status(400).json({ error: `Cannot run next stage from "${project.stage}".` });
+      }
+      const instance = await storage.getWorkflowInstance(projectId);
+      if (instance) {
+        const steps = await storage.getWorkflowInstanceSteps(instance.id);
+        const agentKeyMap = {
+          issues_draft: "issues_tree",
+          hypotheses_draft: "hypothesis",
+          execution_done: "execution",
+          summary_draft: "summary",
+          presentation_draft: "presentation"
+        };
+        const targetAgent = agentKeyMap[nextStage];
+        const targetStep = steps.find((s) => s.agentKey === targetAgent);
+        if (targetStep) {
+          const stepRunRes = await fetch(`http://localhost:5000/api/projects/${projectId}/workflow/steps/${targetStep.id}/run`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" }
+          });
+          const result = await stepRunRes.json();
+          if (!stepRunRes.ok) {
+            return res.status(stepRunRes.status).json(result);
+          }
+          return res.json(result.project || await storage.getProject(projectId));
+        }
+      }
+      const modelUsed = getModelUsed();
+      const runLog = await storage.insertRunLog(projectId, nextStage, { currentStage: project.stage }, modelUsed);
+      try {
+        if (nextStage === "issues_draft") {
+          const result = await issuesTreeAgent(project.objective, project.constraints);
+          const version = await storage.getLatestIssueVersion(projectId) + 1;
+          const idMap = /* @__PURE__ */ new Map();
+          let remaining = [...result.issues];
+          let pass = 0;
+          while (remaining.length > 0 && pass < 10) {
+            pass++;
+            const canInsert = remaining.filter((n) => !n.parentId || idMap.has(n.parentId));
+            const cannotInsert = remaining.filter((n) => n.parentId && !idMap.has(n.parentId));
+            if (canInsert.length === 0) break;
+            const insertedNodes = await storage.insertIssueNodes(
+              projectId,
+              version,
+              canInsert.map((n) => ({ parentId: n.parentId ? idMap.get(n.parentId) || null : null, text: n.text, priority: n.priority }))
+            );
+            canInsert.forEach((n, i) => {
+              idMap.set(n.id, insertedNodes[i].id);
+            });
+            remaining = cannotInsert;
+          }
+          await storage.updateRunLog(runLog.id, result, "success");
+        } else if (nextStage === "hypotheses_draft") {
+          const issueNodesData = await storage.getIssueNodes(projectId);
+          const latestVersion = issueNodesData[0]?.version || 1;
+          const latestIssues = issueNodesData.filter((n) => n.version === latestVersion);
+          const result = await hypothesisAgent(latestIssues.map((n) => ({ id: n.id, text: n.text, priority: n.priority })));
+          const version = await storage.getLatestHypothesisVersion(projectId) + 1;
+          const insertedHyps = await storage.insertHypotheses(
+            projectId,
+            version,
+            result.hypotheses.map((h) => ({ issueNodeId: null, statement: h.statement, metric: h.metric, dataSource: h.dataSource, method: h.method }))
+          );
+          await storage.insertAnalysisPlan(
+            projectId,
+            result.analysisPlan.map((p, i) => ({
+              hypothesisId: insertedHyps[p.hypothesisIndex]?.id || insertedHyps[0]?.id || null,
               method: p.method,
-              parameters: p.parametersJson,
+              parametersJson: p.parameters,
               requiredDataset: p.requiredDataset
             }))
           );
+          await storage.updateRunLog(runLog.id, result, "success");
+        } else if (nextStage === "execution_done") {
+          const plans = await storage.getAnalysisPlan(projectId);
+          const results = await executionAgent(plans.map((p) => ({ method: p.method, parameters: p.parametersJson, requiredDataset: p.requiredDataset })));
           for (const r of results) {
-            await storage.insertModelRun(
-              projectId,
-              r.toolName,
-              r.inputs,
-              r.outputs
-            );
+            await storage.insertModelRun(projectId, r.toolName, r.inputs, r.outputs);
           }
           await storage.updateRunLog(runLog.id, results, "success");
         } else if (nextStage === "summary_draft") {
@@ -1304,14 +1836,8 @@ async function registerRoutes(app2) {
           const result = await summaryAgent(
             project.objective,
             project.constraints,
-            latestHyps.map((h) => ({
-              statement: h.statement,
-              metric: h.metric
-            })),
-            runs.map((r) => ({
-              inputsJson: r.inputsJson,
-              outputsJson: r.outputsJson
-            }))
+            latestHyps.map((h) => ({ statement: h.statement, metric: h.metric })),
+            runs.map((r) => ({ inputsJson: r.inputsJson, outputsJson: r.outputsJson }))
           );
           const version = await storage.getLatestNarrativeVersion(projectId) + 1;
           await storage.insertNarrative(projectId, version, result.summaryText);
@@ -1327,39 +1853,21 @@ async function registerRoutes(app2) {
             project.name,
             project.objective,
             latestNarr?.summaryText || "No summary available",
-            latestHyps.map((h) => ({
-              statement: h.statement,
-              metric: h.metric
-            })),
-            runs.map((r) => ({
-              inputsJson: r.inputsJson,
-              outputsJson: r.outputsJson
-            }))
+            latestHyps.map((h) => ({ statement: h.statement, metric: h.metric })),
+            runs.map((r) => ({ inputsJson: r.inputsJson, outputsJson: r.outputsJson }))
           );
-          const version = await storage.getLatestSlideVersion(projectId) + 1;
+          const slideVersion = await storage.getLatestSlideVersion(projectId) + 1;
           await storage.insertSlides(
             projectId,
-            version,
-            result.slides.map((s) => ({
-              slideIndex: s.slideIndex,
-              layout: s.layout,
-              title: s.title,
-              subtitle: s.subtitle || void 0,
-              bodyJson: s.bodyJson,
-              notesText: s.notesText || void 0
-            }))
+            slideVersion,
+            result.slides.map((s) => ({ slideIndex: s.slideIndex, layout: s.layout, title: s.title, subtitle: s.subtitle || void 0, bodyJson: s.bodyJson, notesText: s.notesText || void 0 }))
           );
           await storage.updateRunLog(runLog.id, result, "success");
         }
         const updated = await storage.updateProjectStage(projectId, nextStage);
         res.json(updated);
       } catch (agentErr) {
-        await storage.updateRunLog(
-          runLog.id,
-          null,
-          "failed",
-          agentErr.message
-        );
+        await storage.updateRunLog(runLog.id, null, "failed", agentErr.message);
         await storage.updateProjectStage(projectId, project.stage);
         res.status(500).json({ error: `Agent failed: ${agentErr.message}` });
       }
@@ -1374,9 +1882,7 @@ async function registerRoutes(app2) {
       if (!project) return res.status(404).json({ error: "Not found" });
       const nextStage = APPROVE_MAP[project.stage];
       if (!nextStage) {
-        return res.status(400).json({
-          error: `Cannot approve stage "${project.stage}". No pending approval.`
-        });
+        return res.status(400).json({ error: `Cannot approve stage "${project.stage}".` });
       }
       const updated = await storage.updateProjectStage(projectId, nextStage);
       res.json(updated);
@@ -1384,18 +1890,6 @@ async function registerRoutes(app2) {
       res.status(500).json({ error: err.message });
     }
   });
-  const REDO_MAP = {
-    issues_draft: "created",
-    issues_approved: "created",
-    hypotheses_draft: "issues_approved",
-    hypotheses_approved: "issues_approved",
-    execution_done: "hypotheses_approved",
-    execution_approved: "hypotheses_approved",
-    summary_draft: "execution_approved",
-    summary_approved: "execution_approved",
-    presentation_draft: "summary_approved",
-    complete: "summary_approved"
-  };
   app2.post("/api/projects/:id/redo", async (req, res) => {
     try {
       const projectId = Number(req.params.id);
@@ -1410,9 +1904,7 @@ async function registerRoutes(app2) {
         presentation: "summary_approved"
       };
       const targetStage = stageMap[step];
-      if (!targetStage) {
-        return res.status(400).json({ error: `Invalid step "${step}"` });
-      }
+      if (!targetStage) return res.status(400).json({ error: `Invalid step "${step}"` });
       const currentIdx = STAGE_ORDER.indexOf(project.stage);
       const stepDraftStages = {
         issues: "issues_draft",
@@ -1422,11 +1914,7 @@ async function registerRoutes(app2) {
         presentation: "presentation_draft"
       };
       const draftIdx = STAGE_ORDER.indexOf(stepDraftStages[step]);
-      if (currentIdx < draftIdx) {
-        return res.status(400).json({
-          error: `Cannot redo "${step}" \u2014 that step hasn't been run yet.`
-        });
-      }
+      if (currentIdx < draftIdx) return res.status(400).json({ error: `Cannot redo "${step}" \u2014 hasn't been run yet.` });
       const updated = await storage.updateProjectStage(projectId, targetStage);
       res.json(updated);
     } catch (err) {
@@ -1444,23 +1932,155 @@ async function registerRoutes(app2) {
         storage.getNarratives(projectId),
         storage.getSlides(projectId)
       ]);
-      res.json({
-        issueNodes: issues,
-        hypotheses: hyps,
-        analysisPlan: plans,
-        modelRuns: runs,
-        narratives: narrs,
-        slides: slds
-      });
+      res.json({ issueNodes: issues, hypotheses: hyps, analysisPlan: plans, modelRuns: runs, narratives: narrs, slides: slds });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
   });
   app2.get("/api/projects/:id/logs", async (req, res) => {
     try {
-      const projectId = Number(req.params.id);
-      const logs = await storage.getRunLogs(projectId);
+      const logs = await storage.getRunLogs(Number(req.params.id));
       res.json(logs);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/workflows", async (_req, res) => {
+    try {
+      const templates = await storage.listWorkflowTemplates();
+      const result = [];
+      for (const t of templates) {
+        const steps = await storage.getWorkflowTemplateSteps(t.id);
+        result.push({ ...t, steps });
+      }
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/workflows/:id", async (req, res) => {
+    try {
+      const template = await storage.getWorkflowTemplate(Number(req.params.id));
+      if (!template) return res.status(404).json({ error: "Not found" });
+      const steps = await storage.getWorkflowTemplateSteps(template.id);
+      res.json({ ...template, steps });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/workflows", async (req, res) => {
+    try {
+      const { name, description, steps } = req.body;
+      if (!name) return res.status(400).json({ error: "name is required" });
+      const template = await storage.createWorkflowTemplate({ name, description });
+      if (steps && Array.isArray(steps)) {
+        for (const s of steps) {
+          await storage.addWorkflowTemplateStep({
+            workflowTemplateId: template.id,
+            stepOrder: s.stepOrder,
+            name: s.name,
+            agentKey: s.agentKey,
+            description: s.description
+          });
+        }
+      }
+      const allSteps = await storage.getWorkflowTemplateSteps(template.id);
+      res.status(201).json({ ...template, steps: allSteps });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.put("/api/workflows/:id", async (req, res) => {
+    try {
+      const { name, description } = req.body;
+      const template = await storage.updateWorkflowTemplate(Number(req.params.id), { name, description });
+      const steps = await storage.getWorkflowTemplateSteps(template.id);
+      res.json({ ...template, steps });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/agents", async (_req, res) => {
+    try {
+      const agentList = await storage.listAgents();
+      res.json(agentList);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/agents/:id", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (isNaN(id)) {
+        const agent2 = await storage.getAgentByKey(req.params.id);
+        if (!agent2) return res.status(404).json({ error: "Not found" });
+        return res.json(agent2);
+      }
+      const agent = await storage.getAgent(id);
+      if (!agent) return res.status(404).json({ error: "Not found" });
+      res.json(agent);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.put("/api/agents/:id", async (req, res) => {
+    try {
+      const agent = await storage.upsertAgent({ key: req.params.id, ...req.body });
+      res.json(agent);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/data/datasets", async (_req, res) => {
+    try {
+      const ds = await storage.listDatasets();
+      res.json(ds);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/data/datasets", async (req, res) => {
+    try {
+      const { name, description, owner, accessLevel, schemaJson, metadata } = req.body;
+      if (!name) return res.status(400).json({ error: "name is required" });
+      const ds = await storage.createDataset({ name, description, owner, accessLevel, schemaJson, metadata });
+      res.status(201).json(ds);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/data/datasets/:id", async (req, res) => {
+    try {
+      const ds = await storage.getDataset(Number(req.params.id));
+      if (!ds) return res.status(404).json({ error: "Not found" });
+      res.json(ds);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/data/models", async (_req, res) => {
+    try {
+      const ms = await storage.listModels();
+      res.json(ms);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/data/models", async (req, res) => {
+    try {
+      const { name, description, inputSchema, outputSchema, apiConfig } = req.body;
+      if (!name) return res.status(400).json({ error: "name is required" });
+      const m = await storage.createModel({ name, description, inputSchema, outputSchema, apiConfig });
+      res.status(201).json(m);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/data/models/:id", async (req, res) => {
+    try {
+      const m = await storage.getModel(Number(req.params.id));
+      if (!m) return res.status(404).json({ error: "Not found" });
+      res.json(m);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1481,14 +2101,8 @@ async function registerRoutes(app2) {
   app2.put("/api/agent-configs/:agentType", async (req, res) => {
     try {
       const agentType = req.params.agentType;
-      const validTypes = ["issues_tree", "hypothesis", "execution", "summary", "mece_critic", "presentation"];
-      if (!validTypes.includes(agentType)) {
-        return res.status(400).json({ error: "Invalid agent type" });
-      }
       const { systemPrompt, model, maxTokens } = req.body;
-      if (!systemPrompt) {
-        return res.status(400).json({ error: "systemPrompt is required" });
-      }
+      if (!systemPrompt) return res.status(400).json({ error: "systemPrompt is required" });
       const config = await storage.upsertAgentConfig({
         agentType,
         systemPrompt,
@@ -1500,176 +2114,16 @@ async function registerRoutes(app2) {
       res.status(500).json({ error: err.message });
     }
   });
-  const AGENT_METADATA = {
-    issues_tree: {
-      key: "issues_tree",
-      label: "Issues Tree",
-      role: "Generator",
-      roleColor: "#3B82F6",
-      roleBg: "#EFF6FF",
-      stage: "issues_draft",
-      description: "Breaks down the project objective into a MECE (Mutually Exclusive, Collectively Exhaustive) issues tree with 3+ levels of depth. This is the foundational decomposition step of the consulting workflow.",
-      inputs: [
-        { name: "objective", type: "string", description: "The project's stated objective or governing question" },
-        { name: "constraints", type: "string", description: "Known constraints, boundaries, or limitations for the analysis" }
-      ],
-      outputs: [
-        { name: "issues", type: "IssueNode[]", description: "Array of 15-25 issue nodes forming a hierarchical tree with id, parentId, text, and priority (high/medium/low)" },
-        { name: "criticLog", type: "CriticResult[]", description: "Log of MECE Critic review iterations, including scores and revision instructions" }
-      ],
-      outputSchema: '{\n  "issues": [\n    { "id": "1", "parentId": null, "text": "Root issue", "priority": "high" },\n    { "id": "2", "parentId": "1", "text": "Sub-issue", "priority": "medium" }\n  ]\n}',
-      tools: [],
-      triggerStage: "created",
-      producesStage: "issues_draft"
-    },
-    mece_critic: {
-      key: "mece_critic",
-      label: "MECE Critic",
-      role: "Quality Gate",
-      roleColor: "#8B5CF6",
-      roleBg: "#F5F3FF",
-      stage: "issues_draft",
-      description: "Quality gate that audits the issues tree for MECE compliance. Scores across 5 criteria (overlap, coverage, mixed logics, branch balance, label quality) on a 1-5 scale. If score < 4, sends revision instructions back to the Issues Tree agent. Runs up to 2 revision loops.",
-      inputs: [
-        { name: "issues", type: "IssueNode[]", description: "The generated issues tree to evaluate" },
-        { name: "objective", type: "string", description: "The original project objective for context" }
-      ],
-      outputs: [
-        { name: "verdict", type: "'approved' | 'revise'", description: "Whether the tree passes quality review or needs revision" },
-        { name: "scores", type: "CriticScores", description: "Detailed scores (1-5) for overlap, coverage, mixed logics, branch balance, and label quality" },
-        { name: "overallScore", type: "number", description: "Aggregate score from 1-5. Tree is approved if >= 4" },
-        { name: "revisionInstructions", type: "string", description: "Specific instructions for what the Issues Tree agent should fix" }
-      ],
-      outputSchema: '{\n  "verdict": "approved" | "revise",\n  "scores": {\n    "overlap": { "score": 4, "details": "..." },\n    "coverage": { "score": 5, "details": "..." },\n    "mixedLogics": { "score": 4, "details": "..." },\n    "branchBalance": { "score": 3, "details": "..." },\n    "labelQuality": { "score": 5, "details": "..." }\n  },\n  "overallScore": 4,\n  "revisionInstructions": ""\n}',
-      tools: [],
-      triggerStage: "issues_draft",
-      producesStage: "issues_approved"
-    },
-    hypothesis: {
-      key: "hypothesis",
-      label: "Hypothesis",
-      role: "Analyst",
-      roleColor: "#0891B2",
-      roleBg: "#ECFEFF",
-      stage: "hypotheses_draft",
-      description: "Generates testable hypotheses linked to the top issues from the tree, and creates a structured analysis plan. Each hypothesis includes a statement, metric, data source, and method. The analysis plan defines parameters for the scenario calculator tool.",
-      inputs: [
-        { name: "issues", type: "IssueNode[]", description: "The approved issues tree nodes, with id, text, and priority" }
-      ],
-      outputs: [
-        { name: "hypotheses", type: "HypothesisOutput[]", description: "2-4 testable hypotheses, each linked to an issue node with statement, metric, data source, and method" },
-        { name: "analysisPlan", type: "AnalysisPlanOutput[]", description: "Corresponding execution plans with method, financial parameters, and required dataset" }
-      ],
-      outputSchema: '{\n  "hypotheses": [\n    {\n      "issueNodeId": "1",\n      "statement": "If we address X, we achieve Y",\n      "metric": "Revenue growth %",\n      "dataSource": "Industry benchmarks",\n      "method": "scenario_analysis"\n    }\n  ],\n  "analysisPlan": [\n    {\n      "hypothesisIndex": 0,\n      "method": "run_scenario_tool",\n      "parameters": {\n        "baselineRevenue": 1000000,\n        "growthRate": 0.1,\n        "costReduction": 0.05,\n        "timeHorizonYears": 5,\n        "volatility": 0.15\n      },\n      "requiredDataset": "Financial projections"\n    }\n  ]\n}',
-      tools: [],
-      triggerStage: "issues_approved",
-      producesStage: "hypotheses_draft"
-    },
-    execution: {
-      key: "execution",
-      label: "Execution",
-      role: "Tool Caller",
-      roleColor: "#059669",
-      roleBg: "#ECFDF5",
-      stage: "execution_done",
-      description: "Executes the analysis plan by calling the Scenario Calculator tool for each hypothesis. Performs financial scenario analysis with baseline, optimistic, and pessimistic projections, calculates NPV, expected value, and risk-adjusted returns. This is the only agent that uses real tool calling.",
-      inputs: [
-        { name: "analysisPlan", type: "AnalysisPlanOutput[]", description: "Array of analysis plans from the Hypothesis agent, each specifying method and financial parameters" }
-      ],
-      outputs: [
-        { name: "results", type: "ToolCallResult[]", description: "Array of tool call results with tool name, input parameters, and full scenario output including baseline/optimistic/pessimistic projections and NPV summary" }
-      ],
-      outputSchema: '[\n  {\n    "toolName": "run_scenario_tool",\n    "inputs": {\n      "baselineRevenue": 1000000,\n      "growthRate": 0.1,\n      "costReduction": 0.05,\n      "timeHorizonYears": 5,\n      "volatility": 0.15\n    },\n    "outputs": {\n      "baseline": [{ "year": 1, "revenue": ..., "costs": ..., "profit": ... }],\n      "optimistic": [...],\n      "pessimistic": [...],\n      "summary": {\n        "baselineNPV": ...,\n        "optimisticNPV": ...,\n        "pessimisticNPV": ...,\n        "expectedValue": ...,\n        "riskAdjustedReturn": ...\n      }\n    }\n  }\n]',
-      tools: [
-        {
-          name: "run_scenario_tool",
-          description: "Financial scenario calculator that projects revenue, costs, and profit across baseline, optimistic, and pessimistic scenarios over a configurable time horizon",
-          parameters: {
-            baselineRevenue: "number \u2014 Starting annual revenue",
-            growthRate: "number (0-1) \u2014 Annual growth rate",
-            costReduction: "number (0-1) \u2014 Expected cost reduction factor",
-            timeHorizonYears: "integer \u2014 Projection period in years",
-            volatility: "number (0-1) \u2014 Market volatility factor for scenario spread"
-          }
-        }
-      ],
-      triggerStage: "hypotheses_approved",
-      producesStage: "execution_done"
-    },
-    summary: {
-      key: "summary",
-      label: "Summary",
-      role: "Synthesizer",
-      roleColor: "#D97706",
-      roleBg: "#FFFBEB",
-      stage: "summary_draft",
-      description: "Synthesizes all analysis results into a structured executive summary with Key Findings, Recommendations, and Next Steps. Uses markdown formatting for rich text rendering. The output reads like a senior partner's memo to a client.",
-      inputs: [
-        { name: "objective", type: "string", description: "The original project objective" },
-        { name: "constraints", type: "string", description: "Project constraints" },
-        { name: "hypotheses", type: "Hypothesis[]", description: "The tested hypotheses with statement and metric" },
-        { name: "modelRuns", type: "ModelRun[]", description: "Execution results with input/output JSON from scenario analysis" }
-      ],
-      outputs: [
-        { name: "summaryText", type: "string (markdown)", description: "Full executive summary in markdown format with headings, bullet points, and numbered lists" }
-      ],
-      outputSchema: '"# Executive Summary\\n\\n## Key Findings\\n- Finding 1: ...\\n- Finding 2: ...\\n\\n## Recommendation\\nBased on...\\n\\n## Next Steps\\n1. Step one\\n2. Step two"',
-      tools: [],
-      triggerStage: "execution_approved",
-      producesStage: "summary_draft"
-    },
-    presentation: {
-      key: "presentation",
-      label: "Presentation",
-      role: "Designer",
-      roleColor: "#E11D48",
-      roleBg: "#FFF1F2",
-      stage: "presentation_draft",
-      description: "Generates a professional 16:9 slide deck from the analysis results. Produces 6-10 slides using 5 layout types: title_slide, section_header, title_body, two_column, and metrics. Each slide includes speaker notes. The deck follows a standard consulting structure: Title, Executive Summary, Key Findings, Analysis Results, Recommendations, Next Steps.",
-      inputs: [
-        { name: "projectName", type: "string", description: "Project name for the title slide" },
-        { name: "objective", type: "string", description: "Project objective" },
-        { name: "summaryText", type: "string", description: "The executive summary text" },
-        { name: "hypotheses", type: "Hypothesis[]", description: "Tested hypotheses" },
-        { name: "modelRuns", type: "ModelRun[]", description: "Scenario analysis results" }
-      ],
-      outputs: [
-        { name: "slides", type: "SlideOutput[]", description: "Array of 6-10 slide objects, each with slideIndex, layout, title, subtitle, bodyJson, and notesText" }
-      ],
-      outputSchema: '{\n  "slides": [\n    {\n      "slideIndex": 0,\n      "layout": "title_slide",\n      "title": "Project Name",\n      "subtitle": "Strategic Analysis",\n      "bodyJson": {},\n      "notesText": "Speaker notes"\n    }\n  ]\n}',
-      tools: [],
-      triggerStage: "summary_approved",
-      producesStage: "presentation_draft"
-    }
-  };
-  app2.get("/api/agents", async (_req, res) => {
+  app2.get("/api/agents/detail/:key", async (req, res) => {
     try {
-      const configs = await storage.getAllAgentConfigs();
-      const agents = Object.values(AGENT_METADATA).map((meta) => {
-        const saved = configs.find((c) => c.agentType === meta.key);
-        return {
-          ...meta,
-          systemPrompt: saved?.systemPrompt || DEFAULT_PROMPTS[meta.key] || "",
-          model: saved?.model || "gpt-5-nano",
-          maxTokens: saved?.maxTokens || 8192
-        };
-      });
-      res.json(agents);
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-  app2.get("/api/agents/:key", async (req, res) => {
-    try {
-      const key = req.params.key;
-      const meta = AGENT_METADATA[key];
-      if (!meta) return res.status(404).json({ error: "Agent not found" });
-      const saved = await storage.getAgentConfig(key);
+      const agent = await storage.getAgentByKey(req.params.key);
+      if (!agent) return res.status(404).json({ error: "Agent not found" });
+      const saved = await storage.getAgentConfig(req.params.key);
       res.json({
-        ...meta,
-        systemPrompt: saved?.systemPrompt || DEFAULT_PROMPTS[key] || "",
-        model: saved?.model || "gpt-5-nano",
-        maxTokens: saved?.maxTokens || 8192
+        ...agent,
+        systemPrompt: saved?.systemPrompt || agent.promptTemplate || DEFAULT_PROMPTS[req.params.key] || "",
+        configModel: saved?.model || agent.model,
+        configMaxTokens: saved?.maxTokens || agent.maxTokens
       });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -1677,8 +2131,7 @@ async function registerRoutes(app2) {
   });
   app2.get("/api/pipelines", async (_req, res) => {
     try {
-      const pipelines = await storage.listPipelines();
-      res.json(pipelines);
+      res.json(await storage.listPipelines());
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1686,32 +2139,24 @@ async function registerRoutes(app2) {
   app2.post("/api/pipelines", async (req, res) => {
     try {
       const { name, agentsJson } = req.body;
-      if (!name || !agentsJson) {
-        return res.status(400).json({ error: "name and agentsJson are required" });
-      }
-      const pipeline = await storage.createPipeline({ name, agentsJson });
-      res.status(201).json(pipeline);
+      if (!name || !agentsJson) return res.status(400).json({ error: "name and agentsJson are required" });
+      res.status(201).json(await storage.createPipeline({ name, agentsJson }));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
   });
   app2.get("/api/pipelines/:id", async (req, res) => {
     try {
-      const pipeline = await storage.getPipeline(Number(req.params.id));
-      if (!pipeline) return res.status(404).json({ error: "Not found" });
-      res.json(pipeline);
+      const p = await storage.getPipeline(Number(req.params.id));
+      if (!p) return res.status(404).json({ error: "Not found" });
+      res.json(p);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
   });
   app2.put("/api/pipelines/:id", async (req, res) => {
     try {
-      const { name, agentsJson } = req.body;
-      const pipeline = await storage.updatePipeline(Number(req.params.id), {
-        name,
-        agentsJson
-      });
-      res.json(pipeline);
+      res.json(await storage.updatePipeline(Number(req.params.id), req.body));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1856,64 +2301,12 @@ function setupErrorHandler(app2) {
       log(`express server serving on port ${port}`);
     }
   );
-  const devProxyPort = 8081;
-  if (port !== devProxyPort) {
+  if (isDev) {
     const http = await import("http");
-    const { execSync } = await import("child_process");
-    const startProxy = () => {
-      const proxyServer = http.createServer((req, res) => {
-        const options = {
-          hostname: "127.0.0.1",
-          port,
-          path: req.url,
-          method: req.method,
-          headers: req.headers
-        };
-        const proxyReq = http.request(options, (proxyRes) => {
-          res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
-          proxyRes.pipe(res, { end: true });
-        });
-        proxyReq.on("error", () => {
-          res.writeHead(502);
-          res.end();
-        });
-        req.pipe(proxyReq, { end: true });
-      });
-      proxyServer.on("upgrade", (req, socket, head) => {
-        const options = {
-          hostname: "127.0.0.1",
-          port,
-          path: req.url,
-          method: req.method,
-          headers: req.headers
-        };
-        const proxyReq = http.request(options);
-        proxyReq.on("upgrade", (proxyRes, proxySocket, proxyHead) => {
-          socket.write(
-            `HTTP/1.1 101 Switching Protocols\r
-` + Object.entries(proxyRes.headers).map(([k, v]) => `${k}: ${v}`).join("\r\n") + "\r\n\r\n"
-          );
-          if (proxyHead.length) socket.write(proxyHead);
-          proxySocket.pipe(socket);
-          socket.pipe(proxySocket);
-        });
-        proxyReq.on("error", () => socket.end());
-        proxyReq.end();
-      });
-      proxyServer.on("error", (err) => {
-        if (err.code === "EADDRINUSE") {
-          log(`port ${devProxyPort} in use, retrying in 3s...`);
-          try {
-            execSync(`fuser -k ${devProxyPort}/tcp 2>/dev/null || true`);
-          } catch {
-          }
-          setTimeout(startProxy, 3e3);
-        }
-      });
-      proxyServer.listen(devProxyPort, "0.0.0.0", () => {
-        log(`dev proxy forwarding port ${devProxyPort} -> ${port}`);
-      });
-    };
-    startProxy();
+    const proxyPort = 8081;
+    const proxy = http.createServer(app);
+    proxy.listen(proxyPort, "0.0.0.0", () => {
+      log(`preview proxy also listening on port ${proxyPort}`);
+    });
   }
 })();

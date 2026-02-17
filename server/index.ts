@@ -172,4 +172,13 @@ function setupErrorHandler(app: express.Application) {
     },
   );
 
+  if (isDev) {
+    const http = await import("http");
+    const proxyPort = 8081;
+    const proxy = http.createServer(app);
+    proxy.listen(proxyPort, "0.0.0.0", () => {
+      log(`preview proxy also listening on port ${proxyPort}`);
+    });
+  }
+
 })();
