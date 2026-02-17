@@ -377,6 +377,13 @@ export const storage = {
       .where(eq(deliverables.stepId, stepId));
   },
 
+  async unlockDeliverables(stepId: number): Promise<void> {
+    await db
+      .update(deliverables)
+      .set({ locked: false })
+      .where(eq(deliverables.stepId, stepId));
+  },
+
   async getLatestIssueVersion(projectId: number): Promise<number> {
     const nodes = await db
       .select()

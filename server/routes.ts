@@ -41,6 +41,15 @@ const APPROVE_MAP: Record<string, string> = {
   presentation_draft: "complete",
 };
 
+const UNAPPROVE_MAP: Record<string, string> = {
+  definition_approved: "definition_draft",
+  issues_approved: "issues_draft",
+  hypotheses_approved: "hypotheses_draft",
+  execution_approved: "execution_done",
+  summary_approved: "summary_draft",
+  complete: "presentation_draft",
+};
+
 const RUN_NEXT_MAP: Record<string, string> = {
   created: "definition_draft",
   definition_approved: "issues_draft",
@@ -512,6 +521,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const nextStage = APPROVE_MAP[project.stage];
       if (nextStage) {
         await storage.updateProjectStage(projectId, nextStage);
+      }
+
+      const updatedProject = await storage.getProject(projectId);
+      res.json(updatedProject);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/projects/:id/workflow/steps/:stepId/unapprove", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const stepId = Number(req.params.stepId);
+      const project = await storage.getProject(projectId);
+      if (!project) return res.status(404).json({ error: "Project not found" });
+
+      const step = await storage.getWorkflowInstanceStep(stepId);
+      if (!step) return res.status(404).json({ error: "Step not found" });
+      if (step.status !== "approved") {
+        return res.status(400).json({ error: "Step is not approved" });
+      }
+
+      const instance = await storage.getWorkflowInstance(projectId);
+      if (instance) {
+        const steps = await storage.getWorkflowInstanceSteps(instance.id);
+        const laterSteps = steps.filter((s) => s.stepOrder > step.stepOrder && s.status !== "not_started");
+        if (laterSteps.length > 0) {
+          return res.status(400).json({ error: "Cannot unapprove: later steps have already been started. Unapprove them first." });
+        }
+      }
+
+      await storage.updateWorkflowInstanceStep(stepId, { status: "completed" });
+      await storage.unlockDeliverables(stepId);
+
+      const prevStage = UNAPPROVE_MAP[project.stage];
+      if (prevStage) {
+        await storage.updateProjectStage(projectId, prevStage);
       }
 
       const updatedProject = await storage.getProject(projectId);

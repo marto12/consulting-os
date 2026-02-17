@@ -418,6 +418,18 @@ export default function WorkflowStepWorkspace() {
     },
   });
 
+  const unapproveStepMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/projects/${projectId}/workflow/steps/${stepIdNum}/unapprove`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum, "chat"] });
+    },
+  });
+
   const handleSend = () => {
     const msg = chatInput.trim();
     if (!msg || sendChatMutation.isPending) return;
@@ -584,6 +596,11 @@ export default function WorkflowStepWorkspace() {
           {canApprove && (
             <Button size="sm" variant="outline" onClick={() => approveStepMutation.mutate()} disabled={approveStepMutation.isPending}>
               {approveStepMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Check size={14} /> <span className="hidden sm:inline">Approve</span></>}
+            </Button>
+          )}
+          {isApproved && (
+            <Button size="sm" variant="outline" onClick={() => unapproveStepMutation.mutate()} disabled={unapproveStepMutation.isPending}>
+              {unapproveStepMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><RefreshCw size={14} /> <span className="hidden sm:inline">Unapprove</span></>}
             </Button>
           )}
           <Button
