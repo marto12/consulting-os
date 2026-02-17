@@ -5,12 +5,13 @@ import {
   Bot,
   Briefcase,
   Database,
-  BarChart3,
   GitBranch,
   Settings,
   ChevronDown,
   FolderOpen,
   Plus,
+  Search,
+  Command,
 } from "lucide-react";
 import { cn } from "./lib/utils";
 import { Button } from "./components/ui/button";
@@ -35,21 +36,41 @@ import { Separator } from "./components/ui/separator";
 import Chat from "./pages/Chat";
 import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
-import Pipeline from "./pages/Pipeline";
-import Pipelines from "./pages/Pipelines";
-import SettingsPage from "./pages/Settings";
+import WorkflowStepWorkspace from "./pages/WorkflowStepWorkspace";
+import Workflows from "./pages/Workflows";
+import Agents from "./pages/Agents";
 import AgentDetail from "./pages/AgentDetail";
-import Datasets from "./pages/Datasets";
-import Analysis from "./pages/Analysis";
+import DataModels from "./pages/DataModels";
+import SettingsPage from "./pages/Settings";
+import CommandPalette from "./components/CommandPalette";
 import { ProjectProvider, useProjectContext } from "./lib/project-context";
 
-const NAV_ITEMS = [
-  { to: "/chat", icon: MessageSquare, label: "Chat" },
-  { to: "/agents", icon: Bot, label: "Agents" },
-  { to: "/projects", icon: Briefcase, label: "Projects" },
-  { to: "/datasets", icon: Database, label: "Datasets" },
-  { to: "/analysis", icon: BarChart3, label: "Analysis" },
-  { to: "/pipelines", icon: GitBranch, label: "Pipelines" },
+const NAV_SECTIONS = [
+  {
+    label: "Projects",
+    items: [
+      { to: "/projects", icon: Briefcase, label: "All Projects" },
+      { to: "/chat", icon: MessageSquare, label: "Chat" },
+    ],
+  },
+  {
+    label: "Workflows",
+    items: [
+      { to: "/workflows", icon: GitBranch, label: "Templates" },
+    ],
+  },
+  {
+    label: "Agents",
+    items: [
+      { to: "/agents", icon: Bot, label: "All Agents" },
+    ],
+  },
+  {
+    label: "Data & Models",
+    items: [
+      { to: "/data", icon: Database, label: "Datasets & Models" },
+    ],
+  },
 ];
 
 function ProjectSelector() {
@@ -99,7 +120,11 @@ function ProjectSelector() {
                 "flex items-center gap-2 w-full px-3 py-2 text-[13px] font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors text-left",
                 activeProject?.id === p.id && "bg-sidebar-primary/15 text-sidebar-accent-foreground"
               )}
-              onClick={() => { setActiveProjectId(p.id); setOpen(false); }}
+              onClick={() => {
+                setActiveProjectId(p.id);
+                setOpen(false);
+                navigate(`/project/${p.id}`);
+              }}
               data-testid={`project-option-${p.id}`}
             >
               {!isCollapsed && <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", activeProject?.id === p.id ? "bg-sidebar-primary" : "bg-sidebar-foreground/30")} />}
@@ -148,30 +173,33 @@ function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {NAV_ITEMS.map((item) => {
-                const isActive =
-                  location.pathname === item.to ||
-                  (item.to === "/projects" && location.pathname.startsWith("/project/")) ||
-                  (item.to === "/agents" && location.pathname.startsWith("/agent/"));
+        {NAV_SECTIONS.map((section) => (
+          <SidebarGroup key={section.label}>
+            <SidebarGroupLabel>{section.label}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {section.items.map((item) => {
+                  const isActive =
+                    location.pathname === item.to ||
+                    (item.to === "/projects" && location.pathname.startsWith("/project/")) ||
+                    (item.to === "/agents" && location.pathname.startsWith("/agent/")) ||
+                    (item.to === "/workflows" && location.pathname.startsWith("/workflow/"));
 
-                return (
-                  <SidebarMenuItem key={item.to}>
-                    <SidebarMenuButton tooltip={item.label} isActive={isActive} asChild>
-                      <NavLink to={item.to}>
-                        <item.icon />
-                        <span>{item.label}</span>
-                      </NavLink>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+                  return (
+                    <SidebarMenuItem key={item.to}>
+                      <SidebarMenuButton tooltip={item.label} isActive={isActive} asChild>
+                        <NavLink to={item.to}>
+                          <item.icon />
+                          <span>{item.label}</span>
+                        </NavLink>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
 
       <SidebarFooter>
@@ -204,6 +232,14 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 h-4" />
+          <div className="flex-1" />
+          <button
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground px-2 py-1 border rounded-md transition-colors"
+            onClick={() => document.dispatchEvent(new CustomEvent("open-command-palette"))}
+          >
+            <Command size={12} />
+            <span>K</span>
+          </button>
         </header>
         <div className="flex-1 overflow-y-auto p-6 lg:p-8">
           {children}
@@ -230,18 +266,19 @@ export default function App() {
   return (
     <BrowserRouter>
       <ProjectProvider>
+        <CommandPalette />
         <Routes>
           <Route path="/chat" element={<FullWidthLayout><Chat /></FullWidthLayout>} />
-          <Route path="/agents" element={<AppLayout><Pipeline /></AppLayout>} />
           <Route path="/projects" element={<AppLayout><Projects /></AppLayout>} />
-          <Route path="/datasets" element={<AppLayout><Datasets /></AppLayout>} />
-          <Route path="/analysis" element={<AppLayout><Analysis /></AppLayout>} />
-          <Route path="/pipelines" element={<AppLayout><Pipelines /></AppLayout>} />
-          <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
           <Route path="/project/:id" element={<AppLayout><ProjectDetail /></AppLayout>} />
+          <Route path="/project/:id/workflow/:stepId" element={<FullWidthLayout><WorkflowStepWorkspace /></FullWidthLayout>} />
+          <Route path="/workflows" element={<AppLayout><Workflows /></AppLayout>} />
+          <Route path="/agents" element={<AppLayout><Agents /></AppLayout>} />
           <Route path="/agent/:key" element={<AppLayout><AgentDetail /></AppLayout>} />
-          <Route path="/" element={<Navigate to="/chat" replace />} />
-          <Route path="*" element={<Navigate to="/chat" replace />} />
+          <Route path="/data" element={<AppLayout><DataModels /></AppLayout>} />
+          <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
+          <Route path="/" element={<Navigate to="/projects" replace />} />
+          <Route path="*" element={<Navigate to="/projects" replace />} />
         </Routes>
       </ProjectProvider>
     </BrowserRouter>
