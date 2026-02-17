@@ -9,6 +9,7 @@ import {
   executionAgent,
   summaryAgent,
   presentationAgent,
+  refineDeliverable,
   getModelUsed,
   getDefaultConfigs,
   DEFAULT_PROMPTS,
@@ -411,6 +412,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     try {
       const result = await executeStepAgent(projectId, stepId, onProgress);
+      
+      const stepDeliverables = await storage.getStepDeliverables(stepId);
+      if (stepDeliverables.length > 0) {
+        const latestDel = stepDeliverables[0];
+        await storage.insertStepChatMessage({
+          stepId,
+          role: "assistant",
+          content: JSON.stringify(latestDel.contentJson),
+          messageType: "deliverable",
+          metadata: { deliverableId: latestDel.id, title: latestDel.title, version: latestDel.version, agentKey: result.step?.agentKey },
+        });
+      }
+      
       sendSSE("complete", JSON.stringify({ deliverableTitle: result.deliverableTitle, project: result.project, step: result.step }));
     } catch (err: any) {
       sendSSE("error", err.message || "Unknown error");
@@ -431,9 +445,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/projects/:id/workflow/steps/:stepId/chat", async (req: Request, res: Response) => {
     try {
+      const projectId = Number(req.params.id);
       const stepId = Number(req.params.stepId);
       const { message } = req.body;
       if (!message) return res.status(400).json({ error: "message is required" });
+
+      const project = await storage.getProject(projectId);
+      if (!project) return res.status(404).json({ error: "Project not found" });
+
+      const step = await storage.getWorkflowInstanceStep(stepId);
+      if (!step) return res.status(404).json({ error: "Step not found" });
 
       await storage.insertStepChatMessage({
         stepId,
@@ -442,12 +463,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         messageType: "message",
       });
 
-      await storage.insertStepChatMessage({
-        stepId,
-        role: "assistant",
-        content: `Acknowledged: "${message}". This step's agent will process your input in the next run.`,
-        messageType: "message",
-      });
+      const stepDeliverables = await storage.getStepDeliverables(stepId);
+      const currentDeliverable = stepDeliverables[0];
+
+      if (currentDeliverable) {
+        const refined = await refineDeliverable(
+          step.agentKey,
+          currentDeliverable.contentJson,
+          message,
+          { objective: project.objective, constraints: project.constraints }
+        );
+
+        await storage.updateDeliverable(currentDeliverable.id, { contentJson: refined });
+
+        await storage.insertStepChatMessage({
+          stepId,
+          role: "assistant",
+          content: JSON.stringify(refined),
+          messageType: "deliverable",
+          metadata: { deliverableId: currentDeliverable.id, title: currentDeliverable.title, version: currentDeliverable.version, agentKey: step.agentKey },
+        });
+      } else {
+        await storage.insertStepChatMessage({
+          stepId,
+          role: "assistant",
+          content: "No deliverable found to refine. Please run the agent first.",
+          messageType: "message",
+        });
+      }
 
       const messages = await storage.getStepChatMessages(stepId);
       res.json(messages);

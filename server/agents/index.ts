@@ -899,4 +899,44 @@ export async function presentationAgent(
   return parsed;
 }
 
+export async function refineDeliverable(
+  agentKey: string,
+  currentContent: any,
+  userFeedback: string,
+  projectContext: { objective: string; constraints: string },
+  onProgress: ProgressCallback = () => {}
+): Promise<any> {
+  onProgress("Processing your feedback...", "progress");
+  
+  if (!openai) {
+    onProgress("Applying feedback (mock mode)...", "progress");
+    return currentContent;
+  }
+
+  const systemPrompt = await getAgentPrompt(agentKey);
+  const model = await getAgentModel(agentKey);
+  const maxTokens = await getAgentMaxTokens(agentKey);
+
+  const refinementPrompt = `You previously generated the following output for this project:
+
+Project Objective: ${projectContext.objective}
+Constraints: ${projectContext.constraints}
+
+Your previous output:
+${JSON.stringify(currentContent, null, 2)}
+
+The user has requested the following changes:
+"${userFeedback}"
+
+Please regenerate the COMPLETE output incorporating the user's feedback. Return the FULL updated output in the same JSON format as before. Do not return partial updates - return the entire revised document.`;
+
+  onProgress(`Calling LLM with model ${model} to refine output...`, "llm");
+  const raw = await callLLM(systemPrompt, refinementPrompt, model, maxTokens);
+  onProgress("LLM response received, parsing refined output...", "llm");
+  
+  const parsed = extractJson(raw);
+  onProgress("Refinement complete.", "status");
+  return parsed;
+}
+
 export { getModelUsed, runScenarioTool };

@@ -20,6 +20,7 @@ import {
   Code,
   ChevronDown,
   ChevronRight,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -187,6 +188,7 @@ interface ChatMessage {
   role: string;
   content: string;
   messageType: string;
+  metadata?: any;
   createdAt?: string;
   isStreaming?: boolean;
 }
@@ -230,6 +232,50 @@ function JsonToggle({ content }: { content: any }) {
           </pre>
         </div>
       )}
+    </div>
+  );
+}
+
+function FormattedText({ text }: { text: string }) {
+  return (
+    <div className="text-sm leading-relaxed break-words overflow-hidden" style={{ wordBreak: "break-word" }}>
+      {text.split("\n").map((line, i) => {
+        if (line.match(/^\*\*.*\*\*$/)) {
+          return <p key={i} className="font-semibold text-foreground mt-3 mb-1">{line.replace(/\*\*/g, "")}</p>;
+        }
+        if (line.match(/^\*\*.*:\*\*\s/)) {
+          const parts = line.match(/^\*\*(.*?):\*\*\s*(.*)/);
+          if (parts) {
+            return <p key={i} className="mt-1"><span className="font-semibold text-foreground">{parts[1]}:</span> {parts[2]}</p>;
+          }
+        }
+        if (line.match(/^\*\*.*\*\*\s/)) {
+          const parts = line.match(/^\*\*(.*?)\*\*\s*(.*)/);
+          if (parts) {
+            return <p key={i} className="mt-2"><span className="font-semibold text-foreground">{parts[1]}</span> {parts[2]}</p>;
+          }
+        }
+        if (line.match(/^\*\*.*\*\*/)) {
+          const cleaned = line.replace(/\*\*/g, "");
+          return <p key={i} className="font-semibold text-foreground mt-3 mb-1">{cleaned}</p>;
+        }
+        if (line.trim().startsWith("- ")) {
+          const indent = line.match(/^(\s*)/)?.[1]?.length || 0;
+          return <p key={i} className="text-muted-foreground" style={{ paddingLeft: `${Math.max(indent * 4, 8)}px` }}>{line.trim()}</p>;
+        }
+        if (line.match(/^\d+\.\s/)) {
+          return <p key={i} className="text-foreground mt-1">{line}</p>;
+        }
+        if (line.match(/^\s{2,}/)) {
+          return <p key={i} className="text-muted-foreground pl-4">{line.trim()}</p>;
+        }
+        if (line.startsWith("#")) {
+          const cleaned = line.replace(/^#+\s*/, "");
+          return <p key={i} className="font-semibold text-foreground mt-3 mb-1 text-base">{cleaned}</p>;
+        }
+        if (line.trim() === "") return <br key={i} />;
+        return <p key={i} className="text-foreground">{line}</p>;
+      })}
     </div>
   );
 }
@@ -305,12 +351,11 @@ export default function WorkflowStepWorkspace() {
         }
 
         if (data.type === "complete") {
-          const result = JSON.parse(data.content);
           setStreamMessages((prev) => [
             ...prev,
             {
               role: "assistant",
-              content: `Execution complete. Generated: ${result.deliverableTitle}`,
+              content: "Done.",
               messageType: "complete",
             },
           ]);
@@ -358,6 +403,7 @@ export default function WorkflowStepWorkspace() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum, "chat"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum] });
     },
   });
 
@@ -414,6 +460,16 @@ export default function WorkflowStepWorkspace() {
         </div>
       );
     }
+    if (msg.messageType === "deliverable") {
+      return (
+        <div
+          className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+          style={{ backgroundColor: agentColor + "20" }}
+        >
+          <FileText size={14} style={{ color: agentColor }} />
+        </div>
+      );
+    }
     return (
       <div
         className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
@@ -426,6 +482,34 @@ export default function WorkflowStepWorkspace() {
         ) : (
           <Bot size={14} style={{ color: agentColor }} />
         )}
+      </div>
+    );
+  }
+
+  function renderDeliverableInline(msg: ChatMessage) {
+    let contentJson: any;
+    try {
+      contentJson = typeof msg.content === "string" ? JSON.parse(msg.content) : msg.content;
+    } catch {
+      contentJson = msg.content;
+    }
+
+    const agentKey = msg.metadata?.agentKey || step.agentKey;
+    const text = formatDeliverableText(agentKey, contentJson);
+    const title = msg.metadata?.title || step.name;
+
+    return (
+      <div className="flex-1 min-w-0 pt-0.5">
+        <Card className="p-3 sm:p-4 overflow-hidden border-l-2" style={{ borderLeftColor: agentColor }}>
+          <div className="flex items-center gap-2 mb-2 min-w-0">
+            <span className="text-xs font-semibold text-muted-foreground">{title}</span>
+            {msg.metadata?.version && (
+              <Badge variant="default" className="text-[10px] shrink-0">v{msg.metadata.version}</Badge>
+            )}
+          </div>
+          <FormattedText text={text} />
+          {isApproved && <JsonToggle content={contentJson} />}
+        </Card>
       </div>
     );
   }
@@ -451,65 +535,6 @@ export default function WorkflowStepWorkspace() {
           <span className="inline-block ml-1 animate-pulse">...</span>
         )}
       </div>
-    );
-  }
-
-  function renderDeliverableText(d: { contentJson: any; title: string; version: number; locked: boolean; id: number }) {
-    const text = formatDeliverableText(step.agentKey, d.contentJson);
-    return (
-      <Card key={d.id} className="p-3 sm:p-4 mb-3 overflow-hidden">
-        <div className="flex items-center gap-2 mb-3 min-w-0">
-          <FileText size={14} className="text-primary shrink-0" />
-          <h3 className="font-semibold text-sm flex-1 truncate min-w-0">{d.title}</h3>
-          <Badge variant="default" className="shrink-0">v{d.version}</Badge>
-          {d.locked && (
-            <Badge variant="default" className="gap-1 shrink-0"><Lock size={10} /> Locked</Badge>
-          )}
-        </div>
-        <div className="text-sm leading-relaxed break-words overflow-hidden" style={{ wordBreak: "break-word" }}>
-          {text.split("\n").map((line, i) => {
-            if (line.startsWith("**") && line.endsWith("**")) {
-              return <p key={i} className="font-semibold text-foreground mt-3 mb-1">{line.replace(/\*\*/g, "")}</p>;
-            }
-            if (line.match(/^\*\*.*\*\*$/)) {
-              return <p key={i} className="font-semibold text-foreground mt-3 mb-1">{line.replace(/\*\*/g, "")}</p>;
-            }
-            if (line.match(/^\*\*.*\*\*\s/)) {
-              const parts = line.match(/^\*\*(.*?)\*\*\s*(.*)/);
-              if (parts) {
-                return <p key={i} className="mt-2"><span className="font-semibold text-foreground">{parts[1]}</span> {parts[2]}</p>;
-              }
-            }
-            if (line.match(/^\*\*.*:\*\*/)) {
-              const parts = line.match(/^\*\*(.*?):\*\*\s*(.*)/);
-              if (parts) {
-                return <p key={i} className="mt-1"><span className="font-semibold text-foreground">{parts[1]}:</span> {parts[2]}</p>;
-              }
-            }
-            if (line.match(/^\*\*.*\*\*/)) {
-              const cleaned = line.replace(/\*\*/g, "");
-              return <p key={i} className="font-semibold text-foreground mt-3 mb-1">{cleaned}</p>;
-            }
-            if (line.trim().startsWith("- ")) {
-              const indent = line.match(/^(\s*)/)?.[1]?.length || 0;
-              return <p key={i} className="text-muted-foreground" style={{ paddingLeft: `${Math.max(indent * 4, 8)}px` }}>{line.trim()}</p>;
-            }
-            if (line.match(/^\d+\.\s/)) {
-              return <p key={i} className="text-foreground mt-1">{line}</p>;
-            }
-            if (line.match(/^\s{2,}/)) {
-              return <p key={i} className="text-muted-foreground pl-4">{line.trim()}</p>;
-            }
-            if (line.startsWith("#")) {
-              const cleaned = line.replace(/^#+\s*/, "");
-              return <p key={i} className="font-semibold text-foreground mt-3 mb-1 text-base">{cleaned}</p>;
-            }
-            if (line.trim() === "") return <br key={i} />;
-            return <p key={i} className="text-foreground">{line}</p>;
-          })}
-        </div>
-        {isApproved && <JsonToggle content={d.contentJson} />}
-      </Card>
     );
   }
 
@@ -608,9 +633,13 @@ export default function WorkflowStepWorkspace() {
                 {allMessages.map((msg, i) => (
                   <div key={msg.id || `stream-${i}`} className="flex gap-2 sm:gap-3 items-start">
                     {renderMessageIcon(msg)}
-                    <div className="flex-1 min-w-0 pt-0.5 overflow-hidden break-words">
-                      {renderMessageContent(msg)}
-                    </div>
+                    {msg.messageType === "deliverable" ? (
+                      renderDeliverableInline(msg)
+                    ) : (
+                      <div className="flex-1 min-w-0 pt-0.5 overflow-hidden break-words">
+                        {renderMessageContent(msg)}
+                      </div>
+                    )}
                   </div>
                 ))}
 
@@ -628,54 +657,27 @@ export default function WorkflowStepWorkspace() {
                   </div>
                 )}
 
-                {!isStreaming && deliverables.length > 0 && (step.status === "completed" || step.status === "approved") && (
-                  <div className="border-t border-border pt-4 mt-4">
-                    <div className="flex items-center gap-2 mb-3">
-                      <FileText size={16} className="text-primary" />
-                      <span className="text-sm font-semibold">Results</span>
+                {sendChatMutation.isPending && (
+                  <div className="flex gap-3 items-start">
+                    <div
+                      className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: agentColor + "20" }}
+                    >
+                      <RefreshCw size={14} className="animate-spin" style={{ color: agentColor }} />
                     </div>
-                    {deliverables.map((d) => renderDeliverableText(d))}
-
-                    {step.status === "completed" && (
-                      <div className="flex justify-center mt-3">
-                        <Button onClick={() => approveStepMutation.mutate()} disabled={approveStepMutation.isPending}>
-                          {approveStepMutation.isPending ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <><Check size={16} /> Approve & Lock Deliverables</>
-                          )}
-                        </Button>
-                      </div>
-                    )}
+                    <div className="text-sm text-muted-foreground pt-0.5">
+                      Refining output with your feedback<span className="animate-pulse">...</span>
+                    </div>
                   </div>
                 )}
-              </div>
-            )}
 
-            {!hasHistory && (step.status === "completed" || step.status === "approved") && deliverables.length > 0 && (
-              <div className="max-w-3xl mx-auto">
-                <div className="flex items-center gap-3 mb-4">
-                  <div
-                    className="w-8 h-8 rounded-full flex items-center justify-center"
-                    style={{ backgroundColor: agentColor + "20" }}
-                  >
-                    <Bot size={16} style={{ color: agentColor }} />
-                  </div>
-                  <div>
-                    <span className="text-sm font-semibold">{step.name} Agent</span>
-                    <p className="text-xs text-muted-foreground">Generated {deliverables.length} deliverable(s)</p>
-                  </div>
-                </div>
-
-                {deliverables.map((d) => renderDeliverableText(d))}
-
-                {step.status === "completed" && (
-                  <div className="flex justify-center mt-4">
-                    <Button onClick={() => approveStepMutation.mutate()} disabled={approveStepMutation.isPending}>
+                {!isStreaming && !sendChatMutation.isPending && canApprove && (
+                  <div className="flex justify-center pt-2">
+                    <Button onClick={() => approveStepMutation.mutate()} disabled={approveStepMutation.isPending} size="sm">
                       {approveStepMutation.isPending ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                        <><Check size={16} /> Approve & Lock Deliverables</>
+                        <><Check size={14} /> Approve & Continue</>
                       )}
                     </Button>
                   </div>
@@ -702,15 +704,17 @@ export default function WorkflowStepWorkspace() {
                 placeholder={
                   isStreaming
                     ? "Agent is running..."
+                    : sendChatMutation.isPending
+                    ? "Refining output..."
                     : step.status === "not_started"
                     ? "Run the agent first, then ask follow-up questions here"
-                    : `Ask the ${step.name} agent a question...`
+                    : `Ask for changes or refinements...`
                 }
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 rows={1}
-                disabled={isStreaming || step.status === "not_started"}
+                disabled={isStreaming || sendChatMutation.isPending || step.status === "not_started"}
               />
               <Button
                 size="icon"

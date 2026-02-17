@@ -366,6 +366,10 @@ export const storage = {
       .orderBy(desc(deliverables.version));
   },
 
+  async updateDeliverable(id: number, data: { contentJson?: any; title?: string }): Promise<void> {
+    await db.update(deliverables).set(data).where(eq(deliverables.id, id));
+  },
+
   async lockDeliverables(stepId: number): Promise<void> {
     await db
       .update(deliverables)
