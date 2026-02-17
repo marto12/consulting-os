@@ -6,9 +6,76 @@ import {
   integer,
   timestamp,
   jsonb,
+  boolean,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+
+export const workflowTemplates = pgTable("workflow_templates", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const workflowTemplateSteps = pgTable("workflow_template_steps", {
+  id: serial("id").primaryKey(),
+  workflowTemplateId: integer("workflow_template_id")
+    .notNull()
+    .references(() => workflowTemplates.id, { onDelete: "cascade" }),
+  stepOrder: integer("step_order").notNull(),
+  name: text("name").notNull(),
+  agentKey: text("agent_key").notNull(),
+  description: text("description").notNull().default(""),
+  configJson: jsonb("config_json"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const agents = pgTable("agents", {
+  id: serial("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  role: text("role").notNull().default(""),
+  roleColor: text("role_color").notNull().default("#3B82F6"),
+  promptTemplate: text("prompt_template").notNull().default(""),
+  inputSchema: jsonb("input_schema"),
+  outputSchema: jsonb("output_schema"),
+  toolRefs: jsonb("tool_refs").default(sql`'[]'::jsonb`),
+  datasetRefs: jsonb("dataset_refs").default(sql`'[]'::jsonb`),
+  modelRefs: jsonb("model_refs").default(sql`'[]'::jsonb`),
+  model: text("model").notNull().default("gpt-5-nano"),
+  maxTokens: integer("max_tokens").notNull().default(8192),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const datasets = pgTable("datasets", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  owner: text("owner").notNull().default("system"),
+  accessLevel: text("access_level").notNull().default("private"),
+  schemaJson: jsonb("schema_json"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const models = pgTable("models", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  inputSchema: jsonb("input_schema"),
+  outputSchema: jsonb("output_schema"),
+  apiConfig: jsonb("api_config"),
+  linkedWorkflowIds: jsonb("linked_workflow_ids").default(sql`'[]'::jsonb`),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
 
 export const projects = pgTable("projects", {
   id: serial("id").primaryKey(),
@@ -16,8 +83,52 @@ export const projects = pgTable("projects", {
   objective: text("objective").notNull(),
   constraints: text("constraints").notNull(),
   stage: text("stage").notNull().default("created"),
+  workflowTemplateId: integer("workflow_template_id"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const workflowInstances = pgTable("workflow_instances", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  workflowTemplateId: integer("workflow_template_id")
+    .notNull(),
+  currentStepOrder: integer("current_step_order").notNull().default(0),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const workflowInstanceSteps = pgTable("workflow_instance_steps", {
+  id: serial("id").primaryKey(),
+  workflowInstanceId: integer("workflow_instance_id")
+    .notNull()
+    .references(() => workflowInstances.id, { onDelete: "cascade" }),
+  stepOrder: integer("step_order").notNull(),
+  name: text("name").notNull(),
+  agentKey: text("agent_key").notNull(),
+  status: text("status").notNull().default("not_started"),
+  configJson: jsonb("config_json"),
+  outputSummary: jsonb("output_summary"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const deliverables = pgTable("deliverables", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  stepId: integer("step_id")
+    .notNull()
+    .references(() => workflowInstanceSteps.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  contentJson: jsonb("content_json").notNull(),
+  version: integer("version").notNull().default(1),
+  locked: boolean("locked").notNull().default(false),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
 export const issueNodes = pgTable("issue_nodes", {
@@ -120,6 +231,7 @@ export const agentConfigs = pgTable("agent_configs", {
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
   title: text("title").notNull(),
+  projectId: integer("project_id"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
@@ -159,3 +271,14 @@ export type RunLog = typeof runLogs.$inferSelect;
 export type Slide = typeof slides.$inferSelect;
 export type AgentConfig = typeof agentConfigs.$inferSelect;
 export type PipelineConfig = typeof pipelineConfigs.$inferSelect;
+
+export type WorkflowTemplate = typeof workflowTemplates.$inferSelect;
+export type WorkflowTemplateStep = typeof workflowTemplateSteps.$inferSelect;
+export type Agent = typeof agents.$inferSelect;
+export type Dataset = typeof datasets.$inferSelect;
+export type Model = typeof models.$inferSelect;
+export type WorkflowInstance = typeof workflowInstances.$inferSelect;
+export type WorkflowInstanceStep = typeof workflowInstanceSteps.$inferSelect;
+export type Deliverable = typeof deliverables.$inferSelect;
+export type Conversation = typeof conversations.$inferSelect;
+export type Message = typeof messages.$inferSelect;

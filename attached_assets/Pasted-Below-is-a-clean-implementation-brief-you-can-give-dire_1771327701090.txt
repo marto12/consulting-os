@@ -1,0 +1,309 @@
+Below is a clean implementation brief you can give directly to your coding agent.
+It assumes you already have an MVP and need to refactor toward a clearer hierarchy.
+
+⸻
+
+Consulting OS – Architecture Refactor Brief
+
+Objective
+
+Refactor the current MVP to enforce a clean four-layer architecture:
+	1.	Projects (execution layer)
+	2.	Workflows (blueprint/orchestration layer)
+	3.	Agents (capability layer)
+	4.	Data & Models (institutional layer)
+
+The system must enforce:
+
+Projects instantiate Workflows
+Workflows reference Agents
+Agents reference Data/Models
+Projects do NOT directly attach Agents
+
+No cross-layer shortcuts.
+
+⸻
+
+1. Core Hierarchy
+
+Correct Object Relationships
+
+Project
+  └── workflowInstance (created from workflowTemplate)
+        └── steps[]
+              └── agentId (reference)
+
+WorkflowTemplate
+  └── steps[]
+        └── agentId (reference)
+
+Agent
+  └── tools[]
+  └── datasetIds[]
+  └── modelIds[]
+
+A Project never references an Agent directly.
+
+⸻
+
+2. Routing Structure
+
+Refactor routes to:
+
+/projects
+/projects/:projectId
+/projects/:projectId/workflow
+/projects/:projectId/workflow/:stepId
+
+/workflows
+/workflows/:workflowId
+
+/agents
+/agents/:agentId
+
+/data/datasets
+/data/datasets/:datasetId
+
+/data/models
+/data/models/:modelId
+
+
+⸻
+
+3. Global Navigation
+
+Persistent sidebar:
+	•	Projects
+	•	Workflows
+	•	Agents
+	•	Data & Models
+	•	Admin (optional)
+
+No second global sidebar.
+
+Project-level navigation must use tabs.
+
+⸻
+
+4. Project Structure
+
+Project Detail Page
+
+Tabs:
+	•	Overview (Coordinator Chat)
+	•	Workflow
+	•	Deliverables
+	•	Files
+	•	Activity
+
+Default tab = Overview.
+
+⸻
+
+5. Workflow Execution Inside Project
+
+Project → Workflow Tab
+
+Show:
+	•	Horizontal step progression bar
+	•	Step status (not_started, in_progress, approved, complete)
+
+Example:
+
+Framing → Issues → Hypotheses → Analysis → Synthesis
+
+Clicking a step opens:
+
+/projects/:projectId/workflow/:stepId
+
+
+⸻
+
+Step Workspace Layout
+
+Three areas:
+	1.	Step Header
+	•	Step name
+	•	Assigned agent
+	•	Status
+	•	Approve button
+	•	Pass to Next button (disabled until approved)
+	2.	Agent Chat Panel
+	3.	Deliverables Panel (versioned outputs)
+
+Deliverables must be first-class objects:
+	•	id
+	•	version
+	•	createdAt
+	•	locked (boolean)
+	•	stepId
+
+When “Pass to Next” is clicked:
+	•	Lock current step outputs
+	•	Create summary payload
+	•	Update workflowInstance.currentStep
+
+⸻
+
+6. Workflow Templates (Blueprint Layer)
+
+Global → Workflows is a template library only.
+
+Each template contains:
+	•	name
+	•	description
+	•	ordered steps[]
+	•	agentId per step
+	•	optional model/dataset references
+
+Workflow template changes must NOT retroactively alter existing projects.
+
+When creating a project:
+	•	Copy workflow template into workflowInstance
+	•	Freeze agent version reference
+
+⸻
+
+7. Agents (Capability Layer)
+
+Agent object structure:
+
+id
+name
+description
+promptTemplate
+inputSchema
+outputSchema
+toolRefs[]
+datasetRefs[]
+modelRefs[]
+version
+
+Agents are only assigned:
+	•	During workflow template design
+	•	Or overridden inside a specific project step
+
+No global-to-project attachment.
+
+⸻
+
+8. Data & Models
+
+Split into:
+
+Datasets
+
+Fields:
+
+id
+name
+owner
+accessLevel
+schema
+metadata
+
+Models
+
+Fields:
+
+id
+name
+description
+inputSchema
+outputSchema
+apiConfig
+linkedWorkflowIds[]
+
+Agents may reference datasets/models.
+
+Projects may attach datasets/models at step level only.
+
+⸻
+
+9. Command Palette (Power User Layer)
+
+Global overlay (Cmd+K):
+
+Must support:
+	•	Navigate to project
+	•	Navigate to workflow
+	•	Navigate to agent
+	•	Run next step
+	•	Approve step
+	•	Attach dataset to step
+	•	Insert step
+	•	Create project
+	•	Create workflow
+
+Command palette does NOT bypass hierarchy rules.
+
+⸻
+
+10. MVP Constraints
+
+For v1 refactor:
+
+Do NOT implement:
+	•	Conditional branching
+	•	Multi-agent parallelism
+	•	Complex permissioning
+	•	Cross-project workflow linking
+
+Focus on:
+	•	Clean hierarchy
+	•	Deterministic step progression
+	•	Versioned deliverables
+	•	Human approval gates
+
+⸻
+
+11. Data Migration Plan
+
+If current MVP attaches agents directly to projects:
+
+Migration logic:
+	1.	Create default workflow template from existing project structure
+	2.	Convert project.agent references → workflowInstance.steps[]
+	3.	Attach agentIds to steps
+	4.	Remove project.agent field
+
+⸻
+
+12. State Management Rules
+
+Must enforce:
+	•	Only one active step at a time
+	•	Step cannot advance without approval
+	•	Deliverables are immutable once step is passed
+	•	Workflow template edits do not modify existing project instances
+
+⸻
+
+13. Acceptance Criteria
+
+Refactor is complete when:
+	•	Agents cannot be attached to projects outside workflows
+	•	All project execution happens inside workflowInstance
+	•	Workflow templates are reusable and versioned
+	•	Step-level deliverables are versioned and lockable
+	•	Navigation matches route structure above
+
+⸻
+
+14. Conceptual Model to Maintain
+
+Four layers only:
+
+Execution → Projects
+Orchestration → Workflows
+Capability → Agents
+Institutional → Data & Models
+
+No cross-layer shortcuts.
+
+⸻
+
+If you want, I can next:
+	•	Convert this into a database schema (Postgres-ready)
+	•	Or into a technical architecture diagram
+	•	Or reduce this to a strict v1 scope to avoid overbuilding
