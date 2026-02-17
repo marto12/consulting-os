@@ -19,10 +19,12 @@ import {
   workflowInstances,
   workflowInstanceSteps,
   deliverables,
+  stepChatMessages,
   conversations,
   messages,
   type Project,
   type InsertProject,
+  type StepChatMessage,
   type IssueNode,
   type Hypothesis,
   type AnalysisPlan,
@@ -672,5 +674,37 @@ export const storage = {
 
   async deletePipeline(id: number): Promise<void> {
     await db.delete(pipelineConfigs).where(eq(pipelineConfigs.id, id));
+  },
+
+  async getStepChatMessages(stepId: number): Promise<StepChatMessage[]> {
+    return db
+      .select()
+      .from(stepChatMessages)
+      .where(eq(stepChatMessages.stepId, stepId))
+      .orderBy(asc(stepChatMessages.createdAt));
+  },
+
+  async insertStepChatMessage(data: {
+    stepId: number;
+    role: string;
+    content: string;
+    messageType?: string;
+    metadata?: any;
+  }): Promise<StepChatMessage> {
+    const [msg] = await db
+      .insert(stepChatMessages)
+      .values({
+        stepId: data.stepId,
+        role: data.role,
+        content: data.content,
+        messageType: data.messageType || "message",
+        metadata: data.metadata || null,
+      })
+      .returning();
+    return msg;
+  },
+
+  async clearStepChatMessages(stepId: number): Promise<void> {
+    await db.delete(stepChatMessages).where(eq(stepChatMessages.stepId, stepId));
   },
 };

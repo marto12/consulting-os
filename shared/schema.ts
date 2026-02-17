@@ -219,6 +219,18 @@ export const slides = pgTable("slides", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+export const stepChatMessages = pgTable("step_chat_messages", {
+  id: serial("id").primaryKey(),
+  stepId: integer("step_id")
+    .notNull()
+    .references(() => workflowInstanceSteps.id, { onDelete: "cascade" }),
+  role: text("role").notNull(),
+  content: text("content").notNull(),
+  messageType: text("message_type").notNull().default("message"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const agentConfigs = pgTable("agent_configs", {
   id: serial("id").primaryKey(),
   agentType: text("agent_type").notNull().unique(),
@@ -280,5 +292,6 @@ export type Model = typeof models.$inferSelect;
 export type WorkflowInstance = typeof workflowInstances.$inferSelect;
 export type WorkflowInstanceStep = typeof workflowInstanceSteps.$inferSelect;
 export type Deliverable = typeof deliverables.$inferSelect;
+export type StepChatMessage = typeof stepChatMessages.$inferSelect;
 export type Conversation = typeof conversations.$inferSelect;
 export type Message = typeof messages.$inferSelect;
