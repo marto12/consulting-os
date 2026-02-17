@@ -9,6 +9,7 @@ import {
   Wrench,
   Terminal,
   AlertCircle,
+  Loader2,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -65,7 +66,7 @@ export default function AgentDetail() {
     return (
       <div>
         <div className="flex items-center justify-center min-h-[300px]">
-          <div className="spinner" />
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
       </div>
     );
