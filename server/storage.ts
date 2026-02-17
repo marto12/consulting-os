@@ -131,6 +131,10 @@ export const storage = {
     return step;
   },
 
+  async updateWorkflowTemplateStep(id: number, data: { stepOrder?: number; name?: string; agentKey?: string }): Promise<void> {
+    await db.update(workflowTemplateSteps).set(data).where(eq(workflowTemplateSteps.id, id));
+  },
+
   async deleteWorkflowTemplateStep(id: number): Promise<void> {
     await db.delete(workflowTemplateSteps).where(eq(workflowTemplateSteps.id, id));
   },

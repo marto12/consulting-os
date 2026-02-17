@@ -15,6 +15,8 @@ import { cn } from "../lib/utils";
 
 const STAGE_LABELS: Record<string, string> = {
   created: "New",
+  definition_draft: "Definition Draft",
+  definition_approved: "Definition Approved",
   issues_draft: "Issues Draft",
   issues_approved: "Issues Approved",
   hypotheses_draft: "Hypotheses Draft",
@@ -36,9 +38,10 @@ function getStageVariant(stage: string): "success" | "warning" | "default" {
 
 function getStageProgress(stage: string): number {
   const stages = [
-    "created", "issues_draft", "issues_approved", "hypotheses_draft",
+    "created", "definition_draft", "definition_approved",
+    "issues_draft", "issues_approved", "hypotheses_draft",
     "hypotheses_approved", "execution_done", "execution_approved",
-    "summary_draft", "complete",
+    "summary_draft", "summary_approved", "presentation_draft", "complete",
   ];
   const idx = stages.indexOf(stage);
   if (idx === -1) return 0;

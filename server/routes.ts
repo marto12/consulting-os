@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import { storage } from "./storage";
 import { registerChatRoutes } from "./replit_integrations/chat/routes";
 import {
+  projectDefinitionAgent,
   issuesTreeAgent,
   hypothesisAgent,
   executionAgent,
@@ -15,6 +16,8 @@ import {
 
 const STAGE_ORDER = [
   "created",
+  "definition_draft",
+  "definition_approved",
   "issues_draft",
   "issues_approved",
   "hypotheses_draft",
@@ -28,6 +31,7 @@ const STAGE_ORDER = [
 ];
 
 const APPROVE_MAP: Record<string, string> = {
+  definition_draft: "definition_approved",
   issues_draft: "issues_approved",
   hypotheses_draft: "hypotheses_approved",
   execution_done: "execution_approved",
@@ -36,7 +40,8 @@ const APPROVE_MAP: Record<string, string> = {
 };
 
 const RUN_NEXT_MAP: Record<string, string> = {
-  created: "issues_draft",
+  created: "definition_draft",
+  definition_approved: "issues_draft",
   issues_approved: "hypotheses_draft",
   hypotheses_approved: "execution_done",
   execution_approved: "summary_draft",
@@ -44,6 +49,7 @@ const RUN_NEXT_MAP: Record<string, string> = {
 };
 
 const DEFAULT_AGENTS = [
+  { key: "project_definition", name: "Project Definition", role: "Framing", roleColor: "#F59E0B", description: "Translates vague briefs into structured, decision-based problem definitions with governing questions, success metrics, and initial hypotheses" },
   { key: "issues_tree", name: "Issues Tree", role: "Generator", roleColor: "#3B82F6", description: "Builds MECE issues tree from project objective" },
   { key: "mece_critic", name: "MECE Critic", role: "Quality Gate", roleColor: "#8B5CF6", description: "Validates MECE structure and compliance" },
   { key: "hypothesis", name: "Hypothesis", role: "Analyst", roleColor: "#0891B2", description: "Generates testable hypotheses and analysis plans" },
@@ -53,11 +59,12 @@ const DEFAULT_AGENTS = [
 ];
 
 const DEFAULT_WORKFLOW_STEPS = [
-  { stepOrder: 1, name: "Issues Tree", agentKey: "issues_tree" },
-  { stepOrder: 2, name: "Hypotheses & Analysis Plan", agentKey: "hypothesis" },
-  { stepOrder: 3, name: "Execution", agentKey: "execution" },
-  { stepOrder: 4, name: "Executive Summary", agentKey: "summary" },
-  { stepOrder: 5, name: "Presentation", agentKey: "presentation" },
+  { stepOrder: 1, name: "Project Definition", agentKey: "project_definition" },
+  { stepOrder: 2, name: "Issues Tree", agentKey: "issues_tree" },
+  { stepOrder: 3, name: "Hypotheses & Analysis Plan", agentKey: "hypothesis" },
+  { stepOrder: 4, name: "Execution", agentKey: "execution" },
+  { stepOrder: 5, name: "Executive Summary", agentKey: "summary" },
+  { stepOrder: 6, name: "Presentation", agentKey: "presentation" },
 ];
 
 async function ensureDefaults() {
@@ -69,13 +76,29 @@ async function ensureDefaults() {
   if (templates.length === 0) {
     const template = await storage.createWorkflowTemplate({
       name: "Consulting Analysis",
-      description: "Standard consulting workflow: Issues Tree -> Hypotheses -> Execution -> Summary -> Presentation",
+      description: "Standard consulting workflow: Project Definition -> Issues Tree -> Hypotheses -> Execution -> Summary -> Presentation",
     });
     for (const step of DEFAULT_WORKFLOW_STEPS) {
       await storage.addWorkflowTemplateStep({
         workflowTemplateId: template.id,
         ...step,
       });
+    }
+  } else {
+    for (const template of templates) {
+      const steps = await storage.getWorkflowTemplateSteps(template.id);
+      const hasDefinition = steps.some((s) => s.agentKey === "project_definition");
+      if (!hasDefinition) {
+        for (const s of steps) {
+          await storage.updateWorkflowTemplateStep(s.id, { stepOrder: s.stepOrder + 1 });
+        }
+        await storage.addWorkflowTemplateStep({
+          workflowTemplateId: template.id,
+          stepOrder: 1,
+          name: "Project Definition",
+          agentKey: "project_definition",
+        });
+      }
     }
   }
 }
@@ -206,7 +229,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let deliverableContent: any = null;
         let deliverableTitle = step.name;
 
-        if (step.agentKey === "issues_tree") {
+        if (step.agentKey === "project_definition") {
+          const result = await projectDefinitionAgent(project.objective, project.constraints);
+          deliverableContent = result;
+          deliverableTitle = "Project Definition";
+          await storage.updateProjectStage(projectId, "definition_draft");
+        } else if (step.agentKey === "issues_tree") {
           const result = await issuesTreeAgent(project.objective, project.constraints);
           const version = (await storage.getLatestIssueVersion(projectId)) + 1;
           const idMap = new Map<string, number>();
@@ -370,6 +398,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (instance) {
         const steps = await storage.getWorkflowInstanceSteps(instance.id);
         const agentKeyMap: Record<string, string> = {
+          definition_draft: "project_definition",
           issues_draft: "issues_tree",
           hypotheses_draft: "hypothesis",
           execution_done: "execution",
@@ -395,7 +424,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const runLog = await storage.insertRunLog(projectId, nextStage, { currentStage: project.stage }, modelUsed);
 
       try {
-        if (nextStage === "issues_draft") {
+        if (nextStage === "definition_draft") {
+          const result = await projectDefinitionAgent(project.objective, project.constraints);
+          await storage.updateRunLog(runLog.id, result, "success");
+        } else if (nextStage === "issues_draft") {
           const result = await issuesTreeAgent(project.objective, project.constraints);
           const version = (await storage.getLatestIssueVersion(projectId)) + 1;
           const idMap = new Map<string, number>();
@@ -493,14 +525,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const project = await storage.getProject(projectId);
       if (!project) return res.status(404).json({ error: "Not found" });
       const stageMap: Record<string, string> = {
-        issues: "created", hypotheses: "issues_approved", execution: "hypotheses_approved",
+        definition: "created", issues: "definition_approved", hypotheses: "issues_approved", execution: "hypotheses_approved",
         summary: "execution_approved", presentation: "summary_approved",
       };
       const targetStage = stageMap[step];
       if (!targetStage) return res.status(400).json({ error: `Invalid step "${step}"` });
       const currentIdx = STAGE_ORDER.indexOf(project.stage);
       const stepDraftStages: Record<string, string> = {
-        issues: "issues_draft", hypotheses: "hypotheses_draft", execution: "execution_done",
+        definition: "definition_draft", issues: "issues_draft", hypotheses: "hypotheses_draft", execution: "execution_done",
         summary: "summary_draft", presentation: "presentation_draft",
       };
       const draftIdx = STAGE_ORDER.indexOf(stepDraftStages[step]);
