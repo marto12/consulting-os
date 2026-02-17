@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "../lib/query-client";
-import { Send, Plus, Trash2, MessageSquare } from "lucide-react";
+import { Send, Plus, Trash2, MessageSquare, Loader2 } from "lucide-react";
 import { Button } from "../components/ui/button";
+import { ScrollArea } from "../components/ui/scroll-area";
+import { Textarea } from "../components/ui/textarea";
 import { cn } from "../lib/utils";
 
 interface Message {
@@ -155,12 +157,12 @@ export default function Chat() {
           <Plus size={16} />
           New Chat
         </Button>
-        <div className="flex-1 overflow-y-auto">
+        <ScrollArea className="flex-1">
           {conversations.map((c) => (
             <div
               key={c.id}
               className={cn(
-                "flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent transition-colors",
+                "group flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent transition-colors",
                 activeConvo === c.id && "bg-accent text-accent-foreground"
               )}
               onClick={() => setActiveConvo(c.id)}
@@ -175,7 +177,7 @@ export default function Chat() {
               </button>
             </div>
           ))}
-        </div>
+        </ScrollArea>
       </div>
 
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -247,9 +249,9 @@ export default function Chat() {
 
         <div className="border-t border-border p-4">
           <div className="flex items-end gap-2 max-w-3xl mx-auto">
-            <textarea
+            <Textarea
               ref={inputRef}
-              className="flex-1 resize-none rounded-lg border border-input bg-background px-3 py-2.5 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex-1 resize-none min-h-[40px]"
               placeholder="Send a message..."
               value={input}
               onChange={(e) => setInput(e.target.value)}

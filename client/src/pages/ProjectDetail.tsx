@@ -16,6 +16,7 @@ import {
   PlayCircle,
   CheckCircle,
   RefreshCw,
+  Loader2,
   Target,
   Database,
   FunctionSquare,
@@ -26,6 +27,7 @@ import IssuesGraph from "../components/IssuesGraph";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { cn } from "../lib/utils";
 
 const STAGE_LABELS: Record<string, string> = {
@@ -227,7 +229,7 @@ export default function ProjectDetail() {
     return (
       <div data-testid="project-detail">
         <div className="flex items-center justify-center min-h-[300px]">
-          <div className="spinner" />
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
       </div>
     );
@@ -248,43 +250,38 @@ export default function ProjectDetail() {
         <div className="flex-shrink-0" />
       </div>
 
-      <div className="border-b border-border mb-6">
-        <div className="flex gap-1 overflow-x-auto">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabKey)} className="mb-6">
+        <TabsList className="w-full justify-start h-auto p-0 bg-transparent border-b border-border rounded-none">
           {TABS.map((tab) => (
-            <button
+            <TabsTrigger
               key={tab}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-t-md transition-colors text-muted-foreground hover:text-foreground",
-                activeTab === tab && "text-foreground border-b-2 border-primary"
-              )}
-              onClick={() => setActiveTab(tab)}
+              value={tab}
+              className="flex items-center gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
               data-testid={`tab-${tab}`}
             >
               {TAB_CONFIG[tab].icon}
               {TAB_CONFIG[tab].label}
-            </button>
+            </TabsTrigger>
           ))}
-        </div>
-      </div>
+        </TabsList>
 
-      <div>
-        {activeTab === "overview" && (
+        <TabsContent value="overview">
           <OverviewTab
             project={project}
             stage={stage}
             onRedo={handleRedo}
             redoPending={redoMutation.isPending}
           />
-        )}
-        {activeTab === "issues" && (
+        </TabsContent>
+        <TabsContent value="issues">
           <IssuesTab
             issues={artifacts?.issueNodes || []}
             showApprove={showApprove && stage === "issues_draft"}
             onApprove={() => approveMutation.mutate()}
             approvePending={approveMutation.isPending}
           />
-        )}
-        {activeTab === "hypotheses" && (
+        </TabsContent>
+        <TabsContent value="hypotheses">
           <HypothesesTab
             hypotheses={artifacts?.hypotheses || []}
             plans={artifacts?.analysisPlan || []}
@@ -292,33 +289,35 @@ export default function ProjectDetail() {
             onApprove={() => approveMutation.mutate()}
             approvePending={approveMutation.isPending}
           />
-        )}
-        {activeTab === "runs" && (
+        </TabsContent>
+        <TabsContent value="runs">
           <RunsTab
             runs={artifacts?.modelRuns || []}
             showApprove={showApprove && stage === "execution_done"}
             onApprove={() => approveMutation.mutate()}
             approvePending={approveMutation.isPending}
           />
-        )}
-        {activeTab === "summary" && (
+        </TabsContent>
+        <TabsContent value="summary">
           <SummaryTab
             narratives={artifacts?.narratives || []}
             showApprove={showApprove && stage === "summary_draft"}
             onApprove={() => approveMutation.mutate()}
             approvePending={approveMutation.isPending}
           />
-        )}
-        {activeTab === "presentation" && (
+        </TabsContent>
+        <TabsContent value="presentation">
           <PresentationTab
             slides={artifacts?.slides || []}
             showApprove={showApprove && stage === "presentation_draft"}
             onApprove={() => approveMutation.mutate()}
             approvePending={approveMutation.isPending}
           />
-        )}
-        {activeTab === "logs" && <LogsTab logs={logs || []} />}
-      </div>
+        </TabsContent>
+        <TabsContent value="logs">
+          <LogsTab logs={logs || []} />
+        </TabsContent>
+      </Tabs>
 
       {runNextMutation.isPending && (
         <RunningStatusBar stage={stage} elapsed={runElapsed} />
@@ -458,7 +457,7 @@ function OverviewTab({
                       data-testid={`redo-${step.key}`}
                     >
                       {redoPending ? (
-                        <div className="spinner spinner-sm" />
+                        <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <>
                           <RefreshCw size={13} />
@@ -515,7 +514,7 @@ function InlineApproveButton({ showApprove, onApprove, approvePending }: Approve
       data-testid="inline-approve-btn"
     >
       {approvePending ? (
-        <div className="spinner spinner-sm spinner-white" />
+        <Loader2 className="h-5 w-5 animate-spin" />
       ) : (
         <>
           <CheckCircle size={20} />
