@@ -112,17 +112,9 @@ export default function ProjectDetail() {
     refetchInterval: 5000,
   });
 
-  const runStepMutation = useMutation({
-    mutationFn: async (stepId: number) => {
-      const res = await apiRequest("POST", `/api/projects/${projectId}/workflow/steps/${stepId}/run`);
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "deliverables"] });
-    },
-  });
+  const runStep = (stepId: number) => {
+    navigate(`/project/${projectId}/workflow/${stepId}?autorun=true`);
+  };
 
   const approveStepMutation = useMutation({
     mutationFn: async (stepId: number) => {
@@ -290,18 +282,21 @@ export default function ProjectDetail() {
                         {showRun && (
                           <Button
                             size="sm"
-                            onClick={() => runStepMutation.mutate(step.id)}
-                            disabled={runStepMutation.isPending}
+                            onClick={() => runStep(step.id)}
                             data-testid={`run-step-${step.id}`}
                           >
-                            {runStepMutation.isPending ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <>
-                                <PlayCircle size={14} />
-                                Run
-                              </>
-                            )}
+                            <PlayCircle size={14} />
+                            Run
+                          </Button>
+                        )}
+                        {step.status === "running" && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => navigate(`/project/${projectId}/workflow/${step.id}`)}
+                          >
+                            <Loader2 size={14} className="animate-spin" />
+                            View Progress
                           </Button>
                         )}
                         {showApprove && (
@@ -339,18 +334,21 @@ export default function ProjectDetail() {
                       {showRun && (
                         <Button
                           size="sm"
-                          onClick={() => runStepMutation.mutate(step.id)}
-                          disabled={runStepMutation.isPending}
+                          onClick={() => runStep(step.id)}
                           data-testid={`run-step-${step.id}`}
                         >
-                          {runStepMutation.isPending ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <>
-                              <PlayCircle size={14} />
-                              Run
-                            </>
-                          )}
+                          <PlayCircle size={14} />
+                          Run
+                        </Button>
+                      )}
+                      {step.status === "running" && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => navigate(`/project/${projectId}/workflow/${step.id}`)}
+                        >
+                          <Loader2 size={14} className="animate-spin" />
+                          View Progress
                         </Button>
                       )}
                       {showApprove && (

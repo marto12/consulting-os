@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "../lib/query-client";
 import {
@@ -283,12 +283,14 @@ function FormattedText({ text }: { text: string }) {
 export default function WorkflowStepWorkspace() {
   const { id, stepId } = useParams<{ id: string; stepId: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const projectId = Number(id);
   const stepIdNum = Number(stepId);
   const [showPanel, setShowPanel] = useState(window.innerWidth >= 640);
   const [chatInput, setChatInput] = useState("");
   const [streamMessages, setStreamMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [autorunTriggered, setAutorunTriggered] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -395,6 +397,19 @@ export default function WorkflowStepWorkspace() {
       eventSource.close();
     };
   }, [projectId, stepIdNum]);
+
+  useEffect(() => {
+    if (searchParams.get("autorun") === "true" && !autorunTriggered && !isStreaming && stepData) {
+      const canAutoRun = stepData.step.status === "not_started" || stepData.step.status === "failed";
+      if (canAutoRun) {
+        setAutorunTriggered(true);
+        setSearchParams({}, { replace: true });
+        startStreaming();
+      } else {
+        setSearchParams({}, { replace: true });
+      }
+    }
+  }, [searchParams, autorunTriggered, isStreaming, stepData, startStreaming, setSearchParams]);
 
   const sendChatMutation = useMutation({
     mutationFn: async (message: string) => {
