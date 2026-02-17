@@ -438,12 +438,13 @@ export default function WorkflowStepWorkspace() {
     return (
       <div
         className={cn(
-          "text-sm leading-relaxed",
+          "text-sm leading-relaxed break-words",
           isProgress && "text-muted-foreground",
           isComplete && "text-green-400 font-medium",
           isError && "text-destructive font-medium",
           msg.role === "user" && "text-foreground"
         )}
+        style={{ wordBreak: "break-word" }}
       >
         {msg.content}
         {msg.isStreaming && isProgress && (
@@ -456,16 +457,16 @@ export default function WorkflowStepWorkspace() {
   function renderDeliverableText(d: { contentJson: any; title: string; version: number; locked: boolean; id: number }) {
     const text = formatDeliverableText(step.agentKey, d.contentJson);
     return (
-      <Card key={d.id} className="p-4 mb-3">
-        <div className="flex items-center gap-2 mb-3">
-          <FileText size={14} className="text-primary" />
-          <h3 className="font-semibold text-sm flex-1">{d.title}</h3>
-          <Badge variant="default">v{d.version}</Badge>
+      <Card key={d.id} className="p-3 sm:p-4 mb-3 overflow-hidden">
+        <div className="flex items-center gap-2 mb-3 min-w-0">
+          <FileText size={14} className="text-primary shrink-0" />
+          <h3 className="font-semibold text-sm flex-1 truncate min-w-0">{d.title}</h3>
+          <Badge variant="default" className="shrink-0">v{d.version}</Badge>
           {d.locked && (
-            <Badge variant="default" className="gap-1"><Lock size={10} /> Locked</Badge>
+            <Badge variant="default" className="gap-1 shrink-0"><Lock size={10} /> Locked</Badge>
           )}
         </div>
-        <div className="text-sm leading-relaxed whitespace-pre-wrap">
+        <div className="text-sm leading-relaxed break-words overflow-hidden" style={{ wordBreak: "break-word" }}>
           {text.split("\n").map((line, i) => {
             if (line.startsWith("**") && line.endsWith("**")) {
               return <p key={i} className="font-semibold text-foreground mt-3 mb-1">{line.replace(/\*\*/g, "")}</p>;
@@ -605,9 +606,9 @@ export default function WorkflowStepWorkspace() {
             {hasHistory && (
               <div className="max-w-3xl mx-auto space-y-4">
                 {allMessages.map((msg, i) => (
-                  <div key={msg.id || `stream-${i}`} className="flex gap-3 items-start">
+                  <div key={msg.id || `stream-${i}`} className="flex gap-2 sm:gap-3 items-start">
                     {renderMessageIcon(msg)}
-                    <div className="flex-1 min-w-0 pt-0.5">
+                    <div className="flex-1 min-w-0 pt-0.5 overflow-hidden break-words">
                       {renderMessageContent(msg)}
                     </div>
                   </div>
