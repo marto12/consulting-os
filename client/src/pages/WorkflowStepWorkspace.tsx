@@ -21,6 +21,7 @@ import {
   ChevronDown,
   ChevronRight,
   RefreshCw,
+  Eye,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -29,6 +30,7 @@ import { Textarea } from "../components/ui/textarea";
 import { SidebarTrigger } from "../components/ui/sidebar";
 import { Separator } from "../components/ui/separator";
 import { cn } from "../lib/utils";
+import DeliverablePreview from "../components/DeliverablePreview";
 
 const AGENT_COLORS: Record<string, string> = {
   project_definition: "#F59E0B",
@@ -291,6 +293,8 @@ export default function WorkflowStepWorkspace() {
   const [streamMessages, setStreamMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [autorunTriggered, setAutorunTriggered] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewData, setPreviewData] = useState<{ agentKey: string; content: any; title: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -525,14 +529,30 @@ export default function WorkflowStepWorkspace() {
     const text = formatDeliverableText(agentKey, contentJson);
     const title = msg.metadata?.title || step.name;
 
+    const openPreview = () => {
+      setPreviewData({ agentKey, content: contentJson, title });
+      setPreviewOpen(true);
+    };
+
     return (
       <div className="flex-1 min-w-0 pt-0.5">
         <Card className="p-3 sm:p-4 overflow-hidden border-l-2" style={{ borderLeftColor: agentColor }}>
-          <div className="flex items-center gap-2 mb-2 min-w-0">
-            <span className="text-xs font-semibold text-muted-foreground">{title}</span>
-            {msg.metadata?.version && (
-              <Badge variant="default" className="text-[10px] shrink-0">v{msg.metadata.version}</Badge>
-            )}
+          <div className="flex items-center justify-between gap-2 mb-2 min-w-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xs font-semibold text-muted-foreground">{title}</span>
+              {msg.metadata?.version && (
+                <Badge variant="default" className="text-[10px] shrink-0">v{msg.metadata.version}</Badge>
+              )}
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={openPreview}
+              className="shrink-0 text-xs h-7 px-2.5 gap-1.5"
+            >
+              <Eye size={13} />
+              Preview
+            </Button>
           </div>
           <FormattedText text={text} />
           {isApproved && <JsonToggle content={contentJson} />}
@@ -827,6 +847,16 @@ export default function WorkflowStepWorkspace() {
           </div>
         )}
       </div>
+
+      {previewData && (
+        <DeliverablePreview
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          agentKey={previewData.agentKey}
+          content={previewData.content}
+          title={previewData.title}
+        />
+      )}
     </div>
   );
 }
