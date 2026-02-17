@@ -2,9 +2,11 @@
 
 ## Overview
 
-Consulting OS is a cloud-hosted MVP that demonstrates sequenced AI agents operating on shared, persistent project state with human approval gates. It follows a consulting workflow pattern where users create projects with objectives and constraints, then run AI agents through a structured pipeline: Issues Tree → Hypotheses & Analysis Plan → Execution (with real tool calling) → Executive Summary → Presentation. Each stage requires human approval before the next can proceed.
+Consulting OS is a cloud-hosted MVP that demonstrates sequenced AI agents operating on shared, persistent project state with human approval gates. It follows a four-layer architecture: Projects → Workflows → Agents → Data/Models.
 
-The app is built as a pure React web application (Vite + React + TypeScript) with an Express.js backend and PostgreSQL database. It supports both real OpenAI LLM calls and a mock mode when no API key is configured.
+Users create projects with objectives and constraints, then run AI agents through a structured workflow pipeline: Issues Tree → MECE Critic → Hypothesis → Execution → Summary → Presentation. Each step produces versioned deliverables that require human approval before proceeding.
+
+The app is built as a pure React web application (Vite + React + TypeScript) with shadcn/ui components, an Express.js backend, and PostgreSQL database. It features a dark sidebar navigation (ChatGPT/Harvey AI-style), Cmd+K command palette, and supports both real OpenAI LLM calls and mock mode.
 
 ## User Preferences
 
@@ -12,115 +14,134 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
-- **2026-02-16**: Replaced custom SVG graph visualizations with React Flow (@xyflow/react) for both IssuesGraph (tree layout in ProjectDetail) and Pipeline Builder (agent nodes + approval gates + revision loop).
-- **2026-02-16**: Converted frontend from Expo/React Native to pure React web app (Vite + React Router + standard HTML/CSS). Removed mobile-specific dependencies. Server now uses Vite dev middleware in development mode and serves static build in production.
+- **2026-02-17**: Major four-layer architecture refactor — Projects instantiate workflow templates into frozen workflow instances with step-level execution and versioned deliverables. Added sidebar navigation (Projects, Workflows, Agents, Data & Models), Cmd+K command palette, and shadcn/ui components throughout.
+- **2026-02-16**: Converted frontend from Expo/React Native to pure React web app (Vite + React Router + standard HTML/CSS). Server uses Vite dev middleware in development.
 
 ## System Architecture
 
-### Frontend (Vite + React + TypeScript)
+### Frontend (Vite + React + TypeScript + shadcn/ui)
 
 - **Framework**: Vite with React 19 and TypeScript
+- **UI Library**: shadcn/ui components (Button, Card, Input, Textarea, Badge, Label, Dialog, ScrollArea, Separator, Tooltip, Sheet)
+- **Styling**: Tailwind CSS with CSS custom properties (dark theme)
 - **Routing**: React Router DOM v7 with BrowserRouter
-- **State Management**: TanStack React Query for server state, with `queryClient` and `apiRequest` helpers in `client/src/lib/query-client.ts`
-- **Pages**:
-  - `client/src/pages/Projects.tsx` — Project list with creation modal (tab: Projects)
-  - `client/src/pages/ProjectDetail.tsx` — Full project detail with 7 sub-tabs (overview, issues, hypotheses, runs, summary, presentation, logs)
-  - `client/src/pages/Pipeline.tsx` — SVG pipeline builder diagram (tab: Pipeline)
-  - `client/src/pages/Settings.tsx` — Agent configuration admin panel (tab: Settings)
-  - `client/src/pages/AgentDetail.tsx` — Individual agent detail page
-- **Components**: `client/src/components/IssuesGraph.tsx` — Interactive SVG tree visualization with pan/zoom
-- **Styling**: CSS files with CSS custom properties defined in `client/src/styles/index.css`
-- **Icons**: Lucide React (Bot, Briefcase, GitFork, Settings, etc.)
-- **Fonts**: Inter (400, 500, 600, 700) via Google Fonts
-- **Layout**: `App.tsx` defines Layout component with header (logo + tab nav) wrapping Projects, Pipeline, Settings. ProjectDetail and AgentDetail have their own headers with back buttons.
-- **API Communication**: All API calls go through relative paths via `apiRequest()` — works with Vite proxy in dev and same-origin in production
+- **State Management**: TanStack React Query for server state
+- **Icons**: Lucide React
+- **Layout**: `App.tsx` defines a Layout with dark sidebar (four sections: Projects, Workflows, Agents, Data & Models) + main content area. Routes: `/projects`, `/project/:id`, `/project/:id/workflow/:stepId`, `/workflows`, `/agents`, `/agent/:key`, `/data`
+
+**Pages**:
+- `Projects.tsx` — Project list with creation dialog
+- `ProjectDetail.tsx` — Project detail with 4 tabs: Overview, Workflow (step cards with run/approve), Deliverables, Activity (run logs)
+- `WorkflowStepWorkspace.tsx` — Individual step execution workspace with chat-style agent output, deliverables panel, approve/redo controls
+- `Workflows.tsx` — Workflow template list
+- `Agents.tsx` — Agent registry list with role badges
+- `AgentDetail.tsx` — Agent configuration (model, max tokens, system prompt)
+- `DataModels.tsx` — Datasets and models registry
+
+**Components**:
+- `CommandPalette.tsx` — Cmd+K search across projects, workflows, agents
+- `IssuesGraph.tsx` — Interactive tree visualization for issues
+- `client/src/components/ui/` — shadcn/ui primitives
 
 ### Backend (Express.js)
 
-- **Server**: Express 5 running on port 5000, defined in `server/index.ts`
-- **Vite Integration**: In development (`NODE_ENV=development`), Express uses Vite's `createServer` middleware to serve the React frontend with HMR. In production, serves static files from `dist/public`.
-- **Routes**: Registered in `server/routes.ts` — handles project CRUD, stage transitions (approve/run-next/redo), and data retrieval for issues, hypotheses, analysis plans, model runs, narratives, slides, and run logs
-- **CORS**: Dynamic CORS based on Replit domain environment variables, plus localhost support
+- **Server**: Express 5 on port 5000, defined in `server/index.ts`
+- **Vite Integration**: Dev mode uses Vite middleware for HMR; production serves static files from `dist/public`
+- **Routes** (`server/routes.ts`):
+  - `GET/POST /api/projects` — Project CRUD
+  - `GET /api/projects/:id` — Single project with workflow instance data
+  - `POST /api/projects/:id/workflow/steps/:stepId/run` — Execute a specific workflow step's agent
+  - `POST /api/projects/:id/workflow/steps/:stepId/approve` — Approve step deliverables
+  - `POST /api/projects/:id/workflow/steps/:stepId/redo` — Redo step
+  - `POST /api/projects/:id/run-next` — Run next pending step
+  - `GET /api/projects/:id/deliverables` — All deliverables for project
+  - `GET /api/projects/:id/run-logs` — Run logs for project
+  - `GET /api/workflows` — Workflow templates with steps
+  - `GET /api/agents` — Agent registry
+  - `GET /api/agents/detail/:key` — Single agent config
+  - `PUT /api/agent-configs/:key` — Update agent configuration
+  - `GET /api/data/datasets` / `GET /api/data/models` — Data layer
+  - Legacy endpoints maintained for backward compatibility
 
 ### Workflow Engine
 
-The core business logic enforces a strict stage-based workflow with these transitions:
+Projects instantiate a workflow template into a frozen `workflow_instance` with `workflow_instance_steps`. Each step:
+1. Has a status: `pending` → `running` → `completed` → `approved` (or `failed`)
+2. Executes the associated agent via `/run`
+3. Produces versioned deliverables
+4. Requires human approval before the next step can run
+5. Can be redone (resets to pending, increments deliverable version)
 
-```
-created → issues_draft → issues_approved → hypotheses_draft → hypotheses_approved → execution_done → execution_approved → summary_draft → summary_approved → presentation_draft → complete
-```
-
-- **Pending stages** (require approval): `issues_draft`, `hypotheses_draft`, `execution_done`, `summary_draft`, `presentation_draft`
-- **Run-next mapping**: Only allowed from approved/created stages to the next draft stage
-- **Approval mapping**: Each draft/done stage maps to its approved/complete counterpart. `presentation_draft` approves directly to `complete`.
+Default 6-step consulting pipeline is seeded on server start.
 
 ### AI Agents (`server/agents/`)
 
-- **Architecture**: Six sequential agents — Issues Tree, MECE Critic (quality gate with revision loop), Hypothesis, Execution, Summary, and Presentation
-- **LLM Integration**: Uses OpenAI SDK pointed at Replit AI Integrations (`AI_INTEGRATIONS_OPENAI_API_KEY` and `AI_INTEGRATIONS_OPENAI_BASE_URL`). Model: `gpt-5-nano`
-- **Mock Mode**: When no API key is present, agents return deterministic stub outputs so the app still functions
-- **Tool Calling**: The execution agent uses a scenario calculator tool (`server/agents/scenario-tool.ts`) that performs financial scenario analysis (baseline, optimistic, pessimistic projections with NPV calculations)
-- **JSON Extraction**: Agent responses are parsed from LLM output using regex to find JSON blocks in markdown code fences or raw JSON
+- **Architecture**: Six sequential agents — Issues Tree, MECE Critic (quality gate), Hypothesis, Execution, Summary, Presentation
+- **LLM Integration**: OpenAI SDK via Replit AI Integrations. Model: `gpt-5-nano`
+- **Mock Mode**: Deterministic stub outputs when no API key is configured
+- **Tool Calling**: Execution agent uses scenario calculator tool (`server/agents/scenario-tool.ts`)
+- **JSON Extraction**: Regex-based parsing of JSON from LLM markdown output
 
 ### Database (PostgreSQL + Drizzle ORM)
 
 - **ORM**: Drizzle ORM with PostgreSQL dialect
-- **Schema Location**: `shared/schema.ts` — shared between frontend (for types) and backend
-- **Connection**: `server/db.ts` creates a pg Pool from `DATABASE_URL` environment variable
-- **Schema Push**: Use `npm run db:push` (drizzle-kit push) to sync schema to database
+- **Schema**: `shared/schema.ts` (shared types between frontend and backend)
+- **Connection**: `server/db.ts` — pg Pool from `DATABASE_URL`
+- **Schema Push**: `npm run db:push`
 
 **Core Tables:**
 - `projects` — id, name, objective, constraints, stage, timestamps
-- `issue_nodes` — id, project_id, parent_id, text, priority, version, timestamps (tree structure)
-- `hypotheses` — id, project_id, issue_node_id, statement, metric, data_source, method, version, timestamps
-- `analysis_plan` — id, project_id, hypothesis_id, method, parameters_json, required_dataset, timestamps
-- `model_runs` — audit log of agent executions (inputs, outputs, stage, status, timestamps)
-- `narratives` — executive summaries generated by the summary agent
-- `slides` — presentation slides with layout, title, subtitle, bodyJson, notesText, version tracking
-- `run_logs` — detailed logging of every agent run
+- `workflow_templates` — id, name, description, version, timestamps
+- `workflow_template_steps` — id, templateId, stepOrder, agentKey, label, description
+- `agents` — id, key, name, description, role, roleColor, promptTemplate, systemPrompt, model, maxTokens, toolRefs, datasetRefs, modelRefs
+- `datasets` — id, key, name, description, sourceType, connectionString, schemaInfo
+- `models` — id, key, name, description, framework, version, endpoint
+- `workflow_instances` — id, projectId, templateId, frozenConfig, status, timestamps
+- `workflow_instance_steps` — id, instanceId, stepOrder, agentKey, label, description, status, startedAt, completedAt
+- `deliverables` — id, projectId, stepId, agentKey, contentType, content, version, locked
+- `issue_nodes` — tree structure for issues analysis
+- `hypotheses` — hypothesis statements with metrics
+- `analysis_plan` — analysis methods and parameters
+- `model_runs` — audit log of agent executions
+- `narratives` — executive summaries
+- `slides` — presentation slides with version tracking
+- `run_logs` — detailed agent run logging
 
 ### Storage Layer
 
-- `server/storage.ts` exports a `storage` object with methods for all database operations (CRUD for each table, stage updates, etc.)
-
-### Replit Integration Modules (`server/replit_integrations/`)
-
-Pre-built integration modules included but not central to the consulting workflow:
-- **Chat**: Conversation CRUD with streaming LLM responses
-- **Audio**: Voice recording, speech-to-text, text-to-speech with format detection and ffmpeg conversion
-- **Image**: Image generation via `gpt-image-1`
-- **Batch**: Rate-limited batch processing with retry logic (uses `p-limit` and `p-retry`)
+- `server/storage.ts` — Full CRUD for all tables plus workflow instance management, deliverable versioning/locking, and stage transitions
 
 ### Build System
 
-- **Development**: Single process — `npm run server:dev` runs Express with Vite dev middleware (tsx for server hot reload, Vite HMR for frontend)
-- **Production Build**: `vite build` (from client dir) builds to `dist/public`, `server:build` uses esbuild to bundle server code
-- **Production Run**: `server:prod` serves the built application with static file serving
+- **Development**: `npm run server:dev` — Express + Vite dev middleware (tsx for server, Vite HMR for frontend)
+- **Production Build**: `vite build` → `dist/public`, `server:build` bundles server
+- **Production Run**: `server:prod` serves built app
 
 ## External Dependencies
 
 ### Required Services
-- **PostgreSQL**: Database provisioned via Replit, connection string in `DATABASE_URL` environment variable
-- **Replit AI Integrations (OpenAI-compatible)**: LLM calls for AI agents. Configured via `AI_INTEGRATIONS_OPENAI_API_KEY` and `AI_INTEGRATIONS_OPENAI_BASE_URL`. App works in mock mode without these.
+- **PostgreSQL**: Via Replit, connection in `DATABASE_URL`
+- **Replit AI Integrations**: OpenAI-compatible LLM. Optional (mock mode works without)
 
 ### Key NPM Dependencies
-- **vite** (^7.3.1): Build tool and dev server
-- **react** (19.1.0) + **react-dom**: UI framework
-- **react-router-dom** (^7.13.0): Client-side routing
-- **lucide-react** (^0.564.0): Icon library
-- **express** (^5.0.1): Backend HTTP server
-- **drizzle-orm** (^0.39.3) + **drizzle-kit**: Database ORM and migration tooling
-- **openai** (^6.22.0): OpenAI API client for LLM calls
-- **@tanstack/react-query** (^5.83.0): Server state management
-- **pg** (^8.16.3): PostgreSQL client
+- **vite**: Build tool and dev server
+- **react** + **react-dom**: UI framework
+- **react-router-dom**: Client-side routing
+- **lucide-react**: Icon library
+- **tailwindcss** + **@tailwindcss/vite**: Styling
+- **shadcn/ui components**: UI primitives (button, card, input, badge, dialog, etc.)
+- **express**: Backend HTTP server
+- **drizzle-orm** + **drizzle-kit**: Database ORM
+- **openai**: LLM API client
+- **@tanstack/react-query**: Server state management
+- **pg**: PostgreSQL client
 - **zod** + **drizzle-zod**: Schema validation
-- **p-limit** / **p-retry**: Rate limiting and retry utilities for batch processing
 
 ### Environment Variables
 | Variable | Purpose |
 |----------|---------|
 | `DATABASE_URL` | PostgreSQL connection string (required) |
-| `AI_INTEGRATIONS_OPENAI_API_KEY` | OpenAI API key via Replit integrations (optional, mock mode without) |
+| `AI_INTEGRATIONS_OPENAI_API_KEY` | OpenAI API key via Replit integrations (optional) |
 | `AI_INTEGRATIONS_OPENAI_BASE_URL` | OpenAI base URL via Replit integrations (optional) |
-| `REPLIT_DEV_DOMAIN` | Replit development domain (set automatically) |
-| `REPLIT_DOMAINS` | Replit deployment domains for CORS (set automatically) |
+| `REPLIT_DEV_DOMAIN` | Replit development domain (auto) |
+| `REPLIT_DOMAINS` | Replit deployment domains for CORS (auto) |
