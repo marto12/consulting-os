@@ -12,7 +12,7 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import "./Pipeline.css";
+import { cn } from "@/lib/utils";
 
 interface AgentDef {
   key: string;
@@ -34,43 +34,46 @@ const agents: AgentDef[] = [
 function AgentNodeComponent({ data }: NodeProps) {
   const agent = data.agent as AgentDef;
   return (
-    <div className="rf-agent-node" data-testid={`agent-node-${agent.key}`}>
-      <Handle type="target" position={Position.Left} className="rf-pipeline-handle" />
-      <div className="rf-agent-accent" style={{ background: agent.color }} />
-      <div className="rf-agent-body">
-        <div className="rf-agent-header">
+    <div className="bg-white rounded-lg shadow-sm border border-border overflow-hidden w-[180px] cursor-pointer hover:shadow-md transition-shadow" data-testid={`agent-node-${agent.key}`}>
+      <Handle type="target" position={Position.Left} className="!w-2 !h-2 !bg-border !border-border" />
+      <div className="h-1 w-full" style={{ background: agent.color }} />
+      <div className="p-3">
+        <div className="flex items-center gap-1.5 mb-1">
           <Bot size={14} color={agent.color} />
-          <span className="rf-agent-label">{agent.label}</span>
+          <span className="text-xs font-semibold text-foreground">{agent.label}</span>
         </div>
-        <span className="rf-agent-role" style={{ background: agent.color + "18", color: agent.color }}>
+        <span
+          className="text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-block mb-1"
+          style={{ background: agent.color + "18", color: agent.color }}
+        >
           {agent.role}
         </span>
-        <span className="rf-agent-desc">{agent.description}</span>
+        <span className="text-[10px] text-muted-foreground block">{agent.description}</span>
       </div>
-      <Handle type="source" position={Position.Right} className="rf-pipeline-handle" />
+      <Handle type="source" position={Position.Right} className="!w-2 !h-2 !bg-border !border-border" />
     </div>
   );
 }
 
 function GateNodeComponent({ data }: NodeProps) {
   return (
-    <div className="rf-gate-node">
-      <Handle type="target" position={Position.Left} className="rf-pipeline-handle" />
-      <div className="rf-gate-diamond">
-        <ShieldCheck size={12} color="#D97706" />
+    <div className="flex flex-col items-center">
+      <Handle type="target" position={Position.Left} className="!w-2 !h-2 !bg-border !border-border" />
+      <div className="w-6 h-6 rounded-sm rotate-45 flex items-center justify-center bg-amber-50 border border-amber-200">
+        <ShieldCheck size={12} color="#D97706" className="-rotate-45" />
       </div>
-      <span className="rf-gate-label">{data.label as string}</span>
-      <Handle type="source" position={Position.Right} className="rf-pipeline-handle" />
+      <span className="text-[10px] font-medium text-amber-600 mt-1">{data.label as string}</span>
+      <Handle type="source" position={Position.Right} className="!w-2 !h-2 !bg-border !border-border" />
     </div>
   );
 }
 
 function RevisionNodeComponent({ data }: NodeProps) {
   return (
-    <div className="rf-revision-node">
-      <Handle type="target" position={Position.Right} className="rf-pipeline-handle" />
-      <span className="rf-revision-text">{data.label as string}</span>
-      <Handle type="source" position={Position.Left} className="rf-pipeline-handle" />
+    <div className="bg-violet-50 border border-violet-200 rounded-full px-3 py-1">
+      <Handle type="target" position={Position.Right} className="!w-2 !h-2 !bg-border !border-border" />
+      <span className="text-[10px] font-medium text-violet-600">{data.label as string}</span>
+      <Handle type="source" position={Position.Left} className="!w-2 !h-2 !bg-border !border-border" />
     </div>
   );
 }
@@ -180,15 +183,15 @@ export default function Pipeline() {
   );
 
   return (
-    <div className="pipeline-page">
-      <div className="page-header">
+    <div>
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="page-title">Pipeline Builder</h1>
-          <p className="page-subtitle">Visual workflow of the AI agent pipeline</p>
+          <h1 className="text-2xl font-bold">Pipeline Builder</h1>
+          <p className="text-sm text-muted-foreground mt-1">Visual workflow of the AI agent pipeline</p>
         </div>
       </div>
 
-      <div className="pipeline-diagram-container" style={{ height: 320 }}>
+      <div className="border border-border rounded-xl overflow-hidden bg-white" style={{ height: 320 }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -206,18 +209,18 @@ export default function Pipeline() {
         </ReactFlow>
       </div>
 
-      <div className="pipeline-legend">
-        <span className="pipeline-legend-title">Legend</span>
-        <div className="pipeline-legend-item">
-          <div className="legend-node-sample" />
+      <div className="flex items-center gap-6 mt-4 px-1">
+        <span className="text-xs font-semibold text-muted-foreground">Legend</span>
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <div className="w-4 h-3 rounded-sm border border-border bg-white" />
           Agent Node
         </div>
-        <div className="pipeline-legend-item">
-          <div className="legend-diamond" />
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <div className="w-3 h-3 rounded-sm rotate-45 bg-amber-50 border border-amber-200" />
           Human Gate
         </div>
-        <div className="pipeline-legend-item">
-          <div className="legend-loop-line" />
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <div className="w-4 h-0.5 bg-violet-400" style={{ borderTop: "1.5px dashed #8B5CF6" }} />
           Revision Loop
         </div>
       </div>

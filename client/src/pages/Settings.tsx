@@ -1,8 +1,14 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "../lib/query-client";
-import { Bot, ChevronDown, ChevronUp, Save, Repeat } from "lucide-react";
-import "./Settings.css";
+import { Bot, ChevronDown, ChevronUp, Save, Repeat, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardHeader, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 const PIPELINE_STEPS = [
   {
@@ -144,8 +150,8 @@ export default function Settings() {
 
   if (isLoading) {
     return (
-      <div className="loading-center" data-testid="settings-loading">
-        <div className="spinner" />
+      <div className="flex items-center justify-center min-h-[300px]" data-testid="settings-loading">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -158,46 +164,56 @@ export default function Settings() {
 
   return (
     <div data-testid="settings-page">
-      <p className="settings-subtitle">Configure agents, prompts, and parameters</p>
+      <p className="text-sm text-muted-foreground mb-6">Configure agents, prompts, and parameters</p>
 
-      <div className="settings-section" data-testid="pipeline-section">
-        <h2 className="settings-section-title">Agent Pipeline</h2>
-        <p className="settings-section-subtitle">
-          Each project runs through these stages in order. Human approval is required between stages.
-        </p>
-        <div className="pipeline-track">
-          {PIPELINE_STEPS.map((step, idx) => (
-            <div className="pipeline-step" key={step.key} data-testid={`pipeline-step-${step.key}`}>
-              <div className="pipeline-step-left">
-                <div className="pipeline-step-dot" style={{ backgroundColor: step.roleColor }}>
-                  <span className="pipeline-step-num">{step.step}</span>
-                </div>
-                {idx < PIPELINE_STEPS.length - 1 && (
-                  <div className="pipeline-connector">
-                    {step.key === "issues_tree" && (
-                      <div className="pipeline-loop-indicator">
-                        <Repeat size={11} color="#8B5CF6" />
-                      </div>
-                    )}
+      <Card className="mb-6" data-testid="pipeline-section">
+        <CardHeader>
+          <h2 className="text-lg font-semibold">Agent Pipeline</h2>
+          <p className="text-sm text-muted-foreground">
+            Each project runs through these stages in order. Human approval is required between stages.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-0">
+            {PIPELINE_STEPS.map((step, idx) => (
+              <div className="flex gap-4" key={step.key} data-testid={`pipeline-step-${step.key}`}>
+                <div className="flex flex-col items-center">
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+                    style={{ backgroundColor: step.roleColor }}
+                  >
+                    {step.step}
                   </div>
-                )}
-              </div>
-              <div className="pipeline-step-content">
-                <div className="pipeline-step-header">
-                  <Bot size={16} color={step.roleColor} />
-                  <span className="pipeline-step-label">{step.label}</span>
-                  <span className="role-badge" style={{ backgroundColor: step.roleBg, color: step.roleColor }}>
-                    {step.role}
-                  </span>
+                  {idx < PIPELINE_STEPS.length - 1 && (
+                    <div className="relative w-0.5 bg-border flex-1 mx-auto min-h-[32px]">
+                      {step.key === "issues_tree" && (
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-full p-0.5">
+                          <Repeat size={11} color="#8B5CF6" />
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <p className="pipeline-step-detail">{step.detail}</p>
+                <div className={cn("pb-4", idx === PIPELINE_STEPS.length - 1 && "pb-0")}>
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <Bot size={16} color={step.roleColor} />
+                    <span className="text-sm font-semibold">{step.label}</span>
+                    <span
+                      className="text-xs font-medium px-2 py-0.5 rounded-full"
+                      style={{ backgroundColor: step.roleBg, color: step.roleColor }}
+                    >
+                      {step.role}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{step.detail}</p>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
-      <h2 className="config-section-title">Agent Configuration</h2>
+      <h2 className="text-lg font-semibold mt-8 mb-4">Agent Configuration</h2>
 
       {sortedConfigs.map((config) => {
         const pipelineStep = PIPELINE_STEPS.find((s) => s.key === config.agentType);
@@ -207,53 +223,57 @@ export default function Settings() {
         const isSaving = saveMutation.isPending;
 
         return (
-          <div className="agent-card" key={config.agentType} data-testid={`agent-card-${config.agentType}`}>
+          <Card className="mb-3" key={config.agentType} data-testid={`agent-card-${config.agentType}`}>
             <div
-              className="agent-header"
+              className="flex items-center gap-3 p-4 cursor-pointer hover:bg-muted/50 transition-colors rounded-t-lg"
               onClick={() => toggleExpand(config.agentType)}
               data-testid={`agent-header-${config.agentType}`}
             >
-              <div className="agent-icon" style={{ backgroundColor: pipelineStep.roleBg }}>
+              <div
+                className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
+                style={{ backgroundColor: pipelineStep.roleBg }}
+              >
                 <Bot size={22} color={pipelineStep.roleColor} />
               </div>
-              <div className="agent-info">
-                <div className="agent-label-row">
-                  <span className="agent-label">{pipelineStep.label}</span>
-                  <span className="role-badge" style={{ backgroundColor: pipelineStep.roleBg, color: pipelineStep.roleColor }}>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-sm">{pipelineStep.label}</span>
+                  <span
+                    className="text-xs font-medium px-2 py-0.5 rounded-full"
+                    style={{ backgroundColor: pipelineStep.roleBg, color: pipelineStep.roleColor }}
+                  >
                     Step {pipelineStep.step} · {pipelineStep.role}
                   </span>
                 </div>
-                <p className="agent-desc">{pipelineStep.description}</p>
+                <p className="text-xs text-muted-foreground truncate">{pipelineStep.description}</p>
               </div>
-              <div className="agent-header-right">
+              <div className="flex items-center gap-2 shrink-0">
                 {changed && (
-                  <span className="unsaved-badge" data-testid={`unsaved-${config.agentType}`}>Unsaved</span>
+                  <Badge variant="warning" data-testid={`unsaved-${config.agentType}`}>Unsaved</Badge>
                 )}
                 {isExpanded ? (
-                  <ChevronUp size={20} color="var(--color-text-muted)" />
+                  <ChevronUp size={20} className="text-muted-foreground" />
                 ) : (
-                  <ChevronDown size={20} color="var(--color-text-muted)" />
+                  <ChevronDown size={20} className="text-muted-foreground" />
                 )}
               </div>
             </div>
 
             {isExpanded && (
-              <div className="agent-body" data-testid={`agent-body-${config.agentType}`}>
-                <div className="field-row">
-                  <div className="field-half">
-                    <label className="field-label">Model</label>
-                    <input
-                      className="field-input"
+              <div className="px-4 pb-4 pt-2 border-t border-border" data-testid={`agent-body-${config.agentType}`}>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div className="space-y-1.5">
+                    <Label>Model</Label>
+                    <Input
                       value={editModels[config.agentType] || ""}
                       onChange={(e) => handleModelChange(config.agentType, e.target.value)}
                       placeholder="gpt-5-nano"
                       data-testid={`model-input-${config.agentType}`}
                     />
                   </div>
-                  <div className="field-half">
-                    <label className="field-label">Max Tokens</label>
-                    <input
-                      className="field-input"
+                  <div className="space-y-1.5">
+                    <Label>Max Tokens</Label>
+                    <Input
                       type="number"
                       value={editMaxTokens[config.agentType] || ""}
                       onChange={(e) => handleMaxTokensChange(config.agentType, e.target.value)}
@@ -263,10 +283,10 @@ export default function Settings() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="field-label">System Prompt</label>
-                  <textarea
-                    className="prompt-input"
+                <div className="space-y-1.5 mb-4">
+                  <Label>System Prompt</Label>
+                  <Textarea
+                    className="min-h-[200px] font-mono text-sm"
                     value={editPrompts[config.agentType] || ""}
                     onChange={(e) => handlePromptChange(config.agentType, e.target.value)}
                     placeholder="Enter system prompt..."
@@ -274,31 +294,31 @@ export default function Settings() {
                   />
                 </div>
 
-                <div className="action-row">
-                  <span className="last-updated">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">
                     {config.id > 0
                       ? `Last updated: ${new Date(config.updatedAt).toLocaleDateString()}`
                       : "Using default prompt"}
                   </span>
-                  <button
-                    className="save-button"
+                  <Button
                     onClick={() => saveMutation.mutate(config.agentType)}
                     disabled={!changed || isSaving}
+                    size="sm"
                     data-testid={`save-btn-${config.agentType}`}
                   >
                     {isSaving ? (
-                      <div className="spinner spinner-sm spinner-white" />
+                      <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <>
                         <Save size={16} />
                         Save
                       </>
                     )}
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
-          </div>
+          </Card>
         );
       })}
     </div>

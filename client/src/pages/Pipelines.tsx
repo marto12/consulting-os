@@ -30,7 +30,10 @@ import {
   MarkerType,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import "./Pipelines.css";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 interface StepDef {
   id: string;
@@ -154,36 +157,36 @@ function PipelineStepNode({ data }: NodeProps) {
   const isData = step.type === "data";
   const isOutput = step.type === "output";
   return (
-    <div className={`pl-step-node pl-step-${step.type}`}>
-      <Handle type="target" position={Position.Left} className="pl-handle" />
-      <div className="pl-step-accent" style={{ background: step.color }} />
-      <div className="pl-step-body">
-        <div className="pl-step-header">
+    <div className="bg-white rounded-lg shadow-sm border border-border overflow-hidden w-[180px] cursor-pointer hover:shadow-md transition-shadow">
+      <Handle type="target" position={Position.Left} className="!w-2 !h-2 !bg-border !border-border" />
+      <div className="h-1 w-full" style={{ background: step.color }} />
+      <div className="p-3">
+        <div className="flex items-center gap-1.5 mb-1">
           <Icon size={14} color={step.color} />
-          <span className="pl-step-label">{step.label}</span>
+          <span className="text-xs font-semibold text-foreground">{step.label}</span>
         </div>
         <span
-          className="pl-step-badge"
+          className="text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-block mb-1"
           style={{ background: step.color + "15", color: step.color }}
         >
           {isAnalysis ? "Analysis" : isData ? "Data" : isOutput ? "Output" : step.type === "agent" ? "Agent" : "Gate"}
         </span>
-        <span className="pl-step-desc">{step.description}</span>
+        <span className="text-[10px] text-muted-foreground block">{step.description}</span>
       </div>
-      <Handle type="source" position={Position.Right} className="pl-handle" />
+      <Handle type="source" position={Position.Right} className="!w-2 !h-2 !bg-border !border-border" />
     </div>
   );
 }
 
 function PipelineGateNode({ data }: NodeProps) {
   return (
-    <div className="pl-gate-node">
-      <Handle type="target" position={Position.Left} className="pl-handle" />
-      <div className="pl-gate-diamond">
-        <ShieldCheck size={11} color="#D97706" />
+    <div className="flex flex-col items-center">
+      <Handle type="target" position={Position.Left} className="!w-2 !h-2 !bg-border !border-border" />
+      <div className="w-6 h-6 rounded-sm rotate-45 flex items-center justify-center bg-amber-50 border border-amber-200">
+        <ShieldCheck size={11} color="#D97706" className="-rotate-45" />
       </div>
-      <span className="pl-gate-label">{data.label as string}</span>
-      <Handle type="source" position={Position.Right} className="pl-handle" />
+      <span className="text-[10px] font-medium text-amber-600 mt-1">{data.label as string}</span>
+      <Handle type="source" position={Position.Right} className="!w-2 !h-2 !bg-border !border-border" />
     </div>
   );
 }
@@ -201,35 +204,35 @@ function PipelineCard({
   onOpen: () => void;
 }) {
   const statusConfig = {
-    draft: { label: "Draft", color: "#64748B", bg: "#F1F5F9" },
-    active: { label: "Active", color: "#059669", bg: "#D1FAE5" },
-    completed: { label: "Completed", color: "#3B82F6", bg: "#DBEAFE" },
+    draft: { label: "Draft", variant: "secondary" as const },
+    active: { label: "Active", variant: "success" as const },
+    completed: { label: "Completed", variant: "default" as const },
   };
   const s = statusConfig[pipeline.status];
 
   return (
-    <div className="pipeline-card card" onClick={onOpen}>
-      <div className="pipeline-card-top">
-        <div className="pipeline-card-icon">
+    <Card className="cursor-pointer hover:shadow-md transition-all" onClick={onOpen}>
+      <div className="flex items-start gap-3 p-5">
+        <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center shrink-0">
           <GitBranch size={18} color="#6366F1" />
         </div>
-        <div className="pipeline-card-info">
-          <h3>{pipeline.name}</h3>
-          <p>{pipeline.description}</p>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-sm">{pipeline.name}</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">{pipeline.description}</p>
         </div>
-        <ChevronRight size={18} className="pipeline-card-arrow" />
+        <ChevronRight size={18} className="text-muted-foreground shrink-0 mt-1" />
       </div>
-      <div className="pipeline-card-footer">
-        <span className="pipeline-status-badge" style={{ background: s.bg, color: s.color }}>
-          {pipeline.status === "active" && <Play size={10} />}
-          {pipeline.status === "completed" && <CheckCircle2 size={10} />}
-          {pipeline.status === "draft" && <Clock size={10} />}
+      <div className="flex items-center gap-3 px-5 pb-4">
+        <Badge variant={s.variant}>
+          {pipeline.status === "active" && <Play size={10} className="mr-1" />}
+          {pipeline.status === "completed" && <CheckCircle2 size={10} className="mr-1" />}
+          {pipeline.status === "draft" && <Clock size={10} className="mr-1" />}
           {s.label}
-        </span>
-        <span className="pipeline-card-meta">{pipeline.stepCount} steps</span>
-        <span className="pipeline-card-meta">{pipeline.lastRun === "Never" ? "Not run yet" : `Last run ${pipeline.lastRun}`}</span>
+        </Badge>
+        <span className="text-xs text-muted-foreground">{pipeline.stepCount} steps</span>
+        <span className="text-xs text-muted-foreground">{pipeline.lastRun === "Never" ? "Not run yet" : `Last run ${pipeline.lastRun}`}</span>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -287,90 +290,96 @@ function PipelineBuilder({
   }
 
   const statusConfig = {
-    draft: { label: "Draft", color: "#64748B", bg: "#F1F5F9" },
-    active: { label: "Active", color: "#059669", bg: "#D1FAE5" },
-    completed: { label: "Completed", color: "#3B82F6", bg: "#DBEAFE" },
+    draft: { label: "Draft", variant: "secondary" as const },
+    active: { label: "Active", variant: "success" as const },
+    completed: { label: "Completed", variant: "default" as const },
   };
   const s = statusConfig[pipeline.status];
 
   return (
-    <div className="pipeline-builder-overlay" onClick={onClose}>
-      <div className="pipeline-builder" onClick={(e) => e.stopPropagation()}>
-        <div className="pb-header">
-          <div className="pb-header-left">
-            <div className="pb-icon">
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={onClose}>
+      <div className="bg-background rounded-xl shadow-2xl w-[95%] max-w-7xl h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-indigo-50 flex items-center justify-center">
               <GitBranch size={18} color="#6366F1" />
             </div>
             <div>
-              <h2 className="pb-title">{pipeline.name}</h2>
-              <div className="pb-meta">
-                <span className="pipeline-status-badge" style={{ background: s.bg, color: s.color }}>
-                  {s.label}
-                </span>
-                <span>{nodes.length} steps</span>
+              <h2 className="font-semibold text-base">{pipeline.name}</h2>
+              <div className="flex items-center gap-2 mt-0.5">
+                <Badge variant={s.variant}>{s.label}</Badge>
+                <span className="text-xs text-muted-foreground">{nodes.length} steps</span>
               </div>
             </div>
           </div>
-          <div className="pb-header-actions">
-            <button className="pb-btn pb-btn-danger" onClick={deleteSelected} title="Delete selected">
-              <Trash2 size={14} /> Delete
-            </button>
-            <button className="pb-btn pb-btn-primary" title="Run pipeline">
-              <Play size={14} /> Run
-            </button>
-            <button className="pb-close" onClick={onClose}>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={deleteSelected}>
+              <Trash2 size={14} />
+              Delete
+            </Button>
+            <Button size="sm">
+              <Play size={14} />
+              Run
+            </Button>
+            <Button variant="ghost" size="icon" onClick={onClose}>
               <X size={18} />
-            </button>
+            </Button>
           </div>
         </div>
 
-        <div className="pb-content">
-          <div className="pb-palette">
-            <div className="pb-palette-section">
-              <span className="pb-palette-heading">Agents</span>
-              {STEP_PALETTE.filter((s) => s.type === "agent").map((step) => (
-                <button
-                  key={step.id}
-                  className="pb-palette-item"
-                  onClick={() => addStep(step)}
-                >
-                  <div className="pb-palette-dot" style={{ background: step.color }} />
-                  <span>{step.label}</span>
-                  <Plus size={12} className="pb-palette-add" />
-                </button>
-              ))}
+        <div className="flex flex-1 overflow-hidden">
+          <div className="w-[200px] border-r border-border overflow-y-auto p-3">
+            <div className="mb-4">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Agents</span>
+              <div className="mt-2 flex flex-col gap-0.5">
+                {STEP_PALETTE.filter((s) => s.type === "agent").map((step) => (
+                  <button
+                    key={step.id}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-xs hover:bg-muted transition-colors w-full group"
+                    onClick={() => addStep(step)}
+                  >
+                    <div className="w-2 h-2 rounded-full shrink-0" style={{ background: step.color }} />
+                    <span className="flex-1">{step.label}</span>
+                    <Plus size={12} className="opacity-0 group-hover:opacity-100 text-muted-foreground transition-opacity" />
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="pb-palette-section">
-              <span className="pb-palette-heading">Analysis</span>
-              {STEP_PALETTE.filter((s) => s.type === "analysis").map((step) => (
-                <button
-                  key={step.id}
-                  className="pb-palette-item"
-                  onClick={() => addStep(step)}
-                >
-                  <div className="pb-palette-dot" style={{ background: step.color }} />
-                  <span>{step.label}</span>
-                  <Plus size={12} className="pb-palette-add" />
-                </button>
-              ))}
+            <div className="mb-4">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Analysis</span>
+              <div className="mt-2 flex flex-col gap-0.5">
+                {STEP_PALETTE.filter((s) => s.type === "analysis").map((step) => (
+                  <button
+                    key={step.id}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-xs hover:bg-muted transition-colors w-full group"
+                    onClick={() => addStep(step)}
+                  >
+                    <div className="w-2 h-2 rounded-full shrink-0" style={{ background: step.color }} />
+                    <span className="flex-1">{step.label}</span>
+                    <Plus size={12} className="opacity-0 group-hover:opacity-100 text-muted-foreground transition-opacity" />
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="pb-palette-section">
-              <span className="pb-palette-heading">Controls</span>
-              {STEP_PALETTE.filter((s) => s.type === "data" || s.type === "gate" || s.type === "output").map((step) => (
-                <button
-                  key={step.id}
-                  className="pb-palette-item"
-                  onClick={() => addStep(step)}
-                >
-                  <div className="pb-palette-dot" style={{ background: step.color }} />
-                  <span>{step.label}</span>
-                  <Plus size={12} className="pb-palette-add" />
-                </button>
-              ))}
+            <div>
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Controls</span>
+              <div className="mt-2 flex flex-col gap-0.5">
+                {STEP_PALETTE.filter((s) => s.type === "data" || s.type === "gate" || s.type === "output").map((step) => (
+                  <button
+                    key={step.id}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-xs hover:bg-muted transition-colors w-full group"
+                    onClick={() => addStep(step)}
+                  >
+                    <div className="w-2 h-2 rounded-full shrink-0" style={{ background: step.color }} />
+                    <span className="flex-1">{step.label}</span>
+                    <Plus size={12} className="opacity-0 group-hover:opacity-100 text-muted-foreground transition-opacity" />
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
-          <div className="pb-canvas">
+          <div className="flex-1">
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -402,19 +411,19 @@ export default function Pipelines() {
   const pipelines = useMemo(() => buildSamplePipelines(), []);
 
   return (
-    <div className="pipelines-page">
-      <div className="page-header">
+    <div>
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="page-title">Pipelines</h1>
-          <p className="page-subtitle">Link agents and analysis steps into automated workflows</p>
+          <h1 className="text-2xl font-bold">Pipelines</h1>
+          <p className="text-sm text-muted-foreground mt-1">Link agents and analysis steps into automated workflows</p>
         </div>
-        <button className="btn-primary" disabled>
+        <Button disabled>
           <Plus size={16} />
           New Pipeline
-        </button>
+        </Button>
       </div>
 
-      <div className="pipelines-list">
+      <div className="flex flex-col gap-4">
         {pipelines.map((p) => (
           <PipelineCard key={p.id} pipeline={p} onOpen={() => setActivePipeline(p)} />
         ))}

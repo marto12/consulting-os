@@ -2,7 +2,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "../lib/query-client";
 import { Send, Plus, Trash2, MessageSquare } from "lucide-react";
-import "./Chat.css";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 interface Message {
   id: number;
@@ -17,6 +18,13 @@ interface Conversation {
   createdAt: string;
   messages?: Message[];
 }
+
+const typingDotsStyle = `
+@keyframes typingBounce {
+  0%, 80%, 100% { transform: scale(0); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+`;
 
 export default function Chat() {
   const [activeConvo, setActiveConvo] = useState<number | null>(null);
@@ -140,23 +148,27 @@ export default function Chat() {
   };
 
   return (
-    <div className="chat-page">
-      <div className="chat-sidebar">
-        <button className="chat-new-btn" onClick={() => createConvo.mutate()}>
+    <div className="flex h-full">
+      <style>{typingDotsStyle}</style>
+      <div className="w-[260px] border-r border-border bg-muted/50 flex flex-col shrink-0">
+        <Button variant="outline" className="m-3" onClick={() => createConvo.mutate()}>
           <Plus size={16} />
           New Chat
-        </button>
-        <div className="chat-convo-list">
+        </Button>
+        <div className="flex-1 overflow-y-auto">
           {conversations.map((c) => (
             <div
               key={c.id}
-              className={`chat-convo-item${activeConvo === c.id ? " active" : ""}`}
+              className={cn(
+                "flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent transition-colors",
+                activeConvo === c.id && "bg-accent text-accent-foreground"
+              )}
               onClick={() => setActiveConvo(c.id)}
             >
-              <MessageSquare size={14} />
-              <span className="chat-convo-title">{c.title}</span>
+              <MessageSquare size={14} className="shrink-0" />
+              <span className="truncate flex-1">{c.title}</span>
               <button
-                className="chat-convo-delete"
+                className="opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity p-1"
                 onClick={(e) => { e.stopPropagation(); deleteConvo.mutate(c.id); }}
               >
                 <Trash2 size={12} />
@@ -166,42 +178,66 @@ export default function Chat() {
         </div>
       </div>
 
-      <div className="chat-main">
+      <div className="flex-1 flex flex-col overflow-hidden">
         {!activeConvo && messages.length === 0 ? (
-          <div className="chat-empty">
-            <div className="chat-empty-icon">
-              <MessageSquare size={40} />
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+              <MessageSquare size={32} />
             </div>
-            <h2>How can I help you today?</h2>
-            <p>Start a conversation or select one from the sidebar</p>
+            <h2 className="text-xl font-semibold text-foreground">How can I help you today?</h2>
+            <p className="text-sm">Start a conversation or select one from the sidebar</p>
           </div>
         ) : (
-          <div className="chat-messages">
+          <div className="flex-1 overflow-y-auto p-6">
             {messages.map((msg) => (
-              <div key={msg.id} className={`chat-msg ${msg.role}`}>
-                <div className="chat-msg-avatar">
+              <div
+                key={msg.id}
+                className={cn(
+                  "flex gap-3 mb-4 max-w-3xl",
+                  msg.role === "user" ? "ml-auto flex-row-reverse" : "mr-auto"
+                )}
+              >
+                <div
+                  className={cn(
+                    "w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0",
+                    msg.role === "user"
+                      ? "bg-blue-500 text-white"
+                      : "bg-muted text-muted-foreground"
+                  )}
+                >
                   {msg.role === "user" ? "You" : "AI"}
                 </div>
-                <div className="chat-msg-content">
-                  <div className="chat-msg-text">{msg.content}</div>
+                <div
+                  className={cn(
+                    "rounded-xl px-4 py-2.5 text-sm max-w-[80%] whitespace-pre-wrap",
+                    msg.role === "user"
+                      ? "bg-blue-500 text-white"
+                      : "bg-muted text-foreground"
+                  )}
+                >
+                  {msg.content}
                 </div>
               </div>
             ))}
             {streamingContent && (
-              <div className="chat-msg assistant">
-                <div className="chat-msg-avatar">AI</div>
-                <div className="chat-msg-content">
-                  <div className="chat-msg-text">{streamingContent}</div>
+              <div className="flex gap-3 mb-4 max-w-3xl mr-auto">
+                <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 bg-muted text-muted-foreground">
+                  AI
+                </div>
+                <div className="rounded-xl px-4 py-2.5 text-sm max-w-[80%] whitespace-pre-wrap bg-muted text-foreground">
+                  {streamingContent}
                 </div>
               </div>
             )}
             {isStreaming && !streamingContent && (
-              <div className="chat-msg assistant">
-                <div className="chat-msg-avatar">AI</div>
-                <div className="chat-msg-content">
-                  <div className="chat-msg-typing">
-                    <span /><span /><span />
-                  </div>
+              <div className="flex gap-3 mb-4 max-w-3xl mr-auto">
+                <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 bg-muted text-muted-foreground">
+                  AI
+                </div>
+                <div className="rounded-xl px-4 py-2.5 bg-muted flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-muted-foreground" style={{ animation: "typingBounce 1.4s infinite ease-in-out", animationDelay: "0s" }} />
+                  <span className="w-2 h-2 rounded-full bg-muted-foreground" style={{ animation: "typingBounce 1.4s infinite ease-in-out", animationDelay: "0.2s" }} />
+                  <span className="w-2 h-2 rounded-full bg-muted-foreground" style={{ animation: "typingBounce 1.4s infinite ease-in-out", animationDelay: "0.4s" }} />
                 </div>
               </div>
             )}
@@ -209,11 +245,11 @@ export default function Chat() {
           </div>
         )}
 
-        <div className="chat-input-area">
-          <div className="chat-input-wrapper">
+        <div className="border-t border-border p-4">
+          <div className="flex items-end gap-2 max-w-3xl mx-auto">
             <textarea
               ref={inputRef}
-              className="chat-input"
+              className="flex-1 resize-none rounded-lg border border-input bg-background px-3 py-2.5 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
               placeholder="Send a message..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -221,13 +257,13 @@ export default function Chat() {
               rows={1}
               disabled={isStreaming}
             />
-            <button
-              className="chat-send-btn"
+            <Button
+              size="icon"
               onClick={sendMessage}
               disabled={!input.trim() || isStreaming}
             >
               <Send size={18} />
-            </button>
+            </Button>
           </div>
         </div>
       </div>

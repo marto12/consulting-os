@@ -14,6 +14,10 @@ import {
   FolderOpen,
   Plus,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import Chat from "./pages/Chat";
 import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
@@ -52,30 +56,33 @@ function ProjectSelector({ collapsed }: { collapsed: boolean }) {
 
   if (collapsed) {
     return (
-      <div className="project-selector-collapsed" title={activeProject?.name || "No project"}>
+      <div className="flex justify-center mb-2 relative" title={activeProject?.name || "No project"}>
         <button
-          className="project-selector-icon-btn"
+          className="w-9 h-9 rounded-lg border border-white/10 bg-white/5 text-sidebar-foreground flex items-center justify-center hover:bg-sidebar-hover hover:text-sidebar-active transition-colors"
           onClick={() => setOpen(!open)}
         >
           <FolderOpen size={16} />
         </button>
         {open && (
-          <div className="project-selector-dropdown project-selector-dropdown-collapsed" ref={ref}>
-            <div className="project-selector-dropdown-header">Projects</div>
+          <div className="absolute left-12 top-0 w-[200px] bg-slate-800 border border-white/10 rounded-xl shadow-2xl z-[100] overflow-hidden animate-in fade-in-0 zoom-in-95" ref={ref}>
+            <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-sidebar-foreground">Projects</div>
             {projects.map((p) => (
               <button
                 key={p.id}
-                className={`project-selector-option${activeProject?.id === p.id ? " active" : ""}`}
+                className={cn(
+                  "flex items-center gap-2 w-full px-3 py-2 text-[13px] font-medium text-white/70 hover:bg-white/5 hover:text-white transition-colors text-left",
+                  activeProject?.id === p.id && "bg-blue-500/15 text-white"
+                )}
                 onClick={() => { setActiveProjectId(p.id); setOpen(false); }}
               >
-                <span className="project-selector-option-name">{p.name}</span>
+                <span className="truncate">{p.name}</span>
               </button>
             ))}
             {projects.length === 0 && (
-              <div className="project-selector-empty">No projects yet</div>
+              <div className="p-3 text-center text-xs text-sidebar-foreground">No projects yet</div>
             )}
             <button
-              className="project-selector-option project-selector-new"
+              className="flex items-center gap-2 w-full px-3 py-2 text-[13px] font-medium text-blue-400 hover:bg-white/5 hover:text-white transition-colors border-t border-white/5 text-left"
               onClick={() => { navigate("/projects"); setOpen(false); }}
             >
               <Plus size={12} />
@@ -88,37 +95,40 @@ function ProjectSelector({ collapsed }: { collapsed: boolean }) {
   }
 
   return (
-    <div className="project-selector" ref={ref}>
+    <div className="px-2 mb-2 relative" ref={ref}>
       <button
-        className="project-selector-trigger"
+        className="flex items-center gap-2 w-full px-2.5 py-2 rounded-lg border border-white/10 bg-white/5 text-sidebar-active text-[13px] font-medium hover:bg-sidebar-hover hover:border-white/15 transition-colors text-left"
         onClick={() => setOpen(!open)}
         data-testid="project-selector"
       >
-        <FolderOpen size={14} />
-        <span className="project-selector-name">
+        <FolderOpen size={14} className="shrink-0 text-blue-400" />
+        <span className="flex-1 truncate">
           {activeProject ? activeProject.name : "Select Project"}
         </span>
-        <ChevronDown size={13} className={`project-selector-chevron${open ? " open" : ""}`} />
+        <ChevronDown size={13} className={cn("shrink-0 text-sidebar-foreground transition-transform", open && "rotate-180")} />
       </button>
       {open && (
-        <div className="project-selector-dropdown">
-          <div className="project-selector-dropdown-header">Switch Project</div>
+        <div className="absolute left-2 right-2 top-[calc(100%+4px)] bg-slate-800 border border-white/10 rounded-xl shadow-2xl z-[100] overflow-hidden animate-in fade-in-0 zoom-in-95">
+          <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-sidebar-foreground">Switch Project</div>
           {projects.map((p) => (
             <button
               key={p.id}
-              className={`project-selector-option${activeProject?.id === p.id ? " active" : ""}`}
+              className={cn(
+                "flex items-center gap-2 w-full px-3 py-2 text-[13px] font-medium text-white/70 hover:bg-white/5 hover:text-white transition-colors text-left",
+                activeProject?.id === p.id && "bg-blue-500/15 text-white"
+              )}
               onClick={() => { setActiveProjectId(p.id); setOpen(false); }}
               data-testid={`project-option-${p.id}`}
             >
-              <span className="project-selector-dot" />
-              <span className="project-selector-option-name">{p.name}</span>
+              <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", activeProject?.id === p.id ? "bg-blue-500" : "bg-white/30")} />
+              <span className="truncate">{p.name}</span>
             </button>
           ))}
           {projects.length === 0 && (
-            <div className="project-selector-empty">No projects yet</div>
+            <div className="p-3 text-center text-xs text-sidebar-foreground">No projects yet</div>
           )}
           <button
-            className="project-selector-option project-selector-new"
+            className="flex items-center gap-2 w-full px-3 py-2 text-[13px] font-medium text-blue-400 hover:bg-white/5 hover:text-white transition-colors border-t border-white/5 text-left"
             onClick={() => { navigate("/projects"); setOpen(false); }}
             data-testid="project-selector-new"
           >
@@ -135,20 +145,28 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
   const location = useLocation();
 
   return (
-    <aside className={`sidebar${collapsed ? " collapsed" : ""}`}>
-      <div className="sidebar-top">
-        <div className="sidebar-logo">
-          {!collapsed && <span className="sidebar-logo-text">Consulting OS</span>}
-          {collapsed && <span className="sidebar-logo-icon">C</span>}
+    <aside className={cn(
+      "flex flex-col shrink-0 bg-sidebar overflow-hidden transition-[width] duration-200",
+      collapsed ? "w-[60px]" : "w-[240px]"
+    )}>
+      <div className="flex items-center justify-between px-4 min-h-[56px]">
+        <div className="flex items-center gap-2 overflow-hidden">
+          {!collapsed && <span className="text-[15px] font-bold text-white whitespace-nowrap">Consulting OS</span>}
+          {collapsed && (
+            <span className="w-7 h-7 rounded-md bg-blue-500 text-white flex items-center justify-center text-sm font-bold">C</span>
+          )}
         </div>
-        <button className="sidebar-toggle" onClick={onToggle}>
+        <button
+          className="text-sidebar-foreground p-1 rounded-md hover:bg-sidebar-hover shrink-0 transition-colors"
+          onClick={onToggle}
+        >
           {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
       </div>
 
       <ProjectSelector collapsed={collapsed} />
 
-      <nav className="sidebar-nav">
+      <nav className="flex-1 flex flex-col gap-0.5 px-2">
         {NAV_ITEMS.map((item) => {
           const isActive =
             location.pathname === item.to ||
@@ -159,23 +177,31 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
             <NavLink
               key={item.to}
               to={item.to}
-              className={`sidebar-link${isActive ? " active" : ""}`}
+              className={cn(
+                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-sidebar-foreground hover:bg-sidebar-hover hover:text-sidebar-active transition-colors whitespace-nowrap overflow-hidden",
+                isActive && "bg-sidebar-active-bg text-sidebar-active",
+                collapsed && "justify-center px-2.5"
+              )}
               title={collapsed ? item.label : undefined}
             >
-              <item.icon size={18} />
+              <item.icon size={18} className="shrink-0" />
               {!collapsed && <span>{item.label}</span>}
             </NavLink>
           );
         })}
       </nav>
 
-      <div className="sidebar-bottom">
+      <div className="p-2 border-t border-white/5">
         <NavLink
           to="/settings"
-          className={({ isActive }) => `sidebar-link${isActive ? " active" : ""}`}
+          className={({ isActive }) => cn(
+            "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-sidebar-foreground hover:bg-sidebar-hover hover:text-sidebar-active transition-colors",
+            isActive && "bg-sidebar-active-bg text-sidebar-active",
+            collapsed && "justify-center px-2.5"
+          )}
           title={collapsed ? "Settings" : undefined}
         >
-          <Settings size={18} />
+          <Settings size={18} className="shrink-0" />
           {!collapsed && <span>Settings</span>}
         </NavLink>
       </div>
@@ -187,9 +213,9 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <div className="app-shell">
+    <div className="flex h-screen overflow-hidden">
       <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} />
-      <main className="app-main">
+      <main className="flex-1 overflow-y-auto bg-background p-6 lg:p-8">
         {children}
       </main>
     </div>
@@ -200,9 +226,9 @@ function FullWidthLayout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <div className="app-shell">
+    <div className="flex h-screen overflow-hidden">
       <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} />
-      <main className="app-main app-main-full">
+      <main className="flex-1 overflow-hidden flex flex-col bg-background">
         {children}
       </main>
     </div>
@@ -212,21 +238,23 @@ function FullWidthLayout({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <BrowserRouter>
-      <ProjectProvider>
-        <Routes>
-          <Route path="/chat" element={<FullWidthLayout><Chat /></FullWidthLayout>} />
-          <Route path="/agents" element={<AppLayout><Pipeline /></AppLayout>} />
-          <Route path="/projects" element={<AppLayout><Projects /></AppLayout>} />
-          <Route path="/datasets" element={<AppLayout><Datasets /></AppLayout>} />
-          <Route path="/analysis" element={<AppLayout><Analysis /></AppLayout>} />
-          <Route path="/pipelines" element={<AppLayout><Pipelines /></AppLayout>} />
-          <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
-          <Route path="/project/:id" element={<AppLayout><ProjectDetail /></AppLayout>} />
-          <Route path="/agent/:key" element={<AppLayout><AgentDetail /></AppLayout>} />
-          <Route path="/" element={<Navigate to="/chat" replace />} />
-          <Route path="*" element={<Navigate to="/chat" replace />} />
-        </Routes>
-      </ProjectProvider>
+      <TooltipProvider>
+        <ProjectProvider>
+          <Routes>
+            <Route path="/chat" element={<FullWidthLayout><Chat /></FullWidthLayout>} />
+            <Route path="/agents" element={<AppLayout><Pipeline /></AppLayout>} />
+            <Route path="/projects" element={<AppLayout><Projects /></AppLayout>} />
+            <Route path="/datasets" element={<AppLayout><Datasets /></AppLayout>} />
+            <Route path="/analysis" element={<AppLayout><Analysis /></AppLayout>} />
+            <Route path="/pipelines" element={<AppLayout><Pipelines /></AppLayout>} />
+            <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
+            <Route path="/project/:id" element={<AppLayout><ProjectDetail /></AppLayout>} />
+            <Route path="/agent/:key" element={<AppLayout><AgentDetail /></AppLayout>} />
+            <Route path="/" element={<Navigate to="/chat" replace />} />
+            <Route path="*" element={<Navigate to="/chat" replace />} />
+          </Routes>
+        </ProjectProvider>
+      </TooltipProvider>
     </BrowserRouter>
   );
 }

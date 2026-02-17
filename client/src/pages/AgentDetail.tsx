@@ -10,7 +10,10 @@ import {
   Terminal,
   AlertCircle,
 } from "lucide-react";
-import "./AgentDetail.css";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 interface AgentField {
   name: string;
@@ -60,8 +63,8 @@ export default function AgentDetail() {
 
   if (isLoading) {
     return (
-      <div className="agent-detail">
-        <div className="loading">
+      <div>
+        <div className="flex items-center justify-center min-h-[300px]">
           <div className="spinner" />
         </div>
       </div>
@@ -70,14 +73,14 @@ export default function AgentDetail() {
 
   if (error || !agent) {
     return (
-      <div className="agent-detail">
-        <div className="error-state">
-          <AlertCircle size={40} color="var(--color-error)" />
+      <div>
+        <div className="flex flex-col items-center justify-center gap-4 py-20">
+          <AlertCircle size={40} className="text-destructive" />
           <h3>Agent not found</h3>
-          <button className="btn-secondary" onClick={() => navigate(-1)}>
+          <Button variant="outline" onClick={() => navigate(-1)}>
             <ArrowLeft size={16} />
             Go Back
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -86,135 +89,138 @@ export default function AgentDetail() {
   const promptLines = agent.systemPrompt.split("\n").length;
 
   return (
-    <div className="agent-detail">
-      <div className="ad-top-bar">
-        <button className="ad-back-button" onClick={() => navigate(-1)}>
+    <div>
+      <div className="flex items-center gap-3 mb-6">
+        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
           <ArrowLeft size={20} />
-        </button>
-        <div className="ad-top-bar-center">
-          <Bot size={18} color={agent.roleColor} />
-          <span className="ad-top-bar-title">{agent.label}</span>
+        </Button>
+        <div className="flex items-center gap-2">
+          <Bot size={18} style={{ color: agent.roleColor }} />
+          <span className="text-lg font-semibold">{agent.label}</span>
         </div>
-        <div className="ad-top-bar-spacer" />
+        <div className="flex-1" />
       </div>
 
-      <div className="ad-scroll-content">
-        <div className="ad-hero-card">
-          <div className="ad-hero-accent" style={{ backgroundColor: agent.roleColor }} />
-          <div className="ad-hero-body">
-            <div className="ad-hero-top-row">
-              <div className="ad-role-badge" style={{ backgroundColor: agent.roleBg, color: agent.roleColor }}>
+      <div className="space-y-6">
+        <Card className="overflow-hidden">
+          <div className="h-1 w-full" style={{ backgroundColor: agent.roleColor }} />
+          <div className="p-6">
+            <div className="flex items-center justify-between">
+              <span
+                className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold"
+                style={{ backgroundColor: agent.roleBg, color: agent.roleColor }}
+              >
                 {agent.role}
-              </div>
-              <div className="ad-hero-meta">
-                <div className="ad-hero-meta-label">Stage</div>
-                <div className="ad-hero-meta-value">{formatStage(agent.stage)}</div>
+              </span>
+              <div className="text-right">
+                <div className="text-xs text-muted-foreground uppercase tracking-wider">Stage</div>
+                <div className="text-sm font-semibold mt-1">{formatStage(agent.stage)}</div>
               </div>
             </div>
-            <div className="ad-hero-title-row">
-              <Bot size={26} color={agent.roleColor} />
-              <span className="ad-hero-title">{agent.label} Agent</span>
+            <div className="flex items-center gap-2 mt-3">
+              <Bot size={26} style={{ color: agent.roleColor }} />
+              <span className="text-xl font-bold">{agent.label} Agent</span>
             </div>
-            <div className="ad-hero-desc">{agent.description}</div>
+            <div className="text-sm text-muted-foreground mt-2">{agent.description}</div>
           </div>
+        </Card>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Card className="p-4">
+            <div className="text-xs text-muted-foreground uppercase tracking-wider">Model</div>
+            <div className="text-sm font-semibold mt-1 text-primary">{agent.model}</div>
+          </Card>
+          <Card className="p-4">
+            <div className="text-xs text-muted-foreground uppercase tracking-wider">Max Tokens</div>
+            <div className="text-sm font-semibold mt-1">{agent.maxTokens.toLocaleString()}</div>
+          </Card>
+          <Card className="p-4">
+            <div className="text-xs text-muted-foreground uppercase tracking-wider">Trigger</div>
+            <div className="text-sm font-semibold mt-1 text-emerald-500">{formatStage(agent.triggerStage)}</div>
+          </Card>
+          <Card className="p-4">
+            <div className="text-xs text-muted-foreground uppercase tracking-wider">Produces</div>
+            <div className="text-sm font-semibold mt-1 text-amber-500">{formatStage(agent.producesStage)}</div>
+          </Card>
         </div>
 
-        <div className="ad-pill-row">
-          <div className="ad-info-pill">
-            <div className="ad-info-pill-label">Model</div>
-            <div className="ad-info-pill-value" style={{ color: "var(--color-accent)" }}>{agent.model}</div>
-          </div>
-          <div className="ad-info-pill">
-            <div className="ad-info-pill-label">Max Tokens</div>
-            <div className="ad-info-pill-value">{agent.maxTokens.toLocaleString()}</div>
-          </div>
-          <div className="ad-info-pill">
-            <div className="ad-info-pill-label">Trigger</div>
-            <div className="ad-info-pill-value" style={{ color: "var(--color-success)" }}>{formatStage(agent.triggerStage)}</div>
-          </div>
-          <div className="ad-info-pill">
-            <div className="ad-info-pill-label">Produces</div>
-            <div className="ad-info-pill-value" style={{ color: "var(--color-warning)" }}>{formatStage(agent.producesStage)}</div>
-          </div>
-        </div>
-
-        <div className="ad-section-header">
+        <div className="flex items-center gap-2 mt-6">
           <LogIn size={16} />
-          <span className="ad-section-title">Inputs</span>
+          <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Inputs</span>
         </div>
         {agent.inputs.map((field) => (
-          <div key={field.name} className="ad-field-card">
-            <div className="ad-field-name-row">
-              <span className="ad-field-name">{field.name}</span>
-              <span className="ad-type-badge">{field.type}</span>
+          <Card key={field.name} className="p-4">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-sm font-medium">{field.name}</span>
+              <Badge variant="secondary">{field.type}</Badge>
             </div>
-            <div className="ad-field-desc">{field.description}</div>
-          </div>
+            <div className="text-sm text-muted-foreground mt-1">{field.description}</div>
+          </Card>
         ))}
 
-        <div className="ad-section-header">
+        <div className="flex items-center gap-2 mt-6">
           <LogOut size={16} />
-          <span className="ad-section-title">Outputs</span>
+          <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Outputs</span>
         </div>
         {agent.outputs.map((field) => (
-          <div key={field.name} className="ad-field-card">
-            <div className="ad-field-name-row">
-              <span className="ad-field-name">{field.name}</span>
-              <span className="ad-type-badge">{field.type}</span>
+          <Card key={field.name} className="p-4">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-sm font-medium">{field.name}</span>
+              <Badge variant="secondary">{field.type}</Badge>
             </div>
-            <div className="ad-field-desc">{field.description}</div>
-          </div>
+            <div className="text-sm text-muted-foreground mt-1">{field.description}</div>
+          </Card>
         ))}
 
-        <div className="ad-section-header">
+        <div className="flex items-center gap-2 mt-6">
           <Code size={16} />
-          <span className="ad-section-title">Output Schema</span>
+          <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Output Schema</span>
         </div>
-        <div className="ad-code-block">
-          <pre className="ad-code-text">{agent.outputSchema}</pre>
+        <div className="bg-slate-900 rounded-lg p-4 overflow-x-auto">
+          <pre className="text-xs font-mono text-slate-300">{agent.outputSchema}</pre>
         </div>
 
         {agent.tools.length > 0 && (
           <>
-            <div className="ad-section-header">
+            <div className="flex items-center gap-2 mt-6">
               <Wrench size={16} />
-              <span className="ad-section-title">Tools</span>
+              <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Tools</span>
             </div>
             {agent.tools.map((tool) => (
-              <div key={tool.name} className="ad-tool-card">
-                <div className="ad-tool-header">
-                  <Wrench size={16} color="var(--color-success)" />
-                  <span className="ad-tool-name">{tool.name}</span>
+              <Card key={tool.name} className="p-4">
+                <div className="flex items-center gap-2">
+                  <Wrench size={16} className="text-emerald-500" />
+                  <span className="font-mono text-sm font-medium">{tool.name}</span>
                 </div>
-                <div className="ad-tool-desc">{tool.description}</div>
+                <div className="text-sm text-muted-foreground mt-1">{tool.description}</div>
                 {Object.keys(tool.parameters).length > 0 && (
-                  <div className="ad-tool-params">
-                    <div className="ad-tool-params-title">Parameters</div>
+                  <div className="mt-3 space-y-2">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Parameters</div>
                     {Object.entries(tool.parameters).map(([param, desc]) => (
-                      <div key={param} className="ad-tool-param-row">
-                        <div className="ad-tool-param-name">{param}</div>
-                        <div className="ad-tool-param-desc">{desc}</div>
+                      <div key={param} className="flex gap-2 text-sm">
+                        <span className="font-mono font-medium text-primary">{param}</span>
+                        <span className="text-muted-foreground">{desc}</span>
                       </div>
                     ))}
                   </div>
                 )}
-              </div>
+              </Card>
             ))}
           </>
         )}
 
-        <div className="ad-section-header">
+        <div className="flex items-center gap-2 mt-6">
           <Terminal size={16} />
-          <span className="ad-section-title">System Prompt</span>
+          <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">System Prompt</span>
         </div>
-        <div className="ad-prompt-card">
-          <div className="ad-prompt-meta">
+        <Card className="overflow-hidden">
+          <div className="text-xs text-muted-foreground px-4 py-2 bg-muted border-b border-border">
             {promptLines} lines | {agent.systemPrompt.length} chars
           </div>
-          <div className="ad-prompt-scroll">
-            <pre className="ad-prompt-text">{agent.systemPrompt}</pre>
+          <div className="max-h-[400px] overflow-y-auto p-4">
+            <pre className="text-xs font-mono text-foreground whitespace-pre-wrap">{agent.systemPrompt}</pre>
           </div>
-        </div>
+        </Card>
       </div>
     </div>
   );

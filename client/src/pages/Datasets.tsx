@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { Database, Upload, Table, FileSpreadsheet, X, ChevronLeft, ChevronRight, ArrowUpDown, Search } from "lucide-react";
-import "./Datasets.css";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 interface DatasetRow {
   [key: string]: string | number;
@@ -155,48 +159,56 @@ function DataViewer({ dataset, onClose }: { dataset: Dataset; onClose: () => voi
   }
 
   return (
-    <div className="data-viewer-overlay" onClick={onClose}>
-      <div className="data-viewer" onClick={(e) => e.stopPropagation()}>
-        <div className="data-viewer-header">
-          <div className="data-viewer-title-row">
-            <div className="data-viewer-icon" style={{ background: dataset.color }}>
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={onClose}>
+      <div className="bg-background rounded-xl shadow-2xl w-[95%] max-w-5xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: dataset.color }}>
               <dataset.icon size={18} color={dataset.iconColor} />
             </div>
             <div>
-              <h2 className="data-viewer-title">{dataset.name}</h2>
-              <span className="data-viewer-meta">{dataset.type} &middot; {dataset.data.length} rows &middot; {dataset.columns.length} columns</span>
+              <h2 className="font-semibold text-foreground">{dataset.name}</h2>
+              <span className="text-xs text-muted-foreground">{dataset.type} &middot; {dataset.data.length} rows &middot; {dataset.columns.length} columns</span>
             </div>
           </div>
-          <button className="data-viewer-close" onClick={onClose}>
+          <Button variant="ghost" size="icon" onClick={onClose}>
             <X size={18} />
-          </button>
+          </Button>
         </div>
 
-        <div className="data-viewer-toolbar">
-          <div className="data-viewer-search">
-            <Search size={14} />
-            <input
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
               type="text"
               placeholder="Search rows..."
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+              className="pl-8 h-8 w-[200px]"
             />
           </div>
-          <span className="data-viewer-count">
+          <span className="text-xs text-muted-foreground">
             {filtered.length === dataset.data.length ? `${dataset.data.length} rows` : `${filtered.length} of ${dataset.data.length} rows`}
           </span>
         </div>
 
-        <div className="data-viewer-table-wrap">
-          <table className="data-viewer-table">
-            <thead>
+        <div className="flex-1 overflow-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead className="sticky top-0 bg-muted">
               <tr>
-                <th className="row-num-col">#</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-10">#</th>
                 {dataset.columns.map((col) => (
-                  <th key={col} onClick={() => handleSort(col)} className={sortCol === col ? "sorted" : ""}>
-                    <span className="th-content">
+                  <th
+                    key={col}
+                    onClick={() => handleSort(col)}
+                    className={cn(
+                      "px-3 py-2 text-left text-xs font-medium cursor-pointer hover:bg-accent transition-colors whitespace-nowrap",
+                      sortCol === col ? "text-foreground" : "text-muted-foreground"
+                    )}
+                  >
+                    <span className="inline-flex items-center gap-1">
                       {col}
-                      <ArrowUpDown size={12} className={`sort-icon${sortCol === col ? " active" : ""}`} />
+                      <ArrowUpDown size={12} className={cn("opacity-40", sortCol === col && "opacity-100")} />
                     </span>
                   </th>
                 ))}
@@ -204,12 +216,12 @@ function DataViewer({ dataset, onClose }: { dataset: Dataset; onClose: () => voi
             </thead>
             <tbody>
               {pageData.map((row, ri) => (
-                <tr key={ri}>
-                  <td className="row-num-col">{page * PAGE_SIZE + ri + 1}</td>
+                <tr key={ri} className="border-t border-border hover:bg-muted/50 transition-colors">
+                  <td className="px-3 py-2 text-xs text-muted-foreground">{page * PAGE_SIZE + ri + 1}</td>
                   {dataset.columns.map((col) => (
-                    <td key={col}>
+                    <td key={col} className="px-3 py-2 whitespace-nowrap">
                       {typeof row[col] === "number" ? (
-                        <span className="cell-number">{row[col]}</span>
+                        <span className="font-mono text-xs">{row[col]}</span>
                       ) : (
                         row[col]
                       )}
@@ -219,7 +231,7 @@ function DataViewer({ dataset, onClose }: { dataset: Dataset; onClose: () => voi
               ))}
               {pageData.length === 0 && (
                 <tr>
-                  <td colSpan={dataset.columns.length + 1} className="empty-row">No matching rows</td>
+                  <td colSpan={dataset.columns.length + 1} className="px-3 py-8 text-center text-muted-foreground">No matching rows</td>
                 </tr>
               )}
             </tbody>
@@ -227,16 +239,16 @@ function DataViewer({ dataset, onClose }: { dataset: Dataset; onClose: () => voi
         </div>
 
         {totalPages > 1 && (
-          <div className="data-viewer-pagination">
-            <button disabled={page === 0} onClick={() => setPage(page - 1)}>
+          <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+            <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(page - 1)}>
               <ChevronLeft size={14} /> Prev
-            </button>
-            <span className="page-indicator">
+            </Button>
+            <span className="text-sm text-muted-foreground">
               Page {page + 1} of {totalPages}
             </span>
-            <button disabled={page >= totalPages - 1} onClick={() => setPage(page + 1)}>
+            <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage(page + 1)}>
               Next <ChevronRight size={14} />
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -248,40 +260,42 @@ export default function Datasets() {
   const [activeDataset, setActiveDataset] = useState<Dataset | null>(null);
 
   return (
-    <div className="datasets-page">
-      <div className="page-header">
+    <div>
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="page-title">Datasets</h1>
-          <p className="page-subtitle">Manage data sources for your analysis</p>
+          <h1 className="text-2xl font-bold text-foreground">Datasets</h1>
+          <p className="text-sm text-muted-foreground mt-1">Manage data sources for your analysis</p>
         </div>
-        <button className="btn-primary" disabled>
+        <Button disabled>
           <Upload size={16} />
           Upload Dataset
-        </button>
+        </Button>
       </div>
 
-      <div className="datasets-grid">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {sampleDatasets.map((ds, i) => (
-          <div key={i} className="dataset-card card" onClick={() => setActiveDataset(ds)}>
-            <div className="dataset-card-icon" style={{ background: ds.color }}>
-              <ds.icon size={20} color={ds.iconColor} />
-            </div>
-            <div className="dataset-card-info">
-              <h3>{ds.name}</h3>
-              <div className="dataset-card-meta">
-                <span className="badge" style={{ background: "var(--color-bg)", color: "var(--color-text-secondary)" }}>{ds.type}</span>
-                <span>{ds.data.length} rows</span>
-                <span>{ds.updated}</span>
+          <Card key={i} className="cursor-pointer hover:shadow-md transition-all p-4" onClick={() => setActiveDataset(ds)}>
+            <div className="flex items-start gap-3">
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0" style={{ background: ds.color }}>
+                <ds.icon size={20} color={ds.iconColor} />
+              </div>
+              <div className="min-w-0">
+                <h3 className="font-semibold text-foreground truncate">{ds.name}</h3>
+                <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                  <Badge variant="outline" className="text-xs">{ds.type}</Badge>
+                  <span>{ds.data.length} rows</span>
+                  <span>{ds.updated}</span>
+                </div>
               </div>
             </div>
-          </div>
+          </Card>
         ))}
       </div>
 
-      <div className="datasets-empty-hint">
+      <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted-foreground mt-6">
         <Database size={32} />
         <p>Connect your data sources or upload files to power your analysis pipeline.</p>
-        <p className="datasets-hint-sub">Supports CSV, Excel, JSON, and API connections.</p>
+        <p className="text-xs">Supports CSV, Excel, JSON, and API connections.</p>
       </div>
 
       {activeDataset && (

@@ -23,7 +23,10 @@ import {
   Network,
 } from "lucide-react";
 import IssuesGraph from "../components/IssuesGraph";
-import "./ProjectDetail.css";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 const STAGE_LABELS: Record<string, string> = {
   created: "New",
@@ -222,8 +225,8 @@ export default function ProjectDetail() {
 
   if (projectLoading || !project) {
     return (
-      <div className="project-detail" data-testid="project-detail">
-        <div className="loading">
+      <div data-testid="project-detail">
+        <div className="flex items-center justify-center min-h-[300px]">
           <div className="spinner" />
         </div>
       </div>
@@ -236,21 +239,24 @@ export default function ProjectDetail() {
   const isComplete = stage === "complete";
 
   return (
-    <div className="project-detail" data-testid="project-detail">
-      <div className="pd-top-bar">
-        <button className="pd-back-button" onClick={() => navigate("/projects")} data-testid="back-button">
+    <div data-testid="project-detail">
+      <div className="flex items-center gap-3 mb-4">
+        <Button variant="ghost" size="icon" onClick={() => navigate("/projects")} data-testid="back-button">
           <ChevronLeft size={24} />
-        </button>
-        <div className="pd-top-bar-title">{project.name}</div>
-        <div className="pd-top-bar-spacer" />
+        </Button>
+        <div className="text-lg font-semibold flex-1">{project.name}</div>
+        <div className="flex-shrink-0" />
       </div>
 
-      <div className="pd-tab-bar">
-        <div className="pd-tab-scroll">
+      <div className="border-b border-border mb-6">
+        <div className="flex gap-1 overflow-x-auto">
           {TABS.map((tab) => (
             <button
               key={tab}
-              className={`pd-tab${activeTab === tab ? " active" : ""}`}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-t-md transition-colors text-muted-foreground hover:text-foreground",
+                activeTab === tab && "text-foreground border-b-2 border-primary"
+              )}
               onClick={() => setActiveTab(tab)}
               data-testid={`tab-${tab}`}
             >
@@ -261,7 +267,7 @@ export default function ProjectDetail() {
         </div>
       </div>
 
-      <div className="pd-scroll-content">
+      <div>
         {activeTab === "overview" && (
           <OverviewTab
             project={project}
@@ -319,23 +325,23 @@ export default function ProjectDetail() {
       )}
 
       {!runNextMutation.isPending && showRunNext && !isComplete && (
-        <div className="pd-action-bar" data-testid="action-bar">
-          <button
-            className="pd-action-button run"
+        <div className="fixed bottom-0 left-0 right-0 bg-background border-t border-border p-4 flex justify-center" data-testid="action-bar">
+          <Button
+            size="lg"
             onClick={() => runNextMutation.mutate()}
             disabled={runNextMutation.isPending}
             data-testid="run-next-btn"
           >
             <PlayCircle size={20} />
             Run Next Agent
-          </button>
+          </Button>
         </div>
       )}
 
       {isComplete && (
-        <div className="pd-action-bar complete-bar" data-testid="complete-bar">
-          <CheckCircle size={24} color="var(--color-success)" />
-          <span className="pd-complete-text">Workflow Complete</span>
+        <div className="fixed bottom-0 left-0 right-0 bg-background border-t border-border p-4 flex items-center justify-center gap-3" data-testid="complete-bar">
+          <CheckCircle size={24} className="text-emerald-500" />
+          <span className="text-sm font-semibold text-emerald-500">Workflow Complete</span>
         </div>
       )}
     </div>
@@ -368,14 +374,14 @@ function RunningStatusBar({ stage, elapsed }: { stage: string; elapsed: number }
     : `${seconds}s`;
 
   return (
-    <div className="pd-running-bar" data-testid="running-bar">
-      <div className="pd-running-bar-content">
-        <div className="pd-running-bar-top">
-          <div className="pd-running-spinner" />
-          <span className="pd-running-bar-agent">{agentName}</span>
-          <span className="pd-running-bar-time">{timeStr}</span>
+    <div className="fixed bottom-0 left-0 right-0 bg-background border-t border-border p-4 z-50" data-testid="running-bar">
+      <div className="max-w-md mx-auto">
+        <div className="flex items-center gap-3">
+          <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          <span className="text-sm font-semibold flex-1">{agentName}</span>
+          <span className="text-xs text-muted-foreground font-mono">{timeStr}</span>
         </div>
-        <div className="pd-running-bar-status">{currentPhase}{dots}</div>
+        <div className="text-xs text-muted-foreground mt-1 ml-8">{currentPhase}{dots}</div>
       </div>
     </div>
   );
@@ -393,40 +399,49 @@ function OverviewTab({
   redoPending: boolean;
 }) {
   return (
-    <div className="pd-tab-content">
-      <div className="pd-section">
-        <div className="pd-section-title">Objective</div>
-        <div className="pd-section-body">{project.objective}</div>
-      </div>
-      <div className="pd-section">
-        <div className="pd-section-title">Constraints</div>
-        <div className="pd-section-body">{project.constraints}</div>
-      </div>
-      <div className="pd-section">
-        <div className="pd-section-title">Workflow Progress</div>
+    <div className="space-y-4">
+      <Card className="p-5">
+        <div className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">Objective</div>
+        <div className="text-sm text-foreground leading-relaxed">{project.objective}</div>
+      </Card>
+      <Card className="p-5">
+        <div className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">Constraints</div>
+        <div className="text-sm text-foreground leading-relaxed">{project.constraints}</div>
+      </Card>
+      <Card className="p-5">
+        <div className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">Workflow Progress</div>
         {WORKFLOW_STEPS.map((step, i) => {
           const status = getStepStatus(step, stage);
           return (
-            <div key={step.key} className="pd-workflow-step">
-              <div className="pd-step-indicator">
-                <div className={`pd-step-circle ${status}`}>
+            <div key={step.key} className="flex gap-3">
+              <div className="flex flex-col items-center">
+                <div
+                  className={cn(
+                    "w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold",
+                    status === "complete" && "bg-emerald-500 text-white",
+                    status === "active" && "bg-blue-500 text-white ring-4 ring-blue-500/20",
+                    status === "pending" && "bg-muted text-muted-foreground"
+                  )}
+                >
                   {status === "complete" ? (
                     <Check size={14} color="#fff" />
                   ) : status === "active" ? (
-                    <div className="pd-step-dot-inner" />
+                    <div className="w-2 h-2 rounded-full bg-white" />
                   ) : (
-                    <span className="pd-step-number">{i + 1}</span>
+                    <span>{i + 1}</span>
                   )}
                 </div>
                 {i < WORKFLOW_STEPS.length - 1 && (
-                  <div className={`pd-step-line${status === "complete" ? " complete" : ""}`} />
+                  <div className={cn("w-0.5 flex-1 mx-auto", status === "complete" ? "bg-emerald-500" : "bg-border")} />
                 )}
               </div>
-              <div className="pd-step-info">
-                <div className="pd-step-info-row">
-                  <div style={{ flex: 1 }}>
-                    <div className={`pd-step-label ${status}`}>{step.label}</div>
-                    <div className="pd-step-status">
+              <div className="flex-1 pb-4">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <div className={cn("text-sm font-medium", status === "pending" && "text-muted-foreground")}>
+                      {step.label}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
                       {status === "complete"
                         ? "Done"
                         : status === "active"
@@ -435,8 +450,9 @@ function OverviewTab({
                     </div>
                   </div>
                   {(status === "complete" || status === "active") && (
-                    <button
-                      className="pd-redo-button"
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       onClick={() => onRedo(step.key, step.label)}
                       disabled={redoPending}
                       data-testid={`redo-${step.key}`}
@@ -449,35 +465,35 @@ function OverviewTab({
                           Redo
                         </>
                       )}
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>
             </div>
           );
         })}
-      </div>
-      <div className="pd-section">
-        <div className="pd-section-title">Details</div>
-        <div className="pd-detail-row">
-          <span className="pd-detail-label">Created</span>
-          <span className="pd-detail-value">
+      </Card>
+      <Card className="p-5">
+        <div className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">Details</div>
+        <div className="flex justify-between py-2 border-b border-border">
+          <span className="text-sm text-muted-foreground">Created</span>
+          <span className="text-sm font-medium">
             {new Date(project.createdAt).toLocaleDateString()}
           </span>
         </div>
-        <div className="pd-detail-row">
-          <span className="pd-detail-label">Updated</span>
-          <span className="pd-detail-value">
+        <div className="flex justify-between py-2 border-b border-border">
+          <span className="text-sm text-muted-foreground">Updated</span>
+          <span className="text-sm font-medium">
             {new Date(project.updatedAt).toLocaleDateString()}
           </span>
         </div>
-        <div className="pd-detail-row">
-          <span className="pd-detail-label">Current Stage</span>
-          <span className="pd-detail-value" style={{ color: "var(--color-accent)" }}>
+        <div className="flex justify-between py-2">
+          <span className="text-sm text-muted-foreground">Current Stage</span>
+          <span className="text-sm font-medium text-primary">
             {STAGE_LABELS[stage] || stage}
           </span>
         </div>
-      </div>
+      </Card>
     </div>
   );
 }
@@ -491,8 +507,9 @@ interface ApproveProps {
 function InlineApproveButton({ showApprove, onApprove, approvePending }: ApproveProps) {
   if (!showApprove) return null;
   return (
-    <button
-      className="pd-inline-approve-btn"
+    <Button
+      className="w-full mt-4 bg-emerald-600 hover:bg-emerald-700 text-white"
+      size="lg"
       onClick={onApprove}
       disabled={approvePending}
       data-testid="inline-approve-btn"
@@ -505,7 +522,7 @@ function InlineApproveButton({ showApprove, onApprove, approvePending }: Approve
           Approve & Continue
         </>
       )}
-    </button>
+    </Button>
   );
 }
 
@@ -514,10 +531,10 @@ function IssuesTab({ issues, showApprove, onApprove, approvePending }: { issues:
 
   if (issues.length === 0) {
     return (
-      <div className="pd-empty-tab">
+      <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
         <GitBranch size={40} />
-        <div className="pd-empty-tab-title">No issues yet</div>
-        <div className="pd-empty-tab-text">
+        <div className="text-base font-semibold">No issues yet</div>
+        <div className="text-sm">
           Run the Issues Tree agent to generate the issues breakdown
         </div>
       </div>
@@ -534,36 +551,34 @@ function IssuesTab({ issues, showApprove, onApprove, approvePending }: { issues:
 
   function renderIssueNode(node: any, depth: number): React.ReactNode {
     const nodeChildren = getDescendants(node.id);
-    const priorityColor =
+    const priorityVariant =
       node.priority === "high"
-        ? "var(--color-error)"
+        ? "destructive"
         : node.priority === "medium"
-        ? "var(--color-warning)"
-        : "var(--color-text-muted)";
-
-    const priorityBg =
-      node.priority === "high"
-        ? "var(--color-error-bg)"
-        : node.priority === "medium"
-        ? "var(--color-warning-bg)"
-        : "var(--color-bg)";
+        ? "warning"
+        : "secondary";
 
     return (
-      <div key={node.id} className={depth > 0 ? "pd-issue-child" : ""}>
-        {depth > 0 && <div className="pd-issue-child-line" />}
-        <div className={depth === 0 ? "pd-issue-root-header" : "pd-issue-child-content"}>
-          <div className="pd-priority-dot" style={{ background: priorityColor }} />
-          <span className={depth === 0 ? "pd-issue-root-text" : "pd-issue-child-text"}>
+      <div key={node.id} className={depth > 0 ? "ml-4" : ""}>
+        {depth > 0 && <div className="w-px h-3 bg-border ml-4" />}
+        <div className="flex items-start gap-2 py-1">
+          <div
+            className={cn(
+              "w-2 h-2 rounded-full mt-1.5 flex-shrink-0",
+              node.priority === "high" && "bg-destructive",
+              node.priority === "medium" && "bg-amber-500",
+              node.priority !== "high" && node.priority !== "medium" && "bg-muted-foreground"
+            )}
+          />
+          <span className={cn("text-sm flex-1", depth === 0 ? "font-semibold" : "text-foreground")}>
             {node.text}
           </span>
-          <span className="pd-priority-badge" style={{ background: priorityBg }}>
-            <span className="pd-priority-text" style={{ color: priorityColor }}>
-              {node.priority}
-            </span>
-          </span>
+          <Badge variant={priorityVariant as any} className="text-[10px] flex-shrink-0">
+            {node.priority}
+          </Badge>
         </div>
         {nodeChildren.length > 0 && (
-          <div style={{ marginLeft: 8 }}>
+          <div className="ml-2">
             {nodeChildren.map((child: any) => renderIssueNode(child, depth + 1))}
           </div>
         )}
@@ -572,21 +587,27 @@ function IssuesTab({ issues, showApprove, onApprove, approvePending }: { issues:
   }
 
   return (
-    <div className="pd-tab-content">
-      <div className="pd-view-toggle-row">
-        <div className="pd-version-badge-row">
-          <span className="pd-version-badge">Version {latestVersion}</span>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <Badge variant="secondary">Version {latestVersion}</Badge>
         </div>
-        <div className="pd-view-toggle">
+        <div className="flex border border-border rounded-md overflow-hidden">
           <button
-            className={`pd-view-toggle-btn${viewMode === "graph" ? " active" : ""}`}
+            className={cn(
+              "p-2 transition-colors",
+              viewMode === "graph" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:text-foreground"
+            )}
             onClick={() => setViewMode("graph")}
             data-testid="toggle-graph"
           >
             <Network size={16} />
           </button>
           <button
-            className={`pd-view-toggle-btn${viewMode === "list" ? " active" : ""}`}
+            className={cn(
+              "p-2 transition-colors",
+              viewMode === "list" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:text-foreground"
+            )}
             onClick={() => setViewMode("list")}
             data-testid="toggle-list"
           >
@@ -599,9 +620,9 @@ function IssuesTab({ issues, showApprove, onApprove, approvePending }: { issues:
         <IssuesGraph issues={latestIssues.map((n: any) => ({ id: n.id, parentId: n.parentId, text: n.text, priority: n.priority }))} />
       ) : (
         roots.map((root: any) => (
-          <div key={root.id} className="pd-issue-root">
+          <Card key={root.id} className="p-4">
             {renderIssueNode(root, 0)}
-          </div>
+          </Card>
         ))
       )}
       <InlineApproveButton showApprove={showApprove} onApprove={onApprove} approvePending={approvePending} />
@@ -621,10 +642,10 @@ function HypothesesTab({
 } & ApproveProps) {
   if (hypotheses.length === 0) {
     return (
-      <div className="pd-empty-tab">
+      <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
         <FlaskConical size={40} />
-        <div className="pd-empty-tab-title">No hypotheses yet</div>
-        <div className="pd-empty-tab-text">
+        <div className="text-base font-semibold">No hypotheses yet</div>
+        <div className="text-sm">
           Run the Hypothesis agent after approving the issues tree
         </div>
       </div>
@@ -635,39 +656,39 @@ function HypothesesTab({
   const latest = hypotheses.filter((h: any) => h.version === latestVersion);
 
   return (
-    <div className="pd-tab-content">
-      <div className="pd-version-badge-row">
-        <span className="pd-version-badge">Version {latestVersion}</span>
+    <div className="space-y-4">
+      <div>
+        <Badge variant="secondary">Version {latestVersion}</Badge>
       </div>
       {latest.map((hyp: any, i: number) => {
         const plan = plans.find((p: any) => p.hypothesisId === hyp.id);
         return (
-          <div key={hyp.id} className="pd-hyp-card">
-            <div className="pd-hyp-index">H{i + 1}</div>
-            <div className="pd-hyp-statement">{hyp.statement}</div>
-            <div className="pd-hyp-meta">
-              <div className="pd-hyp-meta-item">
+          <Card key={hyp.id} className="p-5">
+            <div className="text-xs font-bold text-primary mb-1">H{i + 1}</div>
+            <div className="text-sm font-semibold">{hyp.statement}</div>
+            <div className="flex flex-wrap gap-3 mt-2 text-xs text-muted-foreground">
+              <div className="flex items-center gap-1">
                 <Target size={12} />
-                <span className="pd-hyp-meta-text">{hyp.metric}</span>
+                <span>{hyp.metric}</span>
               </div>
-              <div className="pd-hyp-meta-item">
+              <div className="flex items-center gap-1">
                 <Database size={12} />
-                <span className="pd-hyp-meta-text">{hyp.dataSource}</span>
+                <span>{hyp.dataSource}</span>
               </div>
             </div>
             {plan && (
-              <div className="pd-plan-box">
-                <div className="pd-plan-title">Analysis Plan</div>
-                <div className="pd-plan-method">Method: {plan.method}</div>
-                <div className="pd-plan-dataset">Dataset: {plan.requiredDataset}</div>
+              <div className="bg-muted rounded-lg p-4 mt-3">
+                <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Analysis Plan</div>
+                <div className="text-sm">Method: {plan.method}</div>
+                <div className="text-sm">Dataset: {plan.requiredDataset}</div>
                 {plan.parametersJson && (
-                  <div className="pd-plan-params">
+                  <pre className="text-xs font-mono mt-2 text-muted-foreground">
                     {JSON.stringify(plan.parametersJson, null, 2)}
-                  </div>
+                  </pre>
                 )}
               </div>
             )}
-          </div>
+          </Card>
         );
       })}
       <InlineApproveButton showApprove={showApprove} onApprove={onApprove} approvePending={approvePending} />
@@ -678,10 +699,10 @@ function HypothesesTab({
 function RunsTab({ runs, showApprove, onApprove, approvePending }: { runs: any[] } & ApproveProps) {
   if (runs.length === 0) {
     return (
-      <div className="pd-empty-tab">
+      <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
         <BarChart3 size={40} />
-        <div className="pd-empty-tab-title">No model runs yet</div>
-        <div className="pd-empty-tab-text">
+        <div className="text-base font-semibold">No model runs yet</div>
+        <div className="text-sm">
           Run the Execution agent after approving hypotheses
         </div>
       </div>
@@ -689,53 +710,53 @@ function RunsTab({ runs, showApprove, onApprove, approvePending }: { runs: any[]
   }
 
   return (
-    <div className="pd-tab-content">
+    <div className="space-y-4">
       {runs.map((run: any) => {
         const summary = (run.outputsJson as any)?.summary;
         return (
-          <div key={run.id} className="pd-run-card">
-            <div className="pd-run-header">
-              <FunctionSquare size={18} color="var(--color-accent)" />
-              <span className="pd-run-tool-name">{run.toolName}</span>
-              <span className="pd-run-date">
+          <Card key={run.id} className="p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <FunctionSquare size={18} className="text-primary" />
+              <span className="text-sm font-semibold flex-1">{run.toolName}</span>
+              <span className="text-xs text-muted-foreground">
                 {new Date(run.createdAt).toLocaleString()}
               </span>
             </div>
             {summary && (
-              <div className="pd-scenario-grid">
-                <div className="pd-scenario-item">
-                  <div className="pd-scenario-label">Pessimistic NPV</div>
-                  <div className="pd-scenario-value" style={{ color: "var(--color-error)" }}>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Card className="p-4 text-center">
+                  <div className="text-xs text-muted-foreground">Pessimistic NPV</div>
+                  <div className="text-sm font-semibold mt-1 text-destructive">
                     ${summary.pessimisticNPV?.toLocaleString()}
                   </div>
-                </div>
-                <div className="pd-scenario-item">
-                  <div className="pd-scenario-label">Baseline NPV</div>
-                  <div className="pd-scenario-value" style={{ color: "var(--color-accent)" }}>
+                </Card>
+                <Card className="p-4 text-center">
+                  <div className="text-xs text-muted-foreground">Baseline NPV</div>
+                  <div className="text-sm font-semibold mt-1 text-primary">
                     ${summary.baselineNPV?.toLocaleString()}
                   </div>
-                </div>
-                <div className="pd-scenario-item">
-                  <div className="pd-scenario-label">Optimistic NPV</div>
-                  <div className="pd-scenario-value" style={{ color: "var(--color-success)" }}>
+                </Card>
+                <Card className="p-4 text-center">
+                  <div className="text-xs text-muted-foreground">Optimistic NPV</div>
+                  <div className="text-sm font-semibold mt-1 text-emerald-500">
                     ${summary.optimisticNPV?.toLocaleString()}
                   </div>
-                </div>
-                <div className="pd-scenario-item">
-                  <div className="pd-scenario-label">Expected Value</div>
-                  <div className="pd-scenario-value-bold">
+                </Card>
+                <Card className="p-4 text-center">
+                  <div className="text-xs text-muted-foreground">Expected Value</div>
+                  <div className="text-sm font-bold mt-1">
                     ${summary.expectedValue?.toLocaleString()}
                   </div>
-                </div>
+                </Card>
               </div>
             )}
-            <div className="pd-run-details">
-              <div className="pd-run-details-label">Inputs</div>
-              <div className="pd-run-details-text">
+            <div className="mt-3">
+              <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Inputs</div>
+              <pre className="text-xs font-mono text-muted-foreground bg-muted rounded-lg p-3 overflow-x-auto">
                 {JSON.stringify(run.inputsJson, null, 2)}
-              </div>
+              </pre>
             </div>
-          </div>
+          </Card>
         );
       })}
       <InlineApproveButton showApprove={showApprove} onApprove={onApprove} approvePending={approvePending} />
@@ -759,13 +780,13 @@ function MarkdownText({ text }: { text: string }) {
     while ((match = regex.exec(line)) !== null) {
       if (match.index > lastIndex) {
         parts.push(
-          <span key={`${key}-t${partIdx++}`} className="pd-md-body">
+          <span key={`${key}-t${partIdx++}`} className="text-sm leading-relaxed">
             {line.slice(lastIndex, match.index)}
           </span>
         );
       }
       parts.push(
-        <strong key={`${key}-b${partIdx++}`} className="pd-md-bold">
+        <strong key={`${key}-b${partIdx++}`} className="font-semibold">
           {match[2] || match[4]}
         </strong>
       );
@@ -773,13 +794,13 @@ function MarkdownText({ text }: { text: string }) {
     }
     if (lastIndex < line.length) {
       parts.push(
-        <span key={`${key}-t${partIdx++}`} className="pd-md-body">
+        <span key={`${key}-t${partIdx++}`} className="text-sm leading-relaxed">
           {line.slice(lastIndex)}
         </span>
       );
     }
     if (parts.length === 0) {
-      return <span key={key} className="pd-md-body">{line}</span>;
+      return <span key={key} className="text-sm leading-relaxed">{line}</span>;
     }
     return <span key={key}>{parts}</span>;
   }
@@ -789,50 +810,50 @@ function MarkdownText({ text }: { text: string }) {
     const trimmed = line.trim();
 
     if (trimmed === "") {
-      elements.push(<div key={`sp-${i}`} className="pd-md-spacer" />);
+      elements.push(<div key={`sp-${i}`} className="h-3" />);
       continue;
     }
 
     if (trimmed.startsWith("### ")) {
-      elements.push(<div key={`h3-${i}`} className="pd-md-h3">{trimmed.slice(4)}</div>);
+      elements.push(<div key={`h3-${i}`} className="text-base font-semibold mt-2 mb-1">{trimmed.slice(4)}</div>);
     } else if (trimmed.startsWith("## ")) {
-      elements.push(<div key={`h2-${i}`} className="pd-md-h2">{trimmed.slice(3)}</div>);
+      elements.push(<div key={`h2-${i}`} className="text-lg font-semibold mt-3 mb-2">{trimmed.slice(3)}</div>);
     } else if (trimmed.startsWith("# ")) {
-      elements.push(<div key={`h1-${i}`} className="pd-md-h1">{trimmed.slice(2)}</div>);
+      elements.push(<div key={`h1-${i}`} className="text-xl font-bold mt-4 mb-2">{trimmed.slice(2)}</div>);
     } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
       elements.push(
-        <div key={`li-${i}`} className="pd-md-bullet-row">
-          <span className="pd-md-bullet-dot">{"\u2022"}</span>
-          <div style={{ flex: 1 }}>{renderInline(trimmed.slice(2), `li-${i}`)}</div>
+        <div key={`li-${i}`} className="flex gap-2 items-start py-0.5">
+          <span className="text-muted-foreground">{"\u2022"}</span>
+          <div className="flex-1">{renderInline(trimmed.slice(2), `li-${i}`)}</div>
         </div>
       );
     } else if (/^\d+\.\s/.test(trimmed)) {
       const numMatch = trimmed.match(/^(\d+)\.\s(.*)$/);
       if (numMatch) {
         elements.push(
-          <div key={`ol-${i}`} className="pd-md-bullet-row">
-            <span className="pd-md-ordered-num">{numMatch[1]}.</span>
-            <div style={{ flex: 1 }}>{renderInline(numMatch[2], `ol-${i}`)}</div>
+          <div key={`ol-${i}`} className="flex gap-2 items-start py-0.5">
+            <span className="text-muted-foreground text-sm font-medium">{numMatch[1]}.</span>
+            <div className="flex-1">{renderInline(numMatch[2], `ol-${i}`)}</div>
           </div>
         );
       }
     } else if (trimmed === "---" || trimmed === "***") {
-      elements.push(<div key={`hr-${i}`} className="pd-md-hr" />);
+      elements.push(<div key={`hr-${i}`} className="border-t border-border my-4" />);
     } else {
       elements.push(<div key={`p-${i}`}>{renderInline(trimmed, `p-${i}`)}</div>);
     }
   }
 
-  return <div className="pd-md-container">{elements}</div>;
+  return <div>{elements}</div>;
 }
 
 function SummaryTab({ narratives, showApprove, onApprove, approvePending }: { narratives: any[] } & ApproveProps) {
   if (narratives.length === 0) {
     return (
-      <div className="pd-empty-tab">
+      <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
         <FileText size={40} />
-        <div className="pd-empty-tab-title">No summary yet</div>
-        <div className="pd-empty-tab-text">
+        <div className="text-base font-semibold">No summary yet</div>
+        <div className="text-sm">
           Run the Summary agent after approving execution results
         </div>
       </div>
@@ -840,17 +861,17 @@ function SummaryTab({ narratives, showApprove, onApprove, approvePending }: { na
   }
 
   return (
-    <div className="pd-tab-content">
+    <div className="space-y-4">
       {narratives.map((narr: any) => (
-        <div key={narr.id} className="pd-narrative-card">
-          <div className="pd-narrative-header">
-            <span className="pd-version-badge">Version {narr.version}</span>
-            <span className="pd-narrative-date">
+        <Card key={narr.id} className="p-5">
+          <div className="flex items-center justify-between mb-3">
+            <Badge variant="secondary">Version {narr.version}</Badge>
+            <span className="text-xs text-muted-foreground">
               {new Date(narr.createdAt).toLocaleString()}
             </span>
           </div>
           <MarkdownText text={narr.summaryText} />
-        </div>
+        </Card>
       ))}
       <InlineApproveButton showApprove={showApprove} onApprove={onApprove} approvePending={approvePending} />
     </div>
@@ -862,10 +883,10 @@ function PresentationTab({ slides, showApprove, onApprove, approvePending }: { s
 
   if (slides.length === 0) {
     return (
-      <div className="pd-empty-tab">
+      <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
         <Presentation size={40} />
-        <div className="pd-empty-tab-title">No presentation yet</div>
-        <div className="pd-empty-tab-text">
+        <div className="text-base font-semibold">No presentation yet</div>
+        <div className="text-sm">
           Run the Presentation agent to generate a slide deck
         </div>
       </div>
@@ -883,57 +904,59 @@ function PresentationTab({ slides, showApprove, onApprove, approvePending }: { s
   const body = typeof slide.bodyJson === "string" ? JSON.parse(slide.bodyJson) : slide.bodyJson;
 
   return (
-    <div className="pd-tab-content">
-      <div className="pd-slide-controls">
-        <button
-          className="pd-slide-nav-btn"
+    <div className="space-y-4">
+      <div className="flex items-center justify-center gap-4 mb-4">
+        <Button
+          variant="outline"
+          size="icon"
           onClick={() => setCurrentSlide(Math.max(0, currentSlide - 1))}
           disabled={currentSlide === 0}
           data-testid="slide-prev"
         >
           <ChevronLeft size={20} />
-        </button>
-        <span className="pd-slide-counter">
+        </Button>
+        <span className="text-sm font-medium text-muted-foreground">
           {currentSlide + 1} / {latestSlides.length}
         </span>
-        <button
-          className="pd-slide-nav-btn"
+        <Button
+          variant="outline"
+          size="icon"
           onClick={() => setCurrentSlide(Math.min(latestSlides.length - 1, currentSlide + 1))}
           disabled={currentSlide === latestSlides.length - 1}
           data-testid="slide-next"
         >
           <ChevronRight size={20} />
-        </button>
+        </Button>
       </div>
 
-      <div className="pd-slide-wrapper">
-        <div className="pd-slide-frame">
+      <div>
+        <div className="aspect-video bg-white rounded-xl border border-border shadow-sm p-8 flex items-center justify-center">
           {slide.layout === "title_slide" && (
-            <div className="pd-slide-title-layout">
-              <div className="pd-slide-title-accent" />
-              <div className="pd-slide-title-main">{slide.title}</div>
-              {slide.subtitle && <div className="pd-slide-title-sub">{slide.subtitle}</div>}
+            <div className="text-center">
+              <div className="w-16 h-1 bg-primary mx-auto mb-6 rounded-full" />
+              <div className="text-2xl font-bold text-slate-900">{slide.title}</div>
+              {slide.subtitle && <div className="text-base text-slate-500 mt-3">{slide.subtitle}</div>}
             </div>
           )}
 
           {slide.layout === "section_header" && (
-            <div className="pd-slide-section-layout">
-              <div className="pd-slide-section-bar" />
-              <div className="pd-slide-section-title">{slide.title}</div>
-              {slide.subtitle && <div className="pd-slide-section-sub">{slide.subtitle}</div>}
+            <div className="text-center">
+              <div className="w-10 h-1 bg-primary mx-auto mb-4 rounded-full" />
+              <div className="text-xl font-bold text-slate-900">{slide.title}</div>
+              {slide.subtitle && <div className="text-sm text-slate-500 mt-2">{slide.subtitle}</div>}
             </div>
           )}
 
           {slide.layout === "title_body" && (
-            <div className="pd-slide-body-layout">
-              <div className="pd-slide-body-title">{slide.title}</div>
-              {slide.subtitle && <div className="pd-slide-body-subtitle">{slide.subtitle}</div>}
+            <div className="w-full">
+              <div className="text-lg font-bold text-slate-900 mb-3">{slide.title}</div>
+              {slide.subtitle && <div className="text-sm text-slate-500 mb-4">{slide.subtitle}</div>}
               {body?.bullets && (
-                <div className="pd-slide-bullets">
+                <div className="space-y-2">
                   {body.bullets.map((b: string, i: number) => (
-                    <div key={i} className="pd-slide-bullet-row">
-                      <div className="pd-slide-bullet-dot" />
-                      <span className="pd-slide-bullet-text">{b}</span>
+                    <div key={i} className="flex items-start gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 flex-shrink-0" />
+                      <span className="text-sm text-slate-700">{b}</span>
                     </div>
                   ))}
                 </div>
@@ -942,25 +965,24 @@ function PresentationTab({ slides, showApprove, onApprove, approvePending }: { s
           )}
 
           {slide.layout === "two_column" && (
-            <div className="pd-slide-body-layout">
-              <div className="pd-slide-body-title">{slide.title}</div>
-              <div className="pd-slide-two-col">
-                <div className="pd-slide-col">
-                  <div className="pd-slide-col-title">{body?.leftTitle || "Left"}</div>
+            <div className="w-full">
+              <div className="text-lg font-bold text-slate-900 mb-4">{slide.title}</div>
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <div className="text-sm font-semibold text-slate-700 mb-2">{body?.leftTitle || "Left"}</div>
                   {(body?.leftBullets || []).map((b: string, i: number) => (
-                    <div key={i} className="pd-slide-bullet-row">
-                      <div className="pd-slide-bullet-dot" />
-                      <span className="pd-slide-bullet-text">{b}</span>
+                    <div key={i} className="flex items-start gap-2 py-0.5">
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 flex-shrink-0" />
+                      <span className="text-sm text-slate-700">{b}</span>
                     </div>
                   ))}
                 </div>
-                <div className="pd-slide-col-divider" />
-                <div className="pd-slide-col">
-                  <div className="pd-slide-col-title">{body?.rightTitle || "Right"}</div>
+                <div className="border-l border-slate-200 pl-6">
+                  <div className="text-sm font-semibold text-slate-700 mb-2">{body?.rightTitle || "Right"}</div>
                   {(body?.rightBullets || []).map((b: string, i: number) => (
-                    <div key={i} className="pd-slide-bullet-row">
-                      <div className="pd-slide-bullet-dot" />
-                      <span className="pd-slide-bullet-text">{b}</span>
+                    <div key={i} className="flex items-start gap-2 py-0.5">
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 flex-shrink-0" />
+                      <span className="text-sm text-slate-700">{b}</span>
                     </div>
                   ))}
                 </div>
@@ -969,23 +991,19 @@ function PresentationTab({ slides, showApprove, onApprove, approvePending }: { s
           )}
 
           {slide.layout === "metrics" && (
-            <div className="pd-slide-body-layout">
-              <div className="pd-slide-body-title">{slide.title}</div>
-              <div className="pd-slide-metrics-grid">
+            <div className="w-full">
+              <div className="text-lg font-bold text-slate-900 mb-4">{slide.title}</div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {(body?.metrics || []).map((m: any, i: number) => (
-                  <div key={i} className="pd-slide-metric-card">
-                    <div className="pd-slide-metric-value">{m.value}</div>
-                    <div className="pd-slide-metric-label">{m.label}</div>
+                  <div key={i} className="bg-slate-50 rounded-lg p-4 text-center">
+                    <div className="text-xl font-bold text-slate-900">{m.value}</div>
+                    <div className="text-xs text-slate-500 mt-1">{m.label}</div>
                     {m.change && (
                       <div
-                        className="pd-slide-metric-change"
-                        style={{
-                          color: m.change.startsWith("+")
-                            ? "var(--color-success)"
-                            : m.change.startsWith("-")
-                            ? "var(--color-error)"
-                            : "var(--color-accent)",
-                        }}
+                        className={cn(
+                          "text-xs font-semibold mt-1",
+                          m.change.startsWith("+") ? "text-emerald-600" : m.change.startsWith("-") ? "text-red-600" : "text-blue-600"
+                        )}
                       >
                         {m.change}
                       </div>
@@ -999,21 +1017,26 @@ function PresentationTab({ slides, showApprove, onApprove, approvePending }: { s
       </div>
 
       {slide.notesText && (
-        <div className="pd-slide-notes-box">
-          <div className="pd-slide-notes-label">Speaker Notes</div>
-          <div className="pd-slide-notes-text">{slide.notesText}</div>
-        </div>
+        <Card className="p-4">
+          <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Speaker Notes</div>
+          <div className="text-sm text-foreground leading-relaxed">{slide.notesText}</div>
+        </Card>
       )}
 
-      <div className="pd-slide-thumbnails">
+      <div className="flex gap-2 overflow-x-auto mt-4">
         {latestSlides.map((s: any, i: number) => (
           <button
             key={s.id}
             onClick={() => setCurrentSlide(i)}
-            className={`pd-slide-thumbnail${i === currentSlide ? " active" : ""}`}
+            className={cn(
+              "text-xs px-3 py-1.5 rounded-md border transition-colors whitespace-nowrap",
+              i === currentSlide
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-background text-muted-foreground border-border hover:text-foreground"
+            )}
             data-testid={`slide-thumb-${i}`}
           >
-            <span className="pd-slide-thumbnail-text">{s.title}</span>
+            <span>{s.title}</span>
           </button>
         ))}
       </div>
@@ -1025,10 +1048,10 @@ function PresentationTab({ slides, showApprove, onApprove, approvePending }: { s
 function LogsTab({ logs }: { logs: any[] }) {
   if (logs.length === 0) {
     return (
-      <div className="pd-empty-tab">
+      <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
         <Terminal size={40} />
-        <div className="pd-empty-tab-title">No logs yet</div>
-        <div className="pd-empty-tab-text">
+        <div className="text-base font-semibold">No logs yet</div>
+        <div className="text-sm">
           Agent run logs will appear here
         </div>
       </div>
@@ -1036,39 +1059,31 @@ function LogsTab({ logs }: { logs: any[] }) {
   }
 
   return (
-    <div className="pd-tab-content">
+    <div className="space-y-4">
       {logs.map((log: any) => {
-        const statusBg =
+        const badgeVariant =
           log.status === "success"
-            ? "var(--color-success-bg)"
+            ? "success"
             : log.status === "failed"
-            ? "var(--color-error-bg)"
-            : "var(--color-warning-bg)";
-        const statusColor =
-          log.status === "success"
-            ? "var(--color-success)"
-            : log.status === "failed"
-            ? "var(--color-error)"
-            : "var(--color-warning)";
+            ? "destructive"
+            : "warning";
 
         return (
-          <div key={log.id} className="pd-log-card">
-            <div className="pd-log-header">
-              <span className="pd-log-status" style={{ background: statusBg }}>
-                <span className="pd-log-status-text" style={{ color: statusColor }}>
-                  {log.status}
-                </span>
-              </span>
-              <span className="pd-log-stage">{STAGE_LABELS[log.stage] || log.stage}</span>
-              <span className="pd-log-model">{log.modelUsed}</span>
+          <Card key={log.id} className="p-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge variant={badgeVariant as any}>
+                {log.status}
+              </Badge>
+              <span className="text-sm font-medium">{STAGE_LABELS[log.stage] || log.stage}</span>
+              <span className="text-xs text-muted-foreground ml-auto">{log.modelUsed}</span>
             </div>
-            <div className="pd-log-date">
+            <div className="text-xs text-muted-foreground mt-1">
               {new Date(log.createdAt).toLocaleString()}
             </div>
             {log.errorText && (
-              <div className="pd-log-error">{log.errorText}</div>
+              <div className="text-sm text-destructive mt-2 bg-destructive/10 rounded-md p-2">{log.errorText}</div>
             )}
-          </div>
+          </Card>
         );
       })}
     </div>
