@@ -4,7 +4,7 @@
 
 Consulting OS is a cloud-hosted MVP that demonstrates sequenced AI agents operating on shared, persistent project state with human approval gates. It follows a four-layer architecture: Projects → Workflows → Agents → Data/Models.
 
-Users create projects with objectives and constraints, then run AI agents through a structured workflow pipeline: Issues Tree → MECE Critic → Hypothesis → Execution → Summary → Presentation. Each step produces versioned deliverables that require human approval before proceeding.
+Users create projects with objectives and constraints, then run AI agents through a structured workflow pipeline: Project Definition → Issues Tree → MECE Critic → Hypothesis → Execution → Summary → Presentation. Each step produces versioned deliverables that require human approval before proceeding.
 
 The app is built as a pure React web application (Vite + React + TypeScript) with shadcn/ui components, an Express.js backend, and PostgreSQL database. It features a dark sidebar navigation (ChatGPT/Harvey AI-style), Cmd+K command palette, and supports both real OpenAI LLM calls and mock mode.
 
@@ -14,6 +14,7 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+- **2026-02-17**: Added Project Definition agent as mandatory first step in every workflow. This agent translates vague client briefs into structured, decision-based problem definitions with governing questions, success metrics, constraints, assumptions, and initial hypotheses. Workflow pipeline is now 7 agents (Project Definition → Issues Tree → MECE Critic → Hypothesis → Execution → Summary → Presentation). Stage flow updated with definition_draft/definition_approved stages.
 - **2026-02-17**: Major four-layer architecture refactor — Projects instantiate workflow templates into frozen workflow instances with step-level execution and versioned deliverables. Added sidebar navigation (Projects, Workflows, Agents, Data & Models), Cmd+K command palette, and shadcn/ui components throughout.
 - **2026-02-16**: Converted frontend from Expo/React Native to pure React web app (Vite + React Router + standard HTML/CSS). Server uses Vite dev middleware in development.
 
@@ -72,11 +73,11 @@ Projects instantiate a workflow template into a frozen `workflow_instance` with 
 4. Requires human approval before the next step can run
 5. Can be redone (resets to pending, increments deliverable version)
 
-Default 6-step consulting pipeline is seeded on server start.
+Default 7-step consulting pipeline is seeded on server start.
 
 ### AI Agents (`server/agents/`)
 
-- **Architecture**: Six sequential agents — Issues Tree, MECE Critic (quality gate), Hypothesis, Execution, Summary, Presentation
+- **Architecture**: Seven sequential agents — Project Definition (framing gate), Issues Tree, MECE Critic (quality gate), Hypothesis, Execution, Summary, Presentation
 - **LLM Integration**: OpenAI SDK via Replit AI Integrations. Model: `gpt-5-nano`
 - **Mock Mode**: Deterministic stub outputs when no API key is configured
 - **Tool Calling**: Execution agent uses scenario calculator tool (`server/agents/scenario-tool.ts`)
