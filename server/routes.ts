@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import { storage } from "./storage";
+import { registerChatRoutes } from "./replit_integrations/chat/routes";
 import {
   issuesTreeAgent,
   hypothesisAgent,
@@ -664,6 +665,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: err.message });
     }
   });
+
+  registerChatRoutes(app);
 
   const httpServer = createServer(app);
   return httpServer;
