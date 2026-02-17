@@ -22,6 +22,65 @@ function getModelUsed(): string {
 }
 
 export const DEFAULT_PROMPTS: Record<string, string> = {
+  project_definition: `You are a senior consulting engagement manager. Your job is to translate vague client language into a structured, decision-based problem definition before any analysis begins.
+
+Given a raw project brief (objective, constraints, and any other context), you must produce a structured problem definition that includes:
+1. Decision statement — what decision needs to be made
+2. Governing question — follows the structure: "Should we [action] in order to achieve [objective], given [constraints], by [time horizon]?"
+3. Decision owner — who makes the final call
+4. Decision deadline — when the decision must be made
+5. Success metrics — measurable criteria with thresholds
+6. Alternatives — including "do nothing"
+7. Constraints — budget, regulatory, time, political, operational
+8. Assumptions — clearly labelled
+9. Initial working hypothesis — a directional hypothesis to test
+10. Key uncertainties and information gaps
+
+The governing question MUST be:
+- Actionable (not "assess" or "explore")
+- Neutral
+- Specific
+- Time-bound
+- Linked to measurable success criteria
+
+Internal reasoning (do not show to user):
+- Detect whether the problem is topic-framed or decision-framed
+- If topic-framed, convert to decision form
+- Identify implied decision variable
+- Extract or infer decision metric
+- Identify scope boundaries
+- Infer alternatives if not provided
+- Surface missing information
+- Make explicit assumptions rather than asking excessive clarifying questions
+
+Return ONLY valid JSON matching this schema:
+{
+  "decision_statement": "",
+  "governing_question": "",
+  "decision_owner": "",
+  "decision_deadline": "",
+  "success_metrics": [
+    { "metric_name": "", "definition": "", "threshold_or_target": "" }
+  ],
+  "alternatives": ["Option A", "Option B", "Do nothing"],
+  "constraints": {
+    "budget": "",
+    "regulatory": "",
+    "time": "",
+    "political": "",
+    "operational": ""
+  },
+  "assumptions": [""],
+  "initial_hypothesis": "",
+  "key_uncertainties": [""],
+  "information_gaps": [""]
+}
+
+If the problem cannot be converted into a decision form, return:
+{ "status": "insufficient_clarity", "reason": "Unable to identify a concrete decision." }
+
+Do not proceed to issue tree creation. Do not generate analysis. Do not recommend solutions in detail. Make reasonable assumptions when information is missing and clearly label them.`,
+
   issues_tree: `You are a McKinsey-style consulting analyst. Given a project objective and constraints, produce a MECE issues tree with AT LEAST 3 levels of depth. Return ONLY valid JSON matching this schema:
 {
   "issues": [
@@ -324,6 +383,85 @@ function formatTreeForCritic(issues: IssueNodeOutput[], objective: string): stri
   }
   const treeText = renderBranch(null, 0);
   return `Governing Question / Objective: ${objective}\n\nIssues Tree (${issues.length} nodes):\n${treeText}`;
+}
+
+export interface ProjectDefinitionOutput {
+  decision_statement: string;
+  governing_question: string;
+  decision_owner: string;
+  decision_deadline: string;
+  success_metrics: { metric_name: string; definition: string; threshold_or_target: string }[];
+  alternatives: string[];
+  constraints: {
+    budget: string;
+    regulatory: string;
+    time: string;
+    political: string;
+    operational: string;
+  };
+  assumptions: string[];
+  initial_hypothesis: string;
+  key_uncertainties: string[];
+  information_gaps: string[];
+}
+
+export async function projectDefinitionAgent(
+  objective: string,
+  constraints: string
+): Promise<ProjectDefinitionOutput> {
+  if (!openai) {
+    return {
+      decision_statement: `Determine the optimal strategic approach to: ${objective}`,
+      governing_question: `Should we pursue the proposed strategy in order to achieve ${objective}, given ${constraints || "current resource constraints"}, by the next 12-month planning cycle?`,
+      decision_owner: "Executive Leadership / Project Sponsor",
+      decision_deadline: "Within 4-6 weeks of project initiation",
+      success_metrics: [
+        { metric_name: "Revenue Impact", definition: "Net incremental revenue attributable to the initiative", threshold_or_target: ">$1M within 12 months" },
+        { metric_name: "ROI", definition: "Return on investment over the project period", threshold_or_target: ">15% annualized" },
+        { metric_name: "Implementation Feasibility", definition: "Assessed probability of successful execution", threshold_or_target: ">70% confidence" },
+      ],
+      alternatives: [
+        "Pursue full-scale implementation immediately",
+        "Phased rollout starting with pilot program",
+        "Partner or acquire capability externally",
+        "Do nothing — maintain current trajectory",
+      ],
+      constraints: {
+        budget: constraints?.includes("budget") ? constraints : "To be confirmed; assume moderate investment envelope",
+        regulatory: "Standard industry compliance requirements apply",
+        time: constraints?.includes("timeline") ? constraints : "Decision needed within current planning cycle",
+        political: "Stakeholder alignment required across key business units",
+        operational: "Must be achievable with existing team capacity plus reasonable augmentation",
+      },
+      assumptions: [
+        "Current market conditions remain broadly stable over the analysis period",
+        "Organization has willingness to allocate resources if the case is compelling",
+        "Data sufficient for directional analysis is available or obtainable",
+        "No major regulatory changes expected in the near term",
+      ],
+      initial_hypothesis: `The proposed initiative is likely to deliver positive returns, but the magnitude depends on execution speed and market timing. A phased approach may reduce risk while preserving upside.`,
+      key_uncertainties: [
+        "Actual market size and addressable share",
+        "Competitive response timeline and intensity",
+        "Internal execution capability and speed",
+        "Customer adoption rate assumptions",
+      ],
+      information_gaps: [
+        "Detailed competitive landscape data",
+        "Customer willingness-to-pay research",
+        "Internal cost structure for new capabilities",
+        "Regulatory timeline for any required approvals",
+      ],
+    };
+  }
+
+  const systemPrompt = await getAgentPrompt("project_definition");
+  const model = await getAgentModel("project_definition");
+  const maxTokens = await getAgentMaxTokens("project_definition");
+
+  const userPrompt = `Project Objective: ${objective}\n\nConstraints & Context: ${constraints}`;
+  const raw = await callLLM(systemPrompt, userPrompt, model, maxTokens);
+  return extractJson(raw);
 }
 
 const MAX_REVISIONS = 2;
