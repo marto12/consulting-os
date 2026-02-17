@@ -587,20 +587,22 @@ export default function WorkflowStepWorkspace() {
 
   return (
     <div className="flex flex-col h-full">
-      <header className="flex shrink-0 items-center gap-1 sm:gap-2 border-b px-2 sm:px-4 min-h-[48px] flex-wrap py-1 sm:py-0 sm:flex-nowrap sm:h-12">
+      <header className="flex shrink-0 items-center gap-2 border-b px-2 sm:px-4 h-12">
         <SidebarTrigger className="-ml-1" />
-        <Separator orientation="vertical" className="mr-1 sm:mr-2 h-4 hidden sm:block" />
-        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${projectId}`)} className="shrink-0">
+        <Separator orientation="vertical" className="h-4 hidden sm:block" />
+        <Button variant="ghost" size="icon" onClick={() => navigate(`/project/${projectId}`)} className="shrink-0 sm:hidden h-8 w-8">
           <ChevronLeft size={16} />
-          <span className="hidden sm:inline">{project?.name || "Project"}</span>
-          <span className="sm:hidden">Back</span>
         </Button>
-        <Separator orientation="vertical" className="mx-1 h-4 hidden sm:block" />
-        <div className="flex items-center gap-1 sm:gap-2 flex-1 min-w-0">
+        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${projectId}`)} className="shrink-0 hidden sm:flex">
+          <ChevronLeft size={16} />
+          {project?.name || "Project"}
+        </Button>
+        <Separator orientation="vertical" className="h-4 hidden sm:block" />
+        <div className="flex items-center gap-1.5 flex-1 min-w-0">
           <Bot size={16} style={{ color: agentColor }} className="shrink-0" />
-          <span className="font-semibold text-xs sm:text-sm truncate">{step.name}</span>
+          <span className="font-semibold text-sm truncate">{step.name}</span>
           <span
-            className="text-xs font-medium px-1.5 sm:px-2 py-0.5 rounded-full hidden sm:inline-block"
+            className="text-xs font-medium px-2 py-0.5 rounded-full hidden sm:inline-block"
             style={{ backgroundColor: agentColor + "20", color: agentColor }}
           >
             Step {step.stepOrder}
@@ -612,29 +614,29 @@ export default function WorkflowStepWorkspace() {
               step.status === "running" ? "default" :
               step.status === "failed" ? "destructive" : "default"
             }
-            className="text-[10px] sm:text-xs"
+            className="text-[10px] sm:text-xs shrink-0"
           >
             {isStreaming ? "running" : step.status}
           </Badge>
         </div>
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           {canRun && !isStreaming && (
-            <Button size="sm" onClick={startStreaming}>
+            <Button size="sm" onClick={startStreaming} className="h-8 px-2 sm:px-3">
               <PlayCircle size={14} /> <span className="hidden sm:inline">Run</span>
             </Button>
           )}
           {isStreaming && (
-            <Button size="sm" disabled>
+            <Button size="sm" disabled className="h-8 px-2 sm:px-3">
               <Loader2 className="h-4 w-4 animate-spin" /> <span className="hidden sm:inline">Running</span>
             </Button>
           )}
           {canApprove && (
-            <Button size="sm" variant="outline" onClick={() => approveStepMutation.mutate()} disabled={approveStepMutation.isPending}>
+            <Button size="sm" variant="outline" onClick={() => approveStepMutation.mutate()} disabled={approveStepMutation.isPending} className="h-8 px-2 sm:px-3">
               {approveStepMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Check size={14} /> <span className="hidden sm:inline">Approve</span></>}
             </Button>
           )}
           {isApproved && (
-            <Button size="sm" variant="outline" onClick={() => unapproveStepMutation.mutate()} disabled={unapproveStepMutation.isPending}>
+            <Button size="sm" variant="outline" onClick={() => unapproveStepMutation.mutate()} disabled={unapproveStepMutation.isPending} className="h-8 px-2 sm:px-3">
               {unapproveStepMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><RefreshCw size={14} /> <span className="hidden sm:inline">Unapprove</span></>}
             </Button>
           )}
