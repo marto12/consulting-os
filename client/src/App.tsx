@@ -6,6 +6,7 @@ import {
   Briefcase,
   Database,
   BarChart3,
+  GitBranch,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -14,6 +15,7 @@ import Chat from "./pages/Chat";
 import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
 import Pipeline from "./pages/Pipeline";
+import Pipelines from "./pages/Pipelines";
 import SettingsPage from "./pages/Settings";
 import AgentDetail from "./pages/AgentDetail";
 import Datasets from "./pages/Datasets";
@@ -25,6 +27,7 @@ const NAV_ITEMS = [
   { to: "/projects", icon: Briefcase, label: "Projects" },
   { to: "/datasets", icon: Database, label: "Datasets" },
   { to: "/analysis", icon: BarChart3, label: "Analysis" },
+  { to: "/pipelines", icon: GitBranch, label: "Pipelines" },
 ];
 
 function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
@@ -112,6 +115,7 @@ export default function App() {
         <Route path="/projects" element={<AppLayout><Projects /></AppLayout>} />
         <Route path="/datasets" element={<AppLayout><Datasets /></AppLayout>} />
         <Route path="/analysis" element={<AppLayout><Analysis /></AppLayout>} />
+        <Route path="/pipelines" element={<AppLayout><Pipelines /></AppLayout>} />
         <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
         <Route path="/project/:id" element={<AppLayout><ProjectDetail /></AppLayout>} />
         <Route path="/agent/:key" element={<AppLayout><AgentDetail /></AppLayout>} />
