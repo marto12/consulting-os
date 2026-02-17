@@ -1,3 +1,9 @@
+import { Platform } from "react-native";
+
+if (Platform.OS === "web") {
+  require("../client/src/styles/index.css");
+}
+
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -5,7 +11,6 @@ import React, { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { queryClient } from "@/lib/query-client";
 import {
   useFonts,
   Inter_400Regular,
@@ -26,7 +31,28 @@ function RootLayoutNav() {
   );
 }
 
+let WebApp: React.ComponentType | null = null;
+let webQueryClient: any = null;
+
+if (Platform.OS === "web") {
+  WebApp = require("../client/src/App").default;
+  webQueryClient = require("../client/src/lib/query-client").queryClient;
+}
+
+function WebLayout() {
+  if (!WebApp || !webQueryClient) return null;
+  return (
+    <QueryClientProvider client={webQueryClient}>
+      <WebApp />
+    </QueryClientProvider>
+  );
+}
+
 export default function RootLayout() {
+  if (Platform.OS === "web") {
+    return <WebLayout />;
+  }
+
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -44,7 +70,7 @@ export default function RootLayout() {
 
   return (
     <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
+      <QueryClientProvider client={require("@/lib/query-client").queryClient}>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <KeyboardProvider>
             <RootLayoutNav />
