@@ -12,7 +12,7 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { cn } from "@/lib/utils";
+import { cn } from "../lib/utils";
 
 interface AgentDef {
   key: string;

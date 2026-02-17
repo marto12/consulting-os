@@ -11,7 +11,8 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import "./IssuesGraph.css";
+import { cn } from "../lib/utils";
+import { Card } from "./ui/card";
 
 interface IssueNode {
   id: number;
@@ -35,21 +36,29 @@ function IssueNodeComponent({ data }: NodeProps) {
 
   return (
     <div
-      className={`rf-issue-node${isSelected ? " selected" : ""}`}
+      className={cn(
+        "bg-white border-2 rounded-xl px-3.5 py-2.5 min-w-[140px] max-w-[180px] cursor-pointer transition-all hover:shadow-md",
+        isSelected && "border-[2.5px]"
+      )}
       style={{ borderColor: color, boxShadow: isSelected ? `0 0 0 3px ${color}30` : undefined }}
     >
-      <Handle type="target" position={Position.Top} className="rf-handle" />
-      <div className="rf-issue-dot" style={{ background: color }} />
-      <div className="rf-issue-text">{data.label as string}</div>
-      <div className="rf-issue-meta">
-        <span className="rf-issue-priority" style={{ background: color + "20", color }}>
+      <Handle type="target" position={Position.Top} className="!w-1.5 !h-1.5 !bg-slate-300 !border-none" />
+      <div className="w-2 h-2 rounded-full mb-1.5" style={{ background: color }} />
+      <div className="text-xs font-medium text-foreground leading-snug line-clamp-3 mb-1.5">
+        {data.label as string}
+      </div>
+      <div className="flex items-center gap-1.5">
+        <span
+          className="text-[10px] font-semibold px-1.5 py-0.5 rounded capitalize"
+          style={{ background: color + "20", color }}
+        >
           {data.priority as string}
         </span>
         {(data.childCount as number) > 0 && (
-          <span className="rf-issue-children">{data.childCount as number} sub</span>
+          <span className="text-[10px] text-muted-foreground">{data.childCount as number} sub</span>
         )}
       </div>
-      <Handle type="source" position={Position.Bottom} className="rf-handle" />
+      <Handle type="source" position={Position.Bottom} className="!w-1.5 !h-1.5 !bg-slate-300 !border-none" />
     </div>
   );
 }
@@ -151,25 +160,25 @@ export default function IssuesGraph({ issues }: { issues: IssueNode[] }) {
   }, []);
 
   return (
-    <div className="issues-graph">
-      <div className="graph-toolbar">
-        <div className="graph-legend">
-          <div className="legend-item">
-            <span className="legend-dot" style={{ background: PRIORITY_COLORS.high }} />
+    <div className="flex flex-col gap-3">
+      <div className="flex justify-between items-center">
+        <div className="flex gap-4">
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span className="w-2.5 h-2.5 rounded-full" style={{ background: PRIORITY_COLORS.high }} />
             <span>High</span>
           </div>
-          <div className="legend-item">
-            <span className="legend-dot" style={{ background: PRIORITY_COLORS.medium }} />
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span className="w-2.5 h-2.5 rounded-full" style={{ background: PRIORITY_COLORS.medium }} />
             <span>Medium</span>
           </div>
-          <div className="legend-item">
-            <span className="legend-dot" style={{ background: PRIORITY_COLORS.low }} />
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span className="w-2.5 h-2.5 rounded-full" style={{ background: PRIORITY_COLORS.low }} />
             <span>Low</span>
           </div>
         </div>
       </div>
 
-      <div className="graph-canvas" style={{ height: 500 }}>
+      <div className="rounded-2xl border border-border overflow-hidden min-h-[300px]" style={{ height: 500 }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -192,10 +201,10 @@ export default function IssuesGraph({ issues }: { issues: IssueNode[] }) {
       </div>
 
       {selectedIssue && (
-        <div className="graph-detail-card">
-          <div className="graph-detail-header">
+        <Card className="p-3.5">
+          <div className="flex items-center gap-2 mb-2">
             <span
-              className="graph-detail-priority"
+              className="px-2 py-0.5 rounded-md text-xs font-semibold capitalize"
               style={{
                 background: PRIORITY_COLORS[selectedIssue.priority] + "20",
                 color: PRIORITY_COLORS[selectedIssue.priority],
@@ -203,15 +212,15 @@ export default function IssuesGraph({ issues }: { issues: IssueNode[] }) {
             >
               {selectedIssue.priority}
             </span>
-            <span className="graph-detail-depth">Level {selectedIssue.depth + 1}</span>
+            <span className="text-xs text-muted-foreground">Level {selectedIssue.depth + 1}</span>
           </div>
-          <p className="graph-detail-text">{selectedIssue.text}</p>
+          <p className="text-[15px] font-medium text-foreground leading-relaxed">{selectedIssue.text}</p>
           {selectedIssue.childCount > 0 && (
-            <p className="graph-detail-children">
+            <p className="text-xs text-muted-foreground mt-1">
               {selectedIssue.childCount} sub-issue{selectedIssue.childCount > 1 ? "s" : ""}
             </p>
           )}
-        </div>
+        </Card>
       )}
     </div>
   );

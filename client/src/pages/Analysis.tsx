@@ -1,5 +1,5 @@
 import { BarChart3, TrendingUp, PieChart, LineChart } from "lucide-react";
-import { Card } from "@/components/ui/card";
+import { Card } from "../components/ui/card";
 
 const analysisTypes = [
   { name: "Trend Analysis", desc: "Identify patterns and trends over time", icon: TrendingUp, color: "#3B82F6" },

@@ -23,10 +23,10 @@ import {
   Network,
 } from "lucide-react";
 import IssuesGraph from "../components/IssuesGraph";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import { Badge } from "../components/ui/badge";
+import { cn } from "../lib/utils";
 
 const STAGE_LABELS: Record<string, string> = {
   created: "New",
