@@ -14,6 +14,7 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+- **2026-02-17**: Added chat-style interface to WorkflowStepWorkspace with SSE streaming for real-time agent progress. Agent execution now streams progress messages (starting, LLM calls, completion) via Server-Sent Events. Chat messages are persisted in `step_chat_messages` table. Users can send follow-up questions after agent completion. Added `onProgress` callback to all agent functions.
 - **2026-02-17**: Added Project Definition agent as mandatory first step in every workflow. This agent translates vague client briefs into structured, decision-based problem definitions with governing questions, success metrics, constraints, assumptions, and initial hypotheses. Workflow pipeline is now 7 agents (Project Definition → Issues Tree → MECE Critic → Hypothesis → Execution → Summary → Presentation). Stage flow updated with definition_draft/definition_approved stages.
 - **2026-02-17**: Major four-layer architecture refactor — Projects instantiate workflow templates into frozen workflow instances with step-level execution and versioned deliverables. Added sidebar navigation (Projects, Workflows, Agents, Data & Models), Cmd+K command palette, and shadcn/ui components throughout.
 - **2026-02-16**: Converted frontend from Expo/React Native to pure React web app (Vite + React Router + standard HTML/CSS). Server uses Vite dev middleware in development.
