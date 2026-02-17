@@ -161,6 +161,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/projects/:id/run-logs", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const logs = await storage.getRunLogs(projectId);
+      res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/projects/:id/workflow/steps/:stepId", async (req: Request, res: Response) => {
     try {
       const stepId = Number(req.params.stepId);

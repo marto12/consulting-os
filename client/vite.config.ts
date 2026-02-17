@@ -11,6 +11,9 @@ export default defineConfig({
   },
   server: {
     allowedHosts: true,
+    hmr: {
+      port: 24678,
+    },
   },
   build: {
     outDir: "../dist/public",
