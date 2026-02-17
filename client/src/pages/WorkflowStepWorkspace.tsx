@@ -57,7 +57,7 @@ export default function WorkflowStepWorkspace() {
   const navigate = useNavigate();
   const projectId = Number(id);
   const stepIdNum = Number(stepId);
-  const [showPanel, setShowPanel] = useState(true);
+  const [showPanel, setShowPanel] = useState(window.innerWidth >= 640);
   const [chatInput, setChatInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -113,19 +113,20 @@ export default function WorkflowStepWorkspace() {
 
   return (
     <div className="flex flex-col h-full">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+      <header className="flex shrink-0 items-center gap-1 sm:gap-2 border-b px-2 sm:px-4 min-h-[48px] flex-wrap py-1 sm:py-0 sm:flex-nowrap sm:h-12">
         <SidebarTrigger className="-ml-1" />
-        <Separator orientation="vertical" className="mr-2 h-4" />
-        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${projectId}`)}>
+        <Separator orientation="vertical" className="mr-1 sm:mr-2 h-4 hidden sm:block" />
+        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${projectId}`)} className="shrink-0">
           <ChevronLeft size={16} />
-          {project?.name || "Project"}
+          <span className="hidden sm:inline">{project?.name || "Project"}</span>
+          <span className="sm:hidden">Back</span>
         </Button>
-        <Separator orientation="vertical" className="mx-1 h-4" />
-        <div className="flex items-center gap-2 flex-1">
-          <Bot size={16} style={{ color: agentColor }} />
-          <span className="font-semibold text-sm">{step.name}</span>
+        <Separator orientation="vertical" className="mx-1 h-4 hidden sm:block" />
+        <div className="flex items-center gap-1 sm:gap-2 flex-1 min-w-0">
+          <Bot size={16} style={{ color: agentColor }} className="shrink-0" />
+          <span className="font-semibold text-xs sm:text-sm truncate">{step.name}</span>
           <span
-            className="text-xs font-medium px-2 py-0.5 rounded-full"
+            className="text-xs font-medium px-1.5 sm:px-2 py-0.5 rounded-full hidden sm:inline-block"
             style={{ backgroundColor: agentColor + "20", color: agentColor }}
           >
             Step {step.stepOrder}
@@ -137,25 +138,27 @@ export default function WorkflowStepWorkspace() {
               step.status === "running" ? "default" :
               step.status === "failed" ? "destructive" : "default"
             }
+            className="text-[10px] sm:text-xs"
           >
             {step.status}
           </Badge>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           {canRun && (
             <Button size="sm" onClick={() => runStepMutation.mutate()} disabled={isRunning}>
-              {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <><PlayCircle size={14} /> Run</>}
+              {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <><PlayCircle size={14} /> <span className="hidden sm:inline">Run</span></>}
             </Button>
           )}
           {canApprove && (
             <Button size="sm" variant="outline" onClick={() => approveStepMutation.mutate()} disabled={approveStepMutation.isPending}>
-              {approveStepMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Check size={14} /> Approve</>}
+              {approveStepMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Check size={14} /> <span className="hidden sm:inline">Approve</span></>}
             </Button>
           )}
           <Button
             size="icon"
             variant="ghost"
             onClick={() => setShowPanel(!showPanel)}
+            className="hidden sm:flex"
           >
             {showPanel ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
           </Button>
@@ -164,7 +167,7 @@ export default function WorkflowStepWorkspace() {
 
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-y-auto p-6">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6">
             {step.status === "not_started" && (
               <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
                 <Bot size={48} strokeWidth={1.5} style={{ color: agentColor }} />
@@ -224,8 +227,8 @@ export default function WorkflowStepWorkspace() {
                         <Badge variant="default" className="gap-1"><Lock size={10} /> Locked</Badge>
                       )}
                     </div>
-                    <div className="bg-muted rounded-lg p-4 text-sm font-mono overflow-auto max-h-[400px]">
-                      <pre className="whitespace-pre-wrap text-xs">
+                    <div className="bg-muted rounded-lg p-3 sm:p-4 text-sm font-mono overflow-auto max-h-[400px] max-w-full">
+                      <pre className="whitespace-pre-wrap text-xs break-words">
                         {typeof d.contentJson === "string"
                           ? d.contentJson
                           : JSON.stringify(d.contentJson, null, 2)}

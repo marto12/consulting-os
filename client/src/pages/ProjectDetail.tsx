@@ -171,30 +171,32 @@ export default function ProjectDetail() {
   }
 
   return (
-    <div>
-      <div className="flex items-center gap-2 mb-6">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/projects")}>
+    <div className="min-w-0 w-full">
+      <div className="mb-4 sm:mb-6">
+        <Button variant="ghost" size="sm" onClick={() => navigate("/projects")} className="mb-2">
           <ChevronLeft size={16} />
           Back
         </Button>
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold text-foreground">{project.name}</h1>
-          <div className="flex items-center gap-2 mt-1">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground truncate">{project.name}</h1>
+          <div className="flex flex-wrap items-center gap-2 mt-1">
             <Badge variant={project.stage === "complete" ? "success" : "default"}>
               {STAGE_LABELS[project.stage] || project.stage}
             </Badge>
-            <span className="text-sm text-muted-foreground">{project.objective}</span>
+            <span className="text-xs sm:text-sm text-muted-foreground line-clamp-2 break-words">{project.objective}</span>
           </div>
         </div>
       </div>
 
       <Tabs defaultValue="overview">
-        <TabsList>
-          <TabsTrigger value="overview"><Layers size={14} className="mr-1.5" />Overview</TabsTrigger>
-          <TabsTrigger value="workflow"><GitBranch size={14} className="mr-1.5" />Workflow</TabsTrigger>
-          <TabsTrigger value="deliverables"><FileText size={14} className="mr-1.5" />Deliverables</TabsTrigger>
-          <TabsTrigger value="activity"><Activity size={14} className="mr-1.5" />Activity</TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+          <TabsList className="w-max sm:w-auto">
+            <TabsTrigger value="overview"><Layers size={14} className="mr-1.5" />Overview</TabsTrigger>
+            <TabsTrigger value="workflow"><GitBranch size={14} className="mr-1.5" />Workflow</TabsTrigger>
+            <TabsTrigger value="deliverables"><FileText size={14} className="mr-1.5" />Deliverables</TabsTrigger>
+            <TabsTrigger value="activity"><Activity size={14} className="mr-1.5" />Activity</TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="overview" className="mt-4">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -260,16 +262,17 @@ export default function ProjectDetail() {
               const showApprove = canApproveStep(step);
 
               return (
-                <Card key={step.id} className="p-4" data-testid={`workflow-step-${step.id}`}>
-                  <div className="flex items-center gap-3">
+                <Card key={step.id} className="p-3 sm:p-4" data-testid={`workflow-step-${step.id}`}>
+                  <div className="flex items-start sm:items-center gap-3">
                     <div
-                      className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
+                      className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center shrink-0"
                       style={{ backgroundColor: agentColor + "20" }}
                     >
-                      <Bot size={20} style={{ color: agentColor }} />
+                      <Bot size={18} className="sm:hidden" style={{ color: agentColor }} />
+                      <Bot size={20} className="hidden sm:block" style={{ color: agentColor }} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-1 sm:gap-2">
                         <span className="font-semibold text-sm">{step.name}</span>
                         <span
                           className="text-xs font-medium px-2 py-0.5 rounded-full"
@@ -280,8 +283,56 @@ export default function ProjectDetail() {
                         <span className={cn("text-xs", status.color)}>{status.label}</span>
                       </div>
                       <p className="text-xs text-muted-foreground">{step.agentKey}</p>
+                      <div className="flex items-center gap-2 mt-2 sm:hidden">
+                        {showRun && (
+                          <Button
+                            size="sm"
+                            onClick={() => runStepMutation.mutate(step.id)}
+                            disabled={runStepMutation.isPending}
+                            data-testid={`run-step-${step.id}`}
+                          >
+                            {runStepMutation.isPending ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <>
+                                <PlayCircle size={14} />
+                                Run
+                              </>
+                            )}
+                          </Button>
+                        )}
+                        {showApprove && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => approveStepMutation.mutate(step.id)}
+                            disabled={approveStepMutation.isPending}
+                            data-testid={`approve-step-${step.id}`}
+                          >
+                            {approveStepMutation.isPending ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <>
+                                <Check size={14} />
+                                Approve
+                              </>
+                            )}
+                          </Button>
+                        )}
+                        {(step.status === "completed" || step.status === "approved") && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => navigate(`/project/${projectId}/workflow/${step.id}`)}
+                            data-testid={`view-step-${step.id}`}
+                          >
+                            View
+                            <ChevronRight size={14} />
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="hidden sm:flex items-center gap-2 shrink-0">
                       {showRun && (
                         <Button
                           size="sm"
@@ -382,9 +433,9 @@ export default function ProjectDetail() {
             <div className="space-y-2">
               {logs.map((log) => (
                 <Card key={log.id} className="p-3">
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                     <div className={cn(
-                      "w-2 h-2 rounded-full",
+                      "w-2 h-2 rounded-full shrink-0",
                       log.status === "success" ? "bg-green-500" : log.status === "failed" ? "bg-red-500" : "bg-yellow-500"
                     )} />
                     <div className="flex-1 min-w-0">
@@ -394,7 +445,7 @@ export default function ProjectDetail() {
                     <Badge variant={log.status === "success" ? "success" : log.status === "failed" ? "destructive" : "warning"}>
                       {log.status}
                     </Badge>
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
                       {new Date(log.createdAt).toLocaleString()}
                     </span>
                   </div>

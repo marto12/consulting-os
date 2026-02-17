@@ -241,8 +241,10 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             <span>K</span>
           </button>
         </header>
-        <div className="flex-1 overflow-y-auto p-6 lg:p-8">
-          {children}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8">
+          <div className="w-full max-w-full min-w-0">
+            {children}
+          </div>
         </div>
       </SidebarInset>
     </SidebarProvider>

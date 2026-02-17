@@ -79,15 +79,15 @@ export default function AgentDetail() {
         </Button>
       </div>
 
-      <div className="flex items-center gap-4 mb-6">
+      <div className="flex items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
         <div
-          className="w-14 h-14 rounded-xl flex items-center justify-center"
+          className="w-10 h-10 sm:w-14 sm:h-14 rounded-xl flex items-center justify-center shrink-0"
           style={{ backgroundColor: agent.roleColor + "20" }}
         >
-          <Bot size={28} style={{ color: agent.roleColor }} />
+          <Bot size={24} style={{ color: agent.roleColor }} />
         </div>
-        <div>
-          <h1 className="text-2xl font-bold">{agent.name}</h1>
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold truncate">{agent.name}</h1>
           <div className="flex items-center gap-2 mt-1">
             <span
               className="text-xs font-medium px-2 py-0.5 rounded-full"
@@ -117,7 +117,7 @@ export default function AgentDetail() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             <div className="space-y-1.5">
               <Label>Model</Label>
               <Input
