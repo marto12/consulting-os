@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "../lib/query-client";
@@ -19,11 +19,20 @@ import {
   ChevronRight,
   Terminal,
   Lock,
+  Upload,
+  Trash2,
+  Download,
+  Search,
+  File,
+  AlertCircle,
+  CheckCircle2,
+  Archive,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
+import { Input } from "../components/ui/input";
 import { cn } from "../lib/utils";
 
 const STAGE_LABELS: Record<string, string> = {
@@ -87,6 +96,50 @@ interface RunLog {
   createdAt: string;
 }
 
+interface VaultFile {
+  id: number;
+  projectId: number;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  storagePath: string;
+  extractedText: string | null;
+  embeddingStatus: string;
+  chunkCount: number;
+  metadata: any;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function getStatusBadge(status: string) {
+  switch (status) {
+    case "completed":
+      return <Badge variant="success" className="gap-1"><CheckCircle2 size={10} />Ready</Badge>;
+    case "processing":
+      return <Badge variant="default" className="gap-1"><Loader2 size={10} className="animate-spin" />Processing</Badge>;
+    case "failed":
+      return <Badge variant="destructive" className="gap-1"><AlertCircle size={10} />Failed</Badge>;
+    default:
+      return <Badge variant="secondary" className="gap-1"><Clock size={10} />Pending</Badge>;
+  }
+}
+
+function getFileIcon(mimeType: string) {
+  if (mimeType.startsWith("text/") || mimeType.includes("pdf") || mimeType.includes("document"))
+    return <FileText size={20} className="text-blue-400" />;
+  if (mimeType.includes("spreadsheet") || mimeType.includes("csv") || mimeType.includes("excel"))
+    return <FileText size={20} className="text-green-400" />;
+  if (mimeType.includes("presentation") || mimeType.includes("powerpoint"))
+    return <FileText size={20} className="text-orange-400" />;
+  return <File size={20} className="text-muted-foreground" />;
+}
+
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -111,6 +164,57 @@ export default function ProjectDetail() {
     queryKey: ["/api/projects", projectId, "logs"],
     refetchInterval: 5000,
   });
+
+  const { data: vaultFiles } = useQuery<VaultFile[]>({
+    queryKey: ["/api/projects", projectId, "vault"],
+    refetchInterval: 5000,
+  });
+
+  const [vaultSearch, setVaultSearch] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const uploadMutation = useMutation({
+    mutationFn: async (file: globalThis.File) => {
+      setUploading(true);
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`/api/projects/${projectId}/vault/upload`, {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "vault"] });
+      setUploading(false);
+    },
+    onError: () => setUploading(false),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (fileId: number) => {
+      const res = await apiRequest("DELETE", `/api/projects/${projectId}/vault/${fileId}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "vault"] });
+    },
+  });
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      uploadMutation.mutate(file);
+      e.target.value = "";
+    }
+  };
+
+  const filteredVaultFiles = (vaultFiles || []).filter((f) =>
+    f.fileName.toLowerCase().includes(vaultSearch.toLowerCase())
+  );
 
   const runStep = (stepId: number) => {
     navigate(`/project/${projectId}/workflow/${stepId}?autorun=true`);
@@ -189,6 +293,7 @@ export default function ProjectDetail() {
             <TabsTrigger value="overview"><Layers size={14} className="mr-1.5" />Overview</TabsTrigger>
             <TabsTrigger value="workflow"><GitBranch size={14} className="mr-1.5" />Workflow</TabsTrigger>
             <TabsTrigger value="deliverables"><FileText size={14} className="mr-1.5" />Deliverables</TabsTrigger>
+            <TabsTrigger value="vault"><Archive size={14} className="mr-1.5" />Vault</TabsTrigger>
             <TabsTrigger value="activity"><Activity size={14} className="mr-1.5" />Activity</TabsTrigger>
           </TabsList>
         </div>
@@ -422,6 +527,115 @@ export default function ProjectDetail() {
               ))}
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="vault" className="mt-4">
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="relative flex-1">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search files..."
+                  value={vaultSearch}
+                  onChange={(e) => setVaultSearch(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                onChange={handleFileUpload}
+                accept=".txt,.md,.pdf,.doc,.docx,.csv,.json,.html,.xml,.rtf,.pptx,.xlsx"
+              />
+              <Button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                data-testid="vault-upload-btn"
+              >
+                {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                {uploading ? "Uploading..." : "Upload File"}
+              </Button>
+            </div>
+
+            {uploadMutation.isError && (
+              <div className="text-sm text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+                Upload failed: {(uploadMutation.error as Error).message}
+              </div>
+            )}
+
+            {filteredVaultFiles.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <Archive size={40} strokeWidth={1.5} className="mx-auto mb-2" />
+                <p>{vaultSearch ? "No files match your search" : "No files uploaded yet. Upload documents to enable AI-powered context retrieval."}</p>
+                <p className="text-xs mt-1">Supported: PDF, TXT, MD, DOC, DOCX, CSV, JSON, HTML, XML, PPTX, XLSX</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {filteredVaultFiles.map((file) => (
+                  <Card key={file.id} className="p-3" data-testid={`vault-file-${file.id}`}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                        {getFileIcon(file.mimeType)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium truncate">{file.fileName}</span>
+                          {getStatusBadge(file.embeddingStatus)}
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
+                          <span>{formatFileSize(file.fileSize)}</span>
+                          {file.chunkCount > 0 && <span>{file.chunkCount} chunks</span>}
+                          <span>{new Date(file.createdAt).toLocaleDateString()}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            const a = document.createElement("a");
+                            a.href = `/api/projects/${projectId}/vault/${file.id}/download`;
+                            a.download = file.fileName;
+                            a.click();
+                          }}
+                          title="Download"
+                        >
+                          <Download size={14} />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-red-500 hover:text-red-400"
+                          onClick={() => {
+                            if (confirm(`Delete "${file.fileName}"?`)) {
+                              deleteMutation.mutate(file.id);
+                            }
+                          }}
+                          disabled={deleteMutation.isPending}
+                          title="Delete"
+                        >
+                          <Trash2 size={14} />
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+
+            {(vaultFiles || []).length > 0 && (
+              <Card className="p-3 bg-muted/30 border-dashed">
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 size={16} className="text-green-500 mt-0.5 shrink-0" />
+                  <div className="text-xs text-muted-foreground">
+                    <p className="font-medium text-foreground">RAG-enabled context</p>
+                    <p>Files with "Ready" status are automatically used by AI agents when running workflow steps. The agents will retrieve relevant sections from your uploaded documents to ground their analysis in your data.</p>
+                  </div>
+                </div>
+              </Card>
+            )}
+          </div>
         </TabsContent>
 
         <TabsContent value="activity" className="mt-4">
