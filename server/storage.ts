@@ -149,6 +149,27 @@ export const storage = {
     await db.delete(workflowTemplateSteps).where(eq(workflowTemplateSteps.id, id));
   },
 
+  async deleteWorkflowTemplate(id: number): Promise<void> {
+    await db.delete(workflowTemplateSteps).where(eq(workflowTemplateSteps.workflowTemplateId, id));
+    await db.delete(workflowTemplates).where(eq(workflowTemplates.id, id));
+  },
+
+  async replaceWorkflowTemplateSteps(templateId: number, steps: Array<{ stepOrder: number; name: string; agentKey: string; description?: string }>): Promise<WorkflowTemplateStep[]> {
+    await db.delete(workflowTemplateSteps).where(eq(workflowTemplateSteps.workflowTemplateId, templateId));
+    for (const s of steps) {
+      await db.insert(workflowTemplateSteps).values({
+        workflowTemplateId: templateId,
+        stepOrder: s.stepOrder,
+        name: s.name,
+        agentKey: s.agentKey,
+        description: s.description || "",
+      });
+    }
+    return db.select().from(workflowTemplateSteps)
+      .where(eq(workflowTemplateSteps.workflowTemplateId, templateId))
+      .orderBy(asc(workflowTemplateSteps.stepOrder));
+  },
+
   async listAgents(): Promise<Agent[]> {
     return db.select().from(agents).orderBy(asc(agents.key));
   },

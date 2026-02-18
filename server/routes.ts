@@ -731,10 +731,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.put("/api/workflows/:id", async (req: Request, res: Response) => {
     try {
-      const { name, description } = req.body;
+      const { name, description, steps } = req.body;
       const template = await storage.updateWorkflowTemplate(Number(req.params.id), { name, description });
-      const steps = await storage.getWorkflowTemplateSteps(template.id);
-      res.json({ ...template, steps });
+      let allSteps;
+      if (steps && Array.isArray(steps)) {
+        allSteps = await storage.replaceWorkflowTemplateSteps(template.id, steps);
+      } else {
+        allSteps = await storage.getWorkflowTemplateSteps(template.id);
+      }
+      res.json({ ...template, steps: allSteps });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/workflows/:id", async (req: Request, res: Response) => {
+    try {
+      await storage.deleteWorkflowTemplate(Number(req.params.id));
+      res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
