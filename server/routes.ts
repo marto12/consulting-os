@@ -3,18 +3,12 @@ import { createServer, type Server } from "node:http";
 import { storage } from "./storage";
 import { registerChatRoutes } from "./replit_integrations/chat/routes";
 import {
-  projectDefinitionAgent,
-  issuesTreeAgent,
-  hypothesisAgent,
-  executionAgent,
-  summaryAgent,
-  presentationAgent,
-  refineDeliverable,
   getModelUsed,
   getDefaultConfigs,
   DEFAULT_PROMPTS,
   type ProgressCallback,
 } from "./agents";
+import { runWorkflowStep, refineWithLangGraph } from "./agents/workflow-graph";
 
 const STAGE_ORDER = [
   "created",
@@ -217,6 +211,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  const STAGE_MAP: Record<string, string> = {
+    project_definition: "definition_draft",
+    issues_tree: "issues_draft",
+    hypothesis: "hypotheses_draft",
+    execution: "execution_done",
+    summary: "summary_draft",
+    presentation: "presentation_draft",
+  };
+
+  async function persistAgentResults(
+    projectId: number,
+    agentKey: string,
+    deliverableContent: any
+  ) {
+    if (agentKey === "issues_tree") {
+      const issues = deliverableContent?.issues || deliverableContent;
+      if (Array.isArray(issues)) {
+        const version = (await storage.getLatestIssueVersion(projectId)) + 1;
+        const idMap = new Map<string, number>();
+        let remaining = [...issues];
+        let pass = 0;
+        while (remaining.length > 0 && pass < 10) {
+          pass++;
+          const canInsert = remaining.filter((n: any) => !n.parentId || idMap.has(n.parentId));
+          const cannotInsert = remaining.filter((n: any) => n.parentId && !idMap.has(n.parentId));
+          if (canInsert.length === 0) break;
+          const insertedNodes = await storage.insertIssueNodes(
+            projectId, version,
+            canInsert.map((n: any) => ({
+              parentId: n.parentId ? (idMap.get(n.parentId) || null) : null,
+              text: n.text, priority: n.priority,
+            }))
+          );
+          canInsert.forEach((n: any, i: number) => { idMap.set(n.id, insertedNodes[i].id); });
+          remaining = cannotInsert;
+        }
+      }
+    } else if (agentKey === "hypothesis") {
+      const result = deliverableContent;
+      if (result?.hypotheses) {
+        const version = (await storage.getLatestHypothesisVersion(projectId)) + 1;
+        const insertedHyps = await storage.insertHypotheses(
+          projectId, version,
+          result.hypotheses.map((h: any) => ({
+            issueNodeId: null, statement: h.statement, metric: h.metric, dataSource: h.dataSource, method: h.method,
+          }))
+        );
+        if (result.analysisPlan) {
+          await storage.insertAnalysisPlan(
+            projectId,
+            result.analysisPlan.map((p: any) => ({
+              hypothesisId: insertedHyps[p.hypothesisIndex]?.id || insertedHyps[0]?.id || null,
+              method: p.method, parametersJson: p.parameters, requiredDataset: p.requiredDataset,
+            }))
+          );
+        }
+      }
+    } else if (agentKey === "execution") {
+      const results = Array.isArray(deliverableContent) ? deliverableContent : [];
+      for (const r of results) {
+        await storage.insertModelRun(projectId, r.toolName, r.inputs, r.outputs);
+      }
+    } else if (agentKey === "summary") {
+      if (deliverableContent?.summaryText) {
+        const version = (await storage.getLatestNarrativeVersion(projectId)) + 1;
+        await storage.insertNarrative(projectId, version, deliverableContent.summaryText);
+      }
+    } else if (agentKey === "presentation") {
+      if (deliverableContent?.slides) {
+        const slideVersion = (await storage.getLatestSlideVersion(projectId)) + 1;
+        await storage.insertSlides(
+          projectId, slideVersion,
+          deliverableContent.slides.map((s: any) => ({
+            slideIndex: s.slideIndex, layout: s.layout, title: s.title,
+            subtitle: s.subtitle || undefined, bodyJson: s.bodyJson, notesText: s.notesText || undefined,
+          }))
+        );
+      }
+    }
+  }
+
   async function executeStepAgent(
     projectId: number,
     stepId: number,
@@ -238,113 +313,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     );
 
     try {
-      let deliverableContent: any = null;
-      let deliverableTitle = step.name;
+      const result = await runWorkflowStep(projectId, step.agentKey, onProgress);
+      const { deliverableContent, deliverableTitle } = result;
 
-      if (step.agentKey === "project_definition") {
-        const result = await projectDefinitionAgent(project.objective, project.constraints, onProgress);
-        deliverableContent = result;
-        deliverableTitle = "Project Definition";
-        await storage.updateProjectStage(projectId, "definition_draft");
-      } else if (step.agentKey === "issues_tree") {
-        const result = await issuesTreeAgent(project.objective, project.constraints, onProgress);
-        const version = (await storage.getLatestIssueVersion(projectId)) + 1;
-        const idMap = new Map<string, number>();
-        let remaining = [...result.issues];
-        let pass = 0;
-        while (remaining.length > 0 && pass < 10) {
-          pass++;
-          const canInsert = remaining.filter((n) => !n.parentId || idMap.has(n.parentId));
-          const cannotInsert = remaining.filter((n) => n.parentId && !idMap.has(n.parentId));
-          if (canInsert.length === 0) break;
-          const insertedNodes = await storage.insertIssueNodes(
-            projectId, version,
-            canInsert.map((n) => ({
-              parentId: n.parentId ? (idMap.get(n.parentId) || null) : null,
-              text: n.text, priority: n.priority,
-            }))
-          );
-          canInsert.forEach((n, i) => { idMap.set(n.id, insertedNodes[i].id); });
-          remaining = cannotInsert;
-        }
-        deliverableContent = result;
-        deliverableTitle = "Issues Tree";
-        await storage.updateProjectStage(projectId, "issues_draft");
-      } else if (step.agentKey === "hypothesis") {
-        const issueNodesData = await storage.getIssueNodes(projectId);
-        const latestVersion = issueNodesData[0]?.version || 1;
-        const latestIssues = issueNodesData.filter((n) => n.version === latestVersion);
-        const result = await hypothesisAgent(latestIssues.map((n) => ({ id: n.id, text: n.text, priority: n.priority })), onProgress);
-        const version = (await storage.getLatestHypothesisVersion(projectId)) + 1;
-        const insertedHyps = await storage.insertHypotheses(
-          projectId, version,
-          result.hypotheses.map((h) => ({
-            issueNodeId: null, statement: h.statement, metric: h.metric, dataSource: h.dataSource, method: h.method,
-          }))
-        );
-        await storage.insertAnalysisPlan(
-          projectId,
-          result.analysisPlan.map((p, i) => ({
-            hypothesisId: insertedHyps[p.hypothesisIndex]?.id || insertedHyps[0]?.id || null,
-            method: p.method, parametersJson: p.parameters, requiredDataset: p.requiredDataset,
-          }))
-        );
-        deliverableContent = result;
-        deliverableTitle = "Hypotheses & Analysis Plan";
-        await storage.updateProjectStage(projectId, "hypotheses_draft");
-      } else if (step.agentKey === "execution") {
-        const plans = await storage.getAnalysisPlan(projectId);
-        const results = await executionAgent(
-          plans.map((p) => ({ method: p.method, parameters: p.parametersJson, requiredDataset: p.requiredDataset })),
-          onProgress
-        );
-        for (const r of results) {
-          await storage.insertModelRun(projectId, r.toolName, r.inputs, r.outputs);
-        }
-        deliverableContent = results;
-        deliverableTitle = "Scenario Analysis Results";
-        await storage.updateProjectStage(projectId, "execution_done");
-      } else if (step.agentKey === "summary") {
-        const hyps = await storage.getHypotheses(projectId);
-        const runs = await storage.getModelRuns(projectId);
-        const latestVersion = hyps[0]?.version || 1;
-        const latestHyps = hyps.filter((h) => h.version === latestVersion);
-        const result = await summaryAgent(
-          project.objective, project.constraints,
-          latestHyps.map((h) => ({ statement: h.statement, metric: h.metric })),
-          runs.map((r) => ({ inputsJson: r.inputsJson, outputsJson: r.outputsJson })),
-          onProgress
-        );
-        const version = (await storage.getLatestNarrativeVersion(projectId)) + 1;
-        await storage.insertNarrative(projectId, version, result.summaryText);
-        deliverableContent = result;
-        deliverableTitle = "Executive Summary";
-        await storage.updateProjectStage(projectId, "summary_draft");
-      } else if (step.agentKey === "presentation") {
-        const narrs = await storage.getNarratives(projectId);
-        const hyps = await storage.getHypotheses(projectId);
-        const runs = await storage.getModelRuns(projectId);
-        const latestVersion = hyps[0]?.version || 1;
-        const latestHyps = hyps.filter((h) => h.version === latestVersion);
-        const latestNarr = narrs[0];
-        const result = await presentationAgent(
-          project.name, project.objective,
-          latestNarr?.summaryText || "No summary available",
-          latestHyps.map((h) => ({ statement: h.statement, metric: h.metric })),
-          runs.map((r) => ({ inputsJson: r.inputsJson, outputsJson: r.outputsJson })),
-          onProgress
-        );
-        const slideVersion = (await storage.getLatestSlideVersion(projectId)) + 1;
-        await storage.insertSlides(
-          projectId, slideVersion,
-          result.slides.map((s) => ({
-            slideIndex: s.slideIndex, layout: s.layout, title: s.title,
-            subtitle: s.subtitle || undefined, bodyJson: s.bodyJson, notesText: s.notesText || undefined,
-          }))
-        );
-        deliverableContent = result;
-        deliverableTitle = "Presentation Deck";
-        await storage.updateProjectStage(projectId, "presentation_draft");
+      await persistAgentResults(projectId, step.agentKey, deliverableContent);
+
+      const newStage = STAGE_MAP[step.agentKey];
+      if (newStage) {
+        await storage.updateProjectStage(projectId, newStage);
       }
 
       if (deliverableContent) {
@@ -476,7 +452,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const currentDeliverable = stepDeliverables[0];
 
       if (currentDeliverable) {
-        const refined = await refineDeliverable(
+        const refined = await refineWithLangGraph(
           step.agentKey,
           currentDeliverable.contentJson,
           message,
@@ -604,76 +580,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      const agentKeyForStage: Record<string, string> = {
+        definition_draft: "project_definition",
+        issues_draft: "issues_tree",
+        hypotheses_draft: "hypothesis",
+        execution_done: "execution",
+        summary_draft: "summary",
+        presentation_draft: "presentation",
+      };
+      const agentKey = agentKeyForStage[nextStage];
       const modelUsed = getModelUsed();
       const runLog = await storage.insertRunLog(projectId, nextStage, { currentStage: project.stage }, modelUsed);
 
       try {
-        if (nextStage === "definition_draft") {
-          const result = await projectDefinitionAgent(project.objective, project.constraints);
-          await storage.updateRunLog(runLog.id, result, "success");
-        } else if (nextStage === "issues_draft") {
-          const result = await issuesTreeAgent(project.objective, project.constraints);
-          const version = (await storage.getLatestIssueVersion(projectId)) + 1;
-          const idMap = new Map<string, number>();
-          let remaining = [...result.issues];
-          let pass = 0;
-          while (remaining.length > 0 && pass < 10) {
-            pass++;
-            const canInsert = remaining.filter((n) => !n.parentId || idMap.has(n.parentId));
-            const cannotInsert = remaining.filter((n) => n.parentId && !idMap.has(n.parentId));
-            if (canInsert.length === 0) break;
-            const insertedNodes = await storage.insertIssueNodes(projectId, version,
-              canInsert.map((n) => ({ parentId: n.parentId ? (idMap.get(n.parentId) || null) : null, text: n.text, priority: n.priority })));
-            canInsert.forEach((n, i) => { idMap.set(n.id, insertedNodes[i].id); });
-            remaining = cannotInsert;
-          }
-          await storage.updateRunLog(runLog.id, result, "success");
-        } else if (nextStage === "hypotheses_draft") {
-          const issueNodesData = await storage.getIssueNodes(projectId);
-          const latestVersion = issueNodesData[0]?.version || 1;
-          const latestIssues = issueNodesData.filter((n) => n.version === latestVersion);
-          const result = await hypothesisAgent(latestIssues.map((n) => ({ id: n.id, text: n.text, priority: n.priority })));
-          const version = (await storage.getLatestHypothesisVersion(projectId)) + 1;
-          const insertedHyps = await storage.insertHypotheses(projectId, version,
-            result.hypotheses.map((h) => ({ issueNodeId: null, statement: h.statement, metric: h.metric, dataSource: h.dataSource, method: h.method })));
-          await storage.insertAnalysisPlan(projectId,
-            result.analysisPlan.map((p, i) => ({
-              hypothesisId: insertedHyps[p.hypothesisIndex]?.id || insertedHyps[0]?.id || null,
-              method: p.method, parametersJson: p.parameters, requiredDataset: p.requiredDataset,
-            })));
-          await storage.updateRunLog(runLog.id, result, "success");
-        } else if (nextStage === "execution_done") {
-          const plans = await storage.getAnalysisPlan(projectId);
-          const results = await executionAgent(plans.map((p) => ({ method: p.method, parameters: p.parametersJson, requiredDataset: p.requiredDataset })));
-          for (const r of results) { await storage.insertModelRun(projectId, r.toolName, r.inputs, r.outputs); }
-          await storage.updateRunLog(runLog.id, results, "success");
-        } else if (nextStage === "summary_draft") {
-          const hyps = await storage.getHypotheses(projectId);
-          const runs = await storage.getModelRuns(projectId);
-          const latestVersion = hyps[0]?.version || 1;
-          const latestHyps = hyps.filter((h) => h.version === latestVersion);
-          const result = await summaryAgent(project.objective, project.constraints,
-            latestHyps.map((h) => ({ statement: h.statement, metric: h.metric })),
-            runs.map((r) => ({ inputsJson: r.inputsJson, outputsJson: r.outputsJson })));
-          const version = (await storage.getLatestNarrativeVersion(projectId)) + 1;
-          await storage.insertNarrative(projectId, version, result.summaryText);
-          await storage.updateRunLog(runLog.id, result, "success");
-        } else if (nextStage === "presentation_draft") {
-          const narrs = await storage.getNarratives(projectId);
-          const hyps = await storage.getHypotheses(projectId);
-          const runs = await storage.getModelRuns(projectId);
-          const latestVersion = hyps[0]?.version || 1;
-          const latestHyps = hyps.filter((h) => h.version === latestVersion);
-          const latestNarr = narrs[0];
-          const result = await presentationAgent(project.name, project.objective,
-            latestNarr?.summaryText || "No summary available",
-            latestHyps.map((h) => ({ statement: h.statement, metric: h.metric })),
-            runs.map((r) => ({ inputsJson: r.inputsJson, outputsJson: r.outputsJson })));
-          const slideVersion = (await storage.getLatestSlideVersion(projectId)) + 1;
-          await storage.insertSlides(projectId, slideVersion,
-            result.slides.map((s) => ({ slideIndex: s.slideIndex, layout: s.layout, title: s.title, subtitle: s.subtitle || undefined, bodyJson: s.bodyJson, notesText: s.notesText || undefined })));
-          await storage.updateRunLog(runLog.id, result, "success");
-        }
+        const result = await runWorkflowStep(projectId, agentKey, () => {});
+        await persistAgentResults(projectId, agentKey, result.deliverableContent);
+        await storage.updateRunLog(runLog.id, result.deliverableContent, "success");
         const updated = await storage.updateProjectStage(projectId, nextStage);
         res.json(updated);
       } catch (agentErr: any) {

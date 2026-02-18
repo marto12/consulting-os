@@ -396,12 +396,13 @@ async function executionNode(state: ConsultingStateType): Promise<Partial<Consul
   for (let idx = 0; idx < plans.length; idx++) {
     const plan = plans[idx];
     progress(`Running scenario ${idx + 1} of ${plans.length}...`, "status");
+    const pJson = plan.parametersJson as any;
     const params: ScenarioInput = {
-      baselineRevenue: plan.parametersJson?.baselineRevenue || 1000000,
-      growthRate: plan.parametersJson?.growthRate || 0.1,
-      costReduction: plan.parametersJson?.costReduction || 0.05,
-      timeHorizonYears: plan.parametersJson?.timeHorizonYears || 5,
-      volatility: plan.parametersJson?.volatility || 0.15,
+      baselineRevenue: pJson?.baselineRevenue || 1000000,
+      growthRate: pJson?.growthRate || 0.1,
+      costReduction: pJson?.costReduction || 0.05,
+      timeHorizonYears: pJson?.timeHorizonYears || 5,
+      volatility: pJson?.volatility || 0.15,
     };
     const outputs = runScenarioTool(params);
     results.push({ toolName: "run_scenario_tool", inputs: params, outputs });
@@ -429,7 +430,7 @@ async function summaryNode(state: ConsultingStateType): Promise<Partial<Consulti
     const bullets = latestHyps
       .map((h, i) => {
         const run = runs[i];
-        const summary = run?.outputsJson?.summary;
+        const summary = (run?.outputsJson as any)?.summary;
         if (summary) {
           return `- ${h.statement}: Expected NPV of $${summary.expectedValue?.toLocaleString() || "N/A"} with risk-adjusted return of ${summary.riskAdjustedReturn || "N/A"}%`;
         }
@@ -448,7 +449,7 @@ async function summaryNode(state: ConsultingStateType): Promise<Partial<Consulti
   const hypList = latestHyps
     .map((h, i) => {
       const run = runs[i];
-      return `Hypothesis: ${h.statement}\nMetric: ${h.metric}\nModel Results: ${JSON.stringify(run?.outputsJson?.summary || "No results")}`;
+      return `Hypothesis: ${h.statement}\nMetric: ${h.metric}\nModel Results: ${JSON.stringify((run?.outputsJson as any)?.summary || "No results")}`;
     })
     .join("\n\n");
 
@@ -485,7 +486,7 @@ async function presentationNode(state: ConsultingStateType): Promise<Partial<Con
       { slideIndex: 0, layout: "title_slide", title: projectName, subtitle: "Strategic Analysis & Recommendations", bodyJson: {}, notesText: "Welcome and introductions" },
       { slideIndex: 1, layout: "section_header", title: "Executive Summary", subtitle: "Key findings from our analysis", bodyJson: {}, notesText: "Transition to executive overview" },
       { slideIndex: 2, layout: "title_body", title: "Objective & Scope", subtitle: null, bodyJson: { bullets: [state.objective, "Multi-scenario financial modeling", "Risk-adjusted return analysis", "Data-driven recommendations"] }, notesText: "Review the project scope and analytical approach" },
-      { slideIndex: 3, layout: "metrics", title: "Key Financial Metrics", subtitle: null, bodyJson: { metrics: (() => { const run = runs[0]?.outputsJson?.summary; return [{ label: "Expected NPV", value: run ? `$${(run.expectedValue / 1000).toFixed(0)}K` : "$850K", change: "+22%" }, { label: "Best Case", value: run ? `$${(run.optimisticNpv / 1000).toFixed(0)}K` : "$1.2M", change: "Upside" }, { label: "Risk-Adj Return", value: run ? `${run.riskAdjustedReturn}%` : "18%", change: "+5pp" }]; })() }, notesText: "Walk through each metric and its implications" },
+      { slideIndex: 3, layout: "metrics", title: "Key Financial Metrics", subtitle: null, bodyJson: { metrics: (() => { const run = (runs[0]?.outputsJson as any)?.summary; return [{ label: "Expected NPV", value: run ? `$${(run.expectedValue / 1000).toFixed(0)}K` : "$850K", change: "+22%" }, { label: "Best Case", value: run ? `$${(run.optimisticNpv / 1000).toFixed(0)}K` : "$1.2M", change: "Upside" }, { label: "Risk-Adj Return", value: run ? `${run.riskAdjustedReturn}%` : "18%", change: "+5pp" }]; })() }, notesText: "Walk through each metric and its implications" },
       { slideIndex: 4, layout: "two_column", title: "Scenario Comparison", subtitle: null, bodyJson: { leftTitle: "Baseline Scenario", leftBullets: ["Conservative growth assumptions", "Moderate cost efficiencies", "Stable market conditions"], rightTitle: "Optimistic Scenario", rightBullets: ["Accelerated market capture", "Full cost reduction realized", "Favorable competitive dynamics"] }, notesText: "Compare the two primary scenarios" },
       { slideIndex: 5, layout: "title_body", title: "Key Findings", subtitle: null, bodyJson: { bullets: latestHyps.slice(0, 4).map((h) => h.statement.length > 60 ? h.statement.slice(0, 57) + "..." : h.statement) }, notesText: "Detail each hypothesis and supporting evidence" },
       { slideIndex: 6, layout: "title_body", title: "Recommendations", subtitle: null, bodyJson: { bullets: ["Proceed with phased implementation", "Prioritize highest-NPV initiatives", "Establish KPI tracking framework", "Conduct monthly progress reviews"] }, notesText: "Present the recommended course of action" },
@@ -503,8 +504,9 @@ async function presentationNode(state: ConsultingStateType): Promise<Partial<Con
   const hypSummary = latestHyps
     .map((h, i) => {
       const run = runs[i];
-      const results = run?.outputsJson?.summary
-        ? `NPV: $${run.outputsJson.summary.expectedValue?.toLocaleString()}, Risk-Adj Return: ${run.outputsJson.summary.riskAdjustedReturn}%`
+      const oJson = run?.outputsJson as any;
+      const results = oJson?.summary
+        ? `NPV: $${oJson.summary.expectedValue?.toLocaleString()}, Risk-Adj Return: ${oJson.summary.riskAdjustedReturn}%`
         : "No results";
       return `- ${h.statement} (${h.metric}): ${results}`;
     })
