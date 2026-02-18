@@ -9,7 +9,7 @@ import {
   type ProgressCallback,
 } from "./agents";
 import { runWorkflowStep, refineWithLangGraph } from "./agents/workflow-graph";
-import { reviewDocument, actionComment, executiveReviewDocument } from "./agents/document-agents";
+import { reviewDocument, actionComment, executiveReviewDocument, spotFactCheckCandidates, runFactCheck } from "./agents/document-agents";
 
 const STAGE_ORDER = [
   "created",
@@ -993,6 +993,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const result = await actionComment(doc, comment);
       res.json(result);
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post("/api/documents/:id/factcheck-candidates", async (req: Request, res: Response) => {
+    try {
+      const doc = await storage.getDocument(Number(req.params.id));
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+
+      const comments = await spotFactCheckCandidates(doc);
+      res.json(comments);
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post("/api/documents/:id/factcheck", async (req: Request, res: Response) => {
+    try {
+      const doc = await storage.getDocument(Number(req.params.id));
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+
+      const allComments = await storage.listComments(doc.id);
+      const acceptedCandidates = allComments.filter(
+        c => c.type === "factcheck" && c.status === "accepted"
+      );
+
+      if (acceptedCandidates.length === 0) {
+        return res.status(400).json({ error: "No accepted fact-check candidates found. Accept some candidates first." });
+      }
+
+      const results = await runFactCheck(doc, acceptedCandidates);
+      res.json(results);
     } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 

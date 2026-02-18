@@ -119,9 +119,62 @@ function generateMockExecutiveReviewComments(documentContent: string) {
   ];
 }
 
+const FactCheckState = Annotation.Root({
+  documentContent: Annotation<string>,
+  documentTitle: Annotation<string>,
+  documentId: Annotation<number>,
+  candidates: Annotation<Array<{ from: number; to: number; content: string }>>({
+    reducer: (_, b) => b,
+    default: () => [],
+  }),
+  savedComments: Annotation<DocumentComment[]>({
+    reducer: (_, b) => b,
+    default: () => [],
+  }),
+});
+
+type FactCheckStateType = typeof FactCheckState.State;
+
+const FactCheckRunState = Annotation.Root({
+  documentContent: Annotation<string>,
+  documentId: Annotation<number>,
+  acceptedCandidates: Annotation<DocumentComment[]>,
+  results: Annotation<DocumentComment[]>({
+    reducer: (_, b) => b,
+    default: () => [],
+  }),
+});
+
+type FactCheckRunStateType = typeof FactCheckRunState.State;
+
+function generateMockFactCheckCandidates(documentContent: string) {
+  const len = documentContent.length;
+  if (len === 0) return [];
+  const plainText = documentContent.replace(/<[^>]*>/g, "");
+  return [
+    {
+      from: 1,
+      to: Math.min(50, Math.max(2, len)),
+      content: "Potential unsubstantiated claim: This statement makes an assertion that may need a source or supporting evidence to verify its accuracy.",
+    },
+    {
+      from: Math.max(1, Math.floor(len * 0.4)),
+      to: Math.min(Math.floor(len * 0.4) + 60, Math.max(2, len)),
+      content: "Contains a specific figure or statistic: This number should be verified against the original data source to confirm accuracy.",
+    },
+    {
+      from: Math.max(1, Math.floor(len * 0.7)),
+      to: Math.min(Math.floor(len * 0.7) + 40, Math.max(2, len)),
+      content: "Broad generalization: This claim is stated as fact but may be opinion or an oversimplification that requires qualification.",
+    },
+  ];
+}
+
 let _reviewGraph: any = null;
 let _actionGraph: any = null;
 let _executiveReviewGraph: any = null;
+let _factCheckCandidateGraph: any = null;
+let _factCheckRunGraph: any = null;
 
 function getReviewGraph() {
   if (_reviewGraph) return _reviewGraph;
@@ -335,6 +388,175 @@ Return ONLY valid JSON array. Identify 2-5 meaningful issues.`;
     .addEdge("persist", END)
     .compile();
   return _executiveReviewGraph;
+}
+
+function getFactCheckCandidateGraph() {
+  if (_factCheckCandidateGraph) return _factCheckCandidateGraph;
+  _factCheckCandidateGraph = new StateGraph(FactCheckState)
+    .addNode("spot", async (state: FactCheckStateType): Promise<Partial<FactCheckStateType>> => {
+      if (!hasApiKey()) {
+        return { candidates: generateMockFactCheckCandidates(state.documentContent) };
+      }
+
+      const llm = createLLM()!;
+      const systemPrompt = `You are a fact-checking analyst. Your job is to scan a document and identify statements, claims, statistics, or assertions that should be fact-checked. Look for:
+
+1. **Specific statistics or numbers** — e.g. "revenue grew 40%", "47 microservices", "120ms latency"
+2. **Unsubstantiated claims** — assertions stated as fact without citing a source
+3. **Bold or sweeping generalizations** — e.g. "the best in the industry", "always leads to"
+4. **Historical or factual claims** — dates, events, attributions that could be wrong
+5. **Causal claims** — statements implying cause and effect without evidence
+
+Do NOT flag opinions clearly marked as opinions, or obvious rhetorical devices.
+
+Return a JSON array of candidate items. Each must have:
+- "from": character position where the claim starts (1-indexed, ProseMirror positions)
+- "to": character position where the claim ends
+- "content": a brief note explaining WHY this should be fact-checked (start with a category like "Statistic:", "Unsubstantiated claim:", "Generalization:", "Causal claim:", or "Historical claim:")
+
+Return ONLY valid JSON array. Identify 2-6 candidates.`;
+
+      try {
+        const response = await llm.invoke([
+          new SystemMessage(systemPrompt),
+          new HumanMessage(`Document Title: ${state.documentTitle}\n\nDocument Content:\n${state.documentContent}`),
+        ]);
+
+        const content = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+
+        if (!content || content.trim().length === 0) {
+          return { candidates: generateMockFactCheckCandidates(state.documentContent) };
+        }
+
+        const parsed = extractJson(content);
+        const items = Array.isArray(parsed) ? parsed : parsed.candidates || parsed.comments || [];
+        const validated = items.map((c: any) => ({
+          from: Math.max(1, Math.min(c.from || 1, state.documentContent.length)),
+          to: Math.max(1, Math.min(c.to || 1, state.documentContent.length)),
+          content: c.content || "Candidate for fact-checking",
+        }));
+        return { candidates: validated.length > 0 ? validated : generateMockFactCheckCandidates(state.documentContent) };
+      } catch (e) {
+        console.error("LLM factcheck candidate error, falling back to mock:", e);
+        return { candidates: generateMockFactCheckCandidates(state.documentContent) };
+      }
+    })
+    .addNode("persist", async (state: FactCheckStateType): Promise<Partial<FactCheckStateType>> => {
+      const saved: DocumentComment[] = [];
+      for (const c of state.candidates) {
+        const comment = await storage.createComment({
+          documentId: state.documentId,
+          from: c.from,
+          to: c.to,
+          content: c.content,
+          type: "factcheck",
+          proposedText: "",
+        });
+        saved.push(comment);
+      }
+      return { savedComments: saved };
+    })
+    .addEdge(START, "spot")
+    .addEdge("spot", "persist")
+    .addEdge("persist", END)
+    .compile();
+  return _factCheckCandidateGraph;
+}
+
+function getFactCheckRunGraph() {
+  if (_factCheckRunGraph) return _factCheckRunGraph;
+  _factCheckRunGraph = new StateGraph(FactCheckRunState)
+    .addNode("check", async (state: FactCheckRunStateType): Promise<Partial<FactCheckRunStateType>> => {
+      const updatedComments: DocumentComment[] = [];
+
+      for (const candidate of state.acceptedCandidates) {
+        const highlightedText = state.documentContent.slice(
+          Math.max(0, candidate.from - 1),
+          candidate.to
+        );
+
+        let verdict = "";
+
+        if (!hasApiKey()) {
+          verdict = `Fact check result: The claim "${highlightedText.slice(0, 50)}..." appears to be a reasonable assertion but could not be independently verified. Recommend adding a source citation to strengthen credibility.`;
+        } else {
+          const llm = createLLM()!;
+          const systemPrompt = `You are a rigorous fact-checker. You are given a specific claim or statement from a document. Your job is to assess its accuracy.
+
+Evaluate the claim and return a JSON object with:
+- "verdict": One of "Verified", "Likely Accurate", "Unverifiable", "Misleading", or "Inaccurate"
+- "explanation": A clear 2-3 sentence explanation of your assessment. Include what you found, why you reached this conclusion, and any caveats.
+- "recommendation": A brief suggestion (e.g. "Add source citation", "Rephrase to qualify the claim", "Remove or correct this figure")
+
+Return ONLY valid JSON.`;
+
+          try {
+            const response = await llm.invoke([
+              new SystemMessage(systemPrompt),
+              new HumanMessage(`Claim to fact-check: "${highlightedText}"\n\nOriginal reviewer note: ${candidate.content}\n\nFull document context:\n${state.documentContent}`),
+            ]);
+
+            const content = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+
+            if (content && content.trim().length > 0) {
+              try {
+                const parsed = extractJson(content);
+                verdict = `[${parsed.verdict || "Reviewed"}] ${parsed.explanation || "Review complete."} Recommendation: ${parsed.recommendation || "No specific recommendation."}`;
+              } catch {
+                verdict = content.trim().slice(0, 500);
+              }
+            } else {
+              verdict = `Fact check result: The claim "${highlightedText.slice(0, 50)}..." could not be independently verified at this time. Consider adding a source citation.`;
+            }
+          } catch (e) {
+            console.error("LLM fact check error for candidate:", candidate.id, e);
+            verdict = `Fact check result: Unable to verify this claim at this time. Manual verification recommended.`;
+          }
+        }
+
+        const updated = await storage.updateComment(candidate.id, {
+          aiReply: verdict,
+          status: "accepted",
+        });
+        updatedComments.push(updated);
+      }
+
+      return { results: updatedComments };
+    })
+    .addEdge(START, "check")
+    .addEdge("check", END)
+    .compile();
+  return _factCheckRunGraph;
+}
+
+export async function spotFactCheckCandidates(doc: Document): Promise<DocumentComment[]> {
+  try {
+    const graph = getFactCheckCandidateGraph();
+    const result = await graph.invoke({
+      documentContent: doc.content || "",
+      documentTitle: doc.title || "",
+      documentId: doc.id,
+    });
+    return result.savedComments;
+  } catch (error) {
+    console.error("spotFactCheckCandidates error:", error);
+    return [];
+  }
+}
+
+export async function runFactCheck(doc: Document, acceptedCandidates: DocumentComment[]): Promise<DocumentComment[]> {
+  try {
+    const graph = getFactCheckRunGraph();
+    const result = await graph.invoke({
+      documentContent: doc.content || "",
+      documentId: doc.id,
+      acceptedCandidates,
+    });
+    return result.results;
+  } catch (error) {
+    console.error("runFactCheck error:", error);
+    return [];
+  }
 }
 
 export async function executiveReviewDocument(doc: Document): Promise<DocumentComment[]> {

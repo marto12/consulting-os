@@ -31,6 +31,8 @@ import {
   Cloud,
   CloudOff,
   BriefcaseBusiness,
+  Search,
+  ShieldCheck,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -92,6 +94,8 @@ export default function DocumentEditor() {
   const [loading, setLoading] = useState(true);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [execReviewLoading, setExecReviewLoading] = useState(false);
+  const [factCandidateLoading, setFactCandidateLoading] = useState(false);
+  const [factCheckLoading, setFactCheckLoading] = useState(false);
   const [commentDialogOpen, setCommentDialogOpen] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [selectionRange, setSelectionRange] = useState<{ from: number; to: number } | null>(null);
@@ -254,6 +258,34 @@ export default function DocumentEditor() {
     setExecReviewLoading(false);
   }, [fetchComments]);
 
+  const handleFactCheckCandidates = useCallback(async () => {
+    if (!docIdRef.current) return;
+    setFactCandidateLoading(true);
+    try {
+      const res = await fetch(`/api/documents/${docIdRef.current}/factcheck-candidates`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        await fetchComments(docIdRef.current);
+      }
+    } catch {}
+    setFactCandidateLoading(false);
+  }, [fetchComments]);
+
+  const handleRunFactCheck = useCallback(async () => {
+    if (!docIdRef.current) return;
+    setFactCheckLoading(true);
+    try {
+      const res = await fetch(`/api/documents/${docIdRef.current}/factcheck`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        await fetchComments(docIdRef.current);
+      }
+    } catch {}
+    setFactCheckLoading(false);
+  }, [fetchComments]);
+
   const handleAddComment = useCallback(async () => {
     if (!docIdRef.current || !selectionRange || !commentText.trim()) return;
     try {
@@ -288,7 +320,7 @@ export default function DocumentEditor() {
 
   const handleAcceptComment = useCallback(
     async (comment: DocumentComment) => {
-      if (!editor || !comment.proposedText) return;
+      if (!editor) return;
       setActionLoadingId(comment.id);
       try {
         await fetch(`/api/comments/${comment.id}`, {
@@ -296,16 +328,18 @@ export default function DocumentEditor() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: "accepted" }),
         });
-        const docLength = editor.state.doc.content.size;
-        const from = Math.min(comment.from, docLength);
-        const to = Math.min(comment.to, docLength);
-        editor
-          .chain()
-          .focus()
-          .setTextSelection({ from, to })
-          .deleteSelection()
-          .insertContent(comment.proposedText)
-          .run();
+        if (comment.type !== "factcheck" && comment.proposedText) {
+          const docLength = editor.state.doc.content.size;
+          const from = Math.min(comment.from, docLength);
+          const to = Math.min(comment.to, docLength);
+          editor
+            .chain()
+            .focus()
+            .setTextSelection({ from, to })
+            .deleteSelection()
+            .insertContent(comment.proposedText)
+            .run();
+        }
         if (docIdRef.current) await fetchComments(docIdRef.current);
       } catch {}
       setActionLoadingId(null);
@@ -380,6 +414,8 @@ export default function DocumentEditor() {
   );
 
   const hasSelection = editor ? editor.state.selection.from !== editor.state.selection.to : false;
+  const hasAcceptedFactCandidates = comments.some(c => c.type === "factcheck" && c.status === "accepted");
+  const hasPendingFactCandidates = comments.some(c => c.type === "factcheck" && c.status === "pending");
 
   if (loading) {
     return (
@@ -455,6 +491,40 @@ export default function DocumentEditor() {
                 </>
               )}
             </div>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleFactCheckCandidates}
+              disabled={factCandidateLoading}
+              className="border-orange-700 text-orange-300 hover:bg-orange-950/50"
+            >
+              {factCandidateLoading ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Search size={14} />
+              )}
+              Spot Claims
+            </Button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleRunFactCheck}
+              disabled={factCheckLoading || !hasAcceptedFactCandidates}
+              className={cn(
+                "border-emerald-700 text-emerald-300 hover:bg-emerald-950/50",
+                !hasAcceptedFactCandidates && "opacity-50"
+              )}
+              title={!hasAcceptedFactCandidates ? "Accept some fact-check candidates first" : "Run fact check on accepted candidates"}
+            >
+              {factCheckLoading ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <ShieldCheck size={14} />
+              )}
+              Fact Check
+            </Button>
 
             <Button
               size="sm"
@@ -843,6 +913,7 @@ function CommentCard({
 }) {
   const isAI = comment.type === "ai" || comment.type === "review";
   const isExecutive = comment.type === "executive";
+  const isFactCheck = comment.type === "factcheck";
   const isLoading = actionLoadingId === comment.id;
 
   const statusVariant =
@@ -852,19 +923,23 @@ function CommentCard({
         ? "destructive"
         : "secondary";
 
-  const borderColor = isExecutive
-    ? "border-l-purple-500"
-    : isAI
-      ? "border-l-amber-500"
-      : "border-l-blue-500";
+  const borderColor = isFactCheck
+    ? "border-l-orange-500"
+    : isExecutive
+      ? "border-l-purple-500"
+      : isAI
+        ? "border-l-amber-500"
+        : "border-l-blue-500";
 
-  const iconColor = isExecutive
-    ? "text-purple-500"
-    : isAI
-      ? "text-amber-500"
-      : "text-blue-500";
+  const iconColor = isFactCheck
+    ? "text-orange-500"
+    : isExecutive
+      ? "text-purple-500"
+      : isAI
+        ? "text-amber-500"
+        : "text-blue-500";
 
-  const label = isExecutive ? "Executive" : isAI ? "AI" : "You";
+  const label = isFactCheck ? "Fact Check" : isExecutive ? "Executive" : isAI ? "AI" : "You";
 
   return (
     <Card
@@ -876,7 +951,9 @@ function CommentCard({
     >
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-center gap-1.5">
-          {isExecutive ? (
+          {isFactCheck ? (
+            <Search size={14} className={cn(iconColor, "shrink-0")} />
+          ) : isExecutive ? (
             <BriefcaseBusiness size={14} className={cn(iconColor, "shrink-0")} />
           ) : isAI ? (
             <Bot size={14} className={cn(iconColor, "shrink-0")} />
@@ -913,7 +990,57 @@ function CommentCard({
 
       <p className="text-sm mb-2">{comment.content}</p>
 
-      {comment.proposedText && comment.status === "pending" && (
+      {isFactCheck && comment.status === "pending" && !comment.aiReply && (
+        <div className="space-y-2">
+          <div className="text-xs bg-orange-950/30 border border-orange-800/30 rounded px-2 py-1.5">
+            <span className="text-orange-400 font-medium text-[10px] uppercase tracking-wider">
+              Approve this claim for fact-checking?
+            </span>
+          </div>
+          <div className="flex gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs flex-1 text-orange-400 border-orange-800 hover:bg-orange-950/50"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAccept(comment);
+              }}
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <Check size={12} />
+              )}
+              Approve
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs flex-1 text-red-400 border-red-800 hover:bg-red-950/50"
+              onClick={(e) => {
+                e.stopPropagation();
+                onReject(comment.id);
+              }}
+              disabled={isLoading}
+            >
+              <X size={12} />
+              Decline
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {isFactCheck && comment.status === "accepted" && !comment.aiReply && (
+        <div className="text-xs bg-orange-950/20 border border-orange-800/20 rounded px-2 py-1.5 mt-1">
+          <span className="text-orange-300 font-medium text-[10px] uppercase tracking-wider">
+            Queued for fact check
+          </span>
+        </div>
+      )}
+
+      {!isFactCheck && comment.proposedText && comment.status === "pending" && (
         <div className="space-y-2">
           <div className={cn(
             "text-xs rounded px-2 py-1.5",
@@ -965,15 +1092,23 @@ function CommentCard({
       )}
 
       {comment.aiReply && (
-        <div className="text-xs bg-amber-950/30 border border-amber-800/30 rounded px-2 py-1.5 mt-1">
-          <span className="text-amber-400 font-medium text-[10px] uppercase tracking-wider">
-            AI Response:
+        <div className={cn(
+          "text-xs rounded px-2 py-1.5 mt-1",
+          isFactCheck
+            ? "bg-emerald-950/30 border border-emerald-800/30"
+            : "bg-amber-950/30 border border-amber-800/30"
+        )}>
+          <span className={cn(
+            "font-medium text-[10px] uppercase tracking-wider",
+            isFactCheck ? "text-emerald-400" : "text-amber-400"
+          )}>
+            {isFactCheck ? "Fact Check Result:" : "AI Response:"}
           </span>
-          <p className="mt-0.5 text-amber-200">{comment.aiReply}</p>
+          <p className={cn("mt-0.5", isFactCheck ? "text-emerald-200" : "text-amber-200")}>{comment.aiReply}</p>
         </div>
       )}
 
-      {!isAI && !comment.aiReply && comment.status === "pending" && (
+      {!isAI && !isExecutive && !isFactCheck && !comment.aiReply && comment.status === "pending" && (
         <Button
           size="sm"
           variant="outline"
