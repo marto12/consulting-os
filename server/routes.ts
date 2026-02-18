@@ -895,6 +895,98 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try { await storage.deletePipeline(Number(req.params.id)); res.json({ success: true }); } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
+  app.get("/api/documents", async (req: Request, res: Response) => {
+    try {
+      const projectId = req.query.projectId ? Number(req.query.projectId) : undefined;
+      res.json(await storage.listDocuments(projectId));
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post("/api/documents", async (req: Request, res: Response) => {
+    try {
+      const { projectId, title, content, contentJson } = req.body;
+      res.status(201).json(await storage.createDocument({ projectId, title, content, contentJson }));
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get("/api/documents/:id", async (req: Request, res: Response) => {
+    try {
+      const doc = await storage.getDocument(Number(req.params.id));
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+      res.json(doc);
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.put("/api/documents/:id", async (req: Request, res: Response) => {
+    try {
+      res.json(await storage.updateDocument(Number(req.params.id), req.body));
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.delete("/api/documents/:id", async (req: Request, res: Response) => {
+    try {
+      await storage.deleteDocument(Number(req.params.id));
+      res.json({ success: true });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get("/api/documents/:id/comments", async (req: Request, res: Response) => {
+    try {
+      res.json(await storage.listComments(Number(req.params.id)));
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post("/api/documents/:id/comments", async (req: Request, res: Response) => {
+    try {
+      const { from, to, content, type, proposedText, aiReply } = req.body;
+      res.status(201).json(await storage.createComment({
+        documentId: Number(req.params.id),
+        from, to, content,
+        type, proposedText, aiReply,
+      }));
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.put("/api/comments/:id", async (req: Request, res: Response) => {
+    try {
+      res.json(await storage.updateComment(Number(req.params.id), req.body));
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.delete("/api/comments/:id", async (req: Request, res: Response) => {
+    try {
+      await storage.deleteComment(Number(req.params.id));
+      res.json({ success: true });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post("/api/documents/:id/review", async (req: Request, res: Response) => {
+    try {
+      const doc = await storage.getDocument(Number(req.params.id));
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+
+      const { reviewDocument } = await import("./agents/document-agents");
+      const comments = await reviewDocument(doc);
+      res.json(comments);
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post("/api/documents/:id/comments/:commentId/action", async (req: Request, res: Response) => {
+    try {
+      const doc = await storage.getDocument(Number(req.params.id));
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+
+      const commentId = Number(req.params.commentId);
+      const comments = await storage.listComments(doc.id);
+      const comment = comments.find(c => c.id === commentId);
+      if (!comment) return res.status(404).json({ error: "Comment not found" });
+
+      const { actionComment } = await import("./agents/document-agents");
+      const result = await actionComment(doc, comment);
+      res.json(result);
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
   registerChatRoutes(app);
 
   const httpServer = createServer(app);
