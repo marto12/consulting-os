@@ -291,6 +291,38 @@ export const documentComments = pgTable("document_comments", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+export const vaultFiles = pgTable("vault_files", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  fileName: text("file_name").notNull(),
+  mimeType: text("mime_type").notNull(),
+  fileSize: integer("file_size").notNull(),
+  storagePath: text("storage_path").notNull(),
+  extractedText: text("extracted_text"),
+  embeddingStatus: text("embedding_status").notNull().default("pending"),
+  chunkCount: integer("chunk_count").notNull().default(0),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const vaultChunks = pgTable("vault_chunks", {
+  id: serial("id").primaryKey(),
+  fileId: integer("file_id")
+    .notNull()
+    .references(() => vaultFiles.id, { onDelete: "cascade" }),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  chunkIndex: integer("chunk_index").notNull(),
+  content: text("content").notNull(),
+  embedding: jsonb("embedding"),
+  tokenCount: integer("token_count").notNull().default(0),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const insertProjectSchema = createInsertSchema(projects).omit({
   id: true,
   stage: true,
@@ -323,3 +355,5 @@ export type Conversation = typeof conversations.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type Document = typeof documents.$inferSelect;
 export type DocumentComment = typeof documentComments.$inferSelect;
+export type VaultFile = typeof vaultFiles.$inferSelect;
+export type VaultChunk = typeof vaultChunks.$inferSelect;
