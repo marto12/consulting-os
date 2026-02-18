@@ -26,6 +26,7 @@ import {
   documentComments,
   vaultFiles,
   vaultChunks,
+  datasetRows,
   type Project,
   type InsertProject,
   type StepChatMessage,
@@ -252,16 +253,52 @@ export const storage = {
     return d;
   },
 
-  async createDataset(data: { name: string; description?: string; owner?: string; accessLevel?: string; schemaJson?: any; metadata?: any }): Promise<Dataset> {
+  async createDataset(data: { name: string; description?: string; owner?: string; accessLevel?: string; sourceType?: string; sourceUrl?: string; schemaJson?: any; metadata?: any; rowCount?: number }): Promise<Dataset> {
     const [d] = await db.insert(datasets).values({
       name: data.name,
       description: data.description || "",
       owner: data.owner || "system",
       accessLevel: data.accessLevel || "private",
+      sourceType: data.sourceType || "manual",
+      sourceUrl: data.sourceUrl || null,
       schemaJson: data.schemaJson || null,
       metadata: data.metadata || null,
+      rowCount: data.rowCount || 0,
     }).returning();
     return d;
+  },
+
+  async updateDataset(id: number, data: { name?: string; description?: string; sourceType?: string; sourceUrl?: string; schemaJson?: any; metadata?: any; rowCount?: number }): Promise<Dataset> {
+    const [d] = await db.update(datasets).set({ ...data, updatedAt: new Date() }).where(eq(datasets.id, id)).returning();
+    return d;
+  },
+
+  async deleteDataset(id: number): Promise<void> {
+    await db.delete(datasetRows).where(eq(datasetRows.datasetId, id));
+    await db.delete(datasets).where(eq(datasets.id, id));
+  },
+
+  async insertDatasetRows(datasetId: number, rows: Array<{ rowIndex: number; data: any }>): Promise<void> {
+    await db.delete(datasetRows).where(eq(datasetRows.datasetId, datasetId));
+    if (rows.length > 0) {
+      const batchSize = 500;
+      for (let i = 0; i < rows.length; i += batchSize) {
+        const batch = rows.slice(i, i + batchSize).map((r) => ({
+          datasetId,
+          rowIndex: r.rowIndex,
+          data: r.data,
+        }));
+        await db.insert(datasetRows).values(batch);
+      }
+    }
+  },
+
+  async getDatasetRows(datasetId: number, limit = 100, offset = 0): Promise<any[]> {
+    return db.select().from(datasetRows)
+      .where(eq(datasetRows.datasetId, datasetId))
+      .orderBy(asc(datasetRows.rowIndex))
+      .limit(limit)
+      .offset(offset);
   },
 
   async listModels(): Promise<Model[]> {

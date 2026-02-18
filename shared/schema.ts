@@ -59,10 +59,20 @@ export const datasets = pgTable("datasets", {
   description: text("description").notNull().default(""),
   owner: text("owner").notNull().default("system"),
   accessLevel: text("access_level").notNull().default("private"),
+  sourceType: text("source_type").notNull().default("manual"),
+  sourceUrl: text("source_url"),
   schemaJson: jsonb("schema_json"),
   metadata: jsonb("metadata"),
+  rowCount: integer("row_count").notNull().default(0),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const datasetRows = pgTable("dataset_rows", {
+  id: serial("id").primaryKey(),
+  datasetId: integer("dataset_id").notNull().references(() => datasets.id, { onDelete: "cascade" }),
+  rowIndex: integer("row_index").notNull(),
+  data: jsonb("data").notNull(),
 });
 
 export const models = pgTable("models", {
