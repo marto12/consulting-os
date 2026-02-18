@@ -4,6 +4,7 @@ import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { storage } from "../storage";
 import { runScenarioTool, type ScenarioInput, type ScenarioOutput } from "./scenario-tool";
 import { DEFAULT_PROMPTS, type ProgressCallback } from "./index";
+import { retrieveRelevantContext, formatRAGContext } from "../vault-rag";
 
 function hasApiKey(): boolean {
   return !!(
@@ -111,6 +112,7 @@ export const ConsultingState = Annotation.Root({
   constraints: Annotation<string>,
   targetStep: Annotation<string>,
   onProgress: Annotation<ProgressCallback>,
+  vaultContext: Annotation<string>({ reducer: (_, b) => b, default: () => "" }),
 
   projectDefinitionResult: Annotation<any>({ reducer: (_, b) => b, default: () => null }),
   issues: Annotation<any[]>({ reducer: (_, b) => b, default: () => [] }),
@@ -127,6 +129,11 @@ export const ConsultingState = Annotation.Root({
 });
 
 type ConsultingStateType = typeof ConsultingState.State;
+
+function appendVaultContext(prompt: string, vaultCtx: string): string {
+  if (!vaultCtx) return prompt;
+  return `${prompt}\n\n${vaultCtx}`;
+}
 
 function formatTreeForCritic(issues: any[], objective: string): string {
   function renderBranch(parentId: string | null, indent: number): string {
@@ -199,7 +206,7 @@ async function projectDefinitionNode(state: ConsultingStateType): Promise<Partia
 
   const config = await getAgentConfig("project_definition");
   progress(`Calling LLM with model ${config.model}...`, "llm");
-  const userPrompt = `Project Objective: ${state.objective}\n\nConstraints & Context: ${state.constraints}`;
+  const userPrompt = appendVaultContext(`Project Objective: ${state.objective}\n\nConstraints & Context: ${state.constraints}`, state.vaultContext);
   const raw = await callLLMWithLangChain(config.systemPrompt, userPrompt, config.model, config.maxTokens);
   progress("LLM response received, parsing output...", "llm");
   const parsed = extractJson(raw);
@@ -241,7 +248,7 @@ async function issuesTreeNode(state: ConsultingStateType): Promise<Partial<Consu
   }
 
   const config = await getAgentConfig("issues_tree");
-  const baseUserPrompt = `Objective: ${state.objective}\nConstraints: ${state.constraints}`;
+  const baseUserPrompt = appendVaultContext(`Objective: ${state.objective}\nConstraints: ${state.constraints}`, state.vaultContext);
 
   if (state.criticIteration > 0 && state.criticLog.length > 0) {
     const lastCritic = state.criticLog[state.criticLog.length - 1]?.critic;
@@ -377,7 +384,7 @@ async function hypothesisNode(state: ConsultingStateType): Promise<Partial<Consu
   const issuesList = latestIssues.map((i) => `- [ID:${i.id}] ${i.text} (${i.priority})`).join("\n");
   const config = await getAgentConfig("hypothesis");
   progress(`Calling LLM with model ${config.model}...`, "llm");
-  const raw = await callLLMWithLangChain(config.systemPrompt, `Issues:\n${issuesList}`, config.model, config.maxTokens);
+  const raw = await callLLMWithLangChain(config.systemPrompt, appendVaultContext(`Issues:\n${issuesList}`, state.vaultContext), config.model, config.maxTokens);
   progress("LLM response received, parsing output...", "llm");
   const parsed = extractJson(raw);
   progress("Analysis complete. Generated " + (parsed.hypotheses?.length || 0) + " hypotheses.", "status");
@@ -457,7 +464,7 @@ async function summaryNode(state: ConsultingStateType): Promise<Partial<Consulti
 
   const config = await getAgentConfig("summary");
   progress(`Calling LLM with model ${config.model}...`, "llm");
-  const userPrompt = `Objective: ${state.objective}\nConstraints: ${state.constraints}\n\nHypotheses & Results:\n${hypList}`;
+  const userPrompt = appendVaultContext(`Objective: ${state.objective}\nConstraints: ${state.constraints}\n\nHypotheses & Results:\n${hypList}`, state.vaultContext);
   const summaryText = await callLLMWithLangChain(config.systemPrompt, userPrompt, config.model, config.maxTokens);
   progress("LLM response received, parsing output...", "llm");
   progress("Analysis complete. Generated executive summary.", "status");
@@ -516,7 +523,7 @@ async function presentationNode(state: ConsultingStateType): Promise<Partial<Con
 
   const config = await getAgentConfig("presentation");
   progress(`Calling LLM with model ${config.model}...`, "llm");
-  const userPrompt = `Project: ${projectName}\nObjective: ${state.objective}\n\nExecutive Summary:\n${latestNarr?.summaryText || "No summary available"}\n\nHypotheses & Results:\n${hypSummary}`;
+  const userPrompt = appendVaultContext(`Project: ${projectName}\nObjective: ${state.objective}\n\nExecutive Summary:\n${latestNarr?.summaryText || "No summary available"}\n\nHypotheses & Results:\n${hypSummary}`, state.vaultContext);
   const raw = await callLLMWithLangChain(config.systemPrompt, userPrompt, config.model, config.maxTokens);
   progress("LLM response received, parsing output...", "llm");
   const parsed = extractJson(raw);
@@ -593,6 +600,18 @@ export async function runWorkflowStep(
   const project = await storage.getProject(projectId);
   if (!project) throw new Error("Project not found");
 
+  let vaultContext = "";
+  try {
+    const ragQuery = `${project.objective} ${project.constraints}`;
+    const ragResults = await retrieveRelevantContext(projectId, ragQuery, 8);
+    if (ragResults.length > 0) {
+      vaultContext = formatRAGContext(ragResults);
+      onProgress(`Retrieved ${ragResults.length} relevant vault excerpts for context.`, "status");
+    }
+  } catch (err: any) {
+    console.error("RAG retrieval failed (non-fatal):", err.message);
+  }
+
   const workflow = getConsultingWorkflow();
 
   const result = await workflow.invoke({
@@ -601,6 +620,7 @@ export async function runWorkflowStep(
     constraints: project.constraints,
     targetStep: agentKey === "issues_tree" ? "issues_tree" : agentKey,
     onProgress,
+    vaultContext,
   });
 
   return {
