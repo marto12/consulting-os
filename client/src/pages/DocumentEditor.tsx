@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -34,6 +34,9 @@ import {
   Search,
   ShieldCheck,
   Lightbulb,
+  Play,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -102,10 +105,20 @@ export default function DocumentEditor() {
   const [commentText, setCommentText] = useState("");
   const [selectionRange, setSelectionRange] = useState<{ from: number; to: number } | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState("spot-claims");
+  const [mobileCommentsOpen, setMobileCommentsOpen] = useState(false);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const docIdRef = useRef<number | null>(id ? Number(id) : null);
   const titleInputRef = useRef<HTMLInputElement>(null);
+
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
 
   const editor = useEditor({
     extensions: [
@@ -433,6 +446,21 @@ export default function DocumentEditor() {
   const hasAcceptedFactCandidates = comments.some(c => c.type === "factcheck" && c.status === "accepted");
   const hasPendingFactCandidates = comments.some(c => c.type === "factcheck" && c.status === "pending");
 
+  const agentOptions = useMemo(() => [
+    { key: "spot-claims", label: "Spot Claims", icon: Search, color: "text-orange-400", handler: handleFactCheckCandidates, loading: factCandidateLoading },
+    { key: "fact-check", label: "Fact Check", icon: ShieldCheck, color: "text-emerald-400", handler: handleRunFactCheck, loading: factCheckLoading, disabled: !hasAcceptedFactCandidates },
+    { key: "narrative", label: "Narrative", icon: Lightbulb, color: "text-teal-400", handler: handleNarrativeReview, loading: narrativeLoading },
+    { key: "executive", label: "Executive", icon: BriefcaseBusiness, color: "text-purple-400", handler: handleExecutiveReview, loading: execReviewLoading },
+    { key: "ai-review", label: "AI Review", icon: Sparkles, color: "text-primary", handler: handleAIReview, loading: reviewLoading },
+  ], [handleFactCheckCandidates, handleRunFactCheck, handleNarrativeReview, handleExecutiveReview, handleAIReview, factCandidateLoading, factCheckLoading, narrativeLoading, execReviewLoading, reviewLoading, hasAcceptedFactCandidates]);
+
+  const runSelectedAgent = useCallback(() => {
+    const agent = agentOptions.find(a => a.key === selectedAgent);
+    if (agent && !agent.loading && !agent.disabled) agent.handler();
+  }, [selectedAgent, agentOptions]);
+
+  const currentAgentLoading = agentOptions.find(a => a.key === selectedAgent)?.loading || false;
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-background">
@@ -444,12 +472,12 @@ export default function DocumentEditor() {
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex flex-col h-screen bg-background text-foreground">
-        <div className="sticky top-0 z-20 flex items-center h-14 px-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="sticky top-0 z-20 flex items-center h-12 md:h-14 px-2 md:px-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 gap-2">
           <Button
             variant="ghost"
             size="sm"
             onClick={() => navigate("/projects")}
-            className="mr-3"
+            className="shrink-0 h-8 w-8 p-0 md:h-9 md:w-auto md:px-3"
           >
             <ArrowLeft size={16} />
           </Button>
@@ -463,12 +491,12 @@ export default function DocumentEditor() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleTitleBlur();
               }}
-              className="max-w-xs h-8 text-sm font-semibold"
+              className="max-w-[140px] md:max-w-xs h-7 md:h-8 text-xs md:text-sm font-semibold"
               autoFocus
             />
           ) : (
             <button
-              className="text-sm font-semibold hover:text-primary transition-colors truncate max-w-xs"
+              className="text-xs md:text-sm font-semibold hover:text-primary transition-colors truncate max-w-[120px] md:max-w-xs"
               onClick={() => {
                 setEditingTitle(true);
                 setTimeout(() => titleInputRef.current?.focus(), 50);
@@ -478,36 +506,43 @@ export default function DocumentEditor() {
             </button>
           )}
 
+          <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
+            {saveStatus === "saved" && <Cloud size={14} className="text-green-500" />}
+            {saveStatus === "saving" && <Loader2 size={14} className="animate-spin" />}
+            {saveStatus === "unsaved" && <CloudOff size={14} className="text-amber-500" />}
+            {saveStatus === "error" && <CloudOff size={14} className="text-red-500" />}
+            <span className="hidden md:inline">
+              {saveStatus === "saved" ? "Saved" : saveStatus === "saving" ? "Saving..." : saveStatus === "unsaved" ? "Unsaved" : "Error"}
+            </span>
+          </div>
+
           <div className="flex-1" />
 
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              {saveStatus === "saved" && (
-                <>
-                  <Cloud size={14} className="text-green-500" />
-                  <span>Saved</span>
-                </>
-              )}
-              {saveStatus === "saving" && (
-                <>
-                  <Loader2 size={14} className="animate-spin" />
-                  <span>Saving...</span>
-                </>
-              )}
-              {saveStatus === "unsaved" && (
-                <>
-                  <CloudOff size={14} className="text-amber-500" />
-                  <span>Unsaved</span>
-                </>
-              )}
-              {saveStatus === "error" && (
-                <>
-                  <CloudOff size={14} className="text-red-500" />
-                  <span>Error</span>
-                </>
-              )}
+          {isMobile ? (
+            <div className="flex items-center gap-1.5">
+              <select
+                value={selectedAgent}
+                onChange={(e) => setSelectedAgent(e.target.value)}
+                className="h-8 rounded-md border border-border bg-background text-xs px-2 pr-6 appearance-none"
+                style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 6px center" }}
+              >
+                {agentOptions.map((opt) => (
+                  <option key={opt.key} value={opt.key} disabled={opt.disabled}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <Button
+                size="sm"
+                className="h-8 px-3 text-xs"
+                onClick={runSelectedAgent}
+                disabled={currentAgentLoading}
+              >
+                {currentAgentLoading ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+                Go
+              </Button>
             </div>
-
+          ) : (
             <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-1">
               <button
                 onClick={handleFactCheckCandidates}
@@ -551,39 +586,41 @@ export default function DocumentEditor() {
                 AI Review
               </button>
             </div>
-          </div>
+          )}
         </div>
 
-        <div className="sticky top-14 z-10 flex items-center gap-0.5 px-4 py-1.5 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 overflow-x-auto">
+        <div className="sticky top-12 md:top-14 z-10 flex items-center gap-0.5 px-2 md:px-4 py-1 md:py-1.5 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 overflow-x-auto scrollbar-none">
           <ToolbarButton
-            icon={<Bold size={16} />}
+            icon={<Bold size={isMobile ? 14 : 16} />}
             tooltip="Bold"
             active={editor?.isActive("bold")}
             onClick={() => editor?.chain().focus().toggleBold().run()}
           />
           <ToolbarButton
-            icon={<Italic size={16} />}
+            icon={<Italic size={isMobile ? 14 : 16} />}
             tooltip="Italic"
             active={editor?.isActive("italic")}
             onClick={() => editor?.chain().focus().toggleItalic().run()}
           />
           <ToolbarButton
-            icon={<UnderlineIcon size={16} />}
+            icon={<UnderlineIcon size={isMobile ? 14 : 16} />}
             tooltip="Underline"
             active={editor?.isActive("underline")}
             onClick={() => editor?.chain().focus().toggleUnderline().run()}
           />
-          <ToolbarButton
-            icon={<Strikethrough size={16} />}
-            tooltip="Strikethrough"
-            active={editor?.isActive("strike")}
-            onClick={() => editor?.chain().focus().toggleStrike().run()}
-          />
+          {!isMobile && (
+            <ToolbarButton
+              icon={<Strikethrough size={16} />}
+              tooltip="Strikethrough"
+              active={editor?.isActive("strike")}
+              onClick={() => editor?.chain().focus().toggleStrike().run()}
+            />
+          )}
 
-          <Separator orientation="vertical" className="mx-1.5 h-6" />
+          <Separator orientation="vertical" className="mx-1 md:mx-1.5 h-5 md:h-6" />
 
           <ToolbarButton
-            icon={<Heading1 size={16} />}
+            icon={<Heading1 size={isMobile ? 14 : 16} />}
             tooltip="Heading 1"
             active={editor?.isActive("heading", { level: 1 })}
             onClick={() =>
@@ -591,26 +628,28 @@ export default function DocumentEditor() {
             }
           />
           <ToolbarButton
-            icon={<Heading2 size={16} />}
+            icon={<Heading2 size={isMobile ? 14 : 16} />}
             tooltip="Heading 2"
             active={editor?.isActive("heading", { level: 2 })}
             onClick={() =>
               editor?.chain().focus().toggleHeading({ level: 2 }).run()
             }
           />
-          <ToolbarButton
-            icon={<Heading3 size={16} />}
-            tooltip="Heading 3"
-            active={editor?.isActive("heading", { level: 3 })}
-            onClick={() =>
-              editor?.chain().focus().toggleHeading({ level: 3 }).run()
-            }
-          />
+          {!isMobile && (
+            <ToolbarButton
+              icon={<Heading3 size={16} />}
+              tooltip="Heading 3"
+              active={editor?.isActive("heading", { level: 3 })}
+              onClick={() =>
+                editor?.chain().focus().toggleHeading({ level: 3 }).run()
+              }
+            />
+          )}
 
-          <Separator orientation="vertical" className="mx-1.5 h-6" />
+          <Separator orientation="vertical" className="mx-1 md:mx-1.5 h-5 md:h-6" />
 
           <ToolbarButton
-            icon={<AlignLeft size={16} />}
+            icon={<AlignLeft size={isMobile ? 14 : 16} />}
             tooltip="Align Left"
             active={editor?.isActive({ textAlign: "left" })}
             onClick={() =>
@@ -618,210 +657,173 @@ export default function DocumentEditor() {
             }
           />
           <ToolbarButton
-            icon={<AlignCenter size={16} />}
+            icon={<AlignCenter size={isMobile ? 14 : 16} />}
             tooltip="Align Center"
             active={editor?.isActive({ textAlign: "center" })}
             onClick={() =>
               editor?.chain().focus().setTextAlign("center").run()
             }
           />
-          <ToolbarButton
-            icon={<AlignRight size={16} />}
-            tooltip="Align Right"
-            active={editor?.isActive({ textAlign: "right" })}
-            onClick={() =>
-              editor?.chain().focus().setTextAlign("right").run()
-            }
-          />
+          {!isMobile && (
+            <ToolbarButton
+              icon={<AlignRight size={16} />}
+              tooltip="Align Right"
+              active={editor?.isActive({ textAlign: "right" })}
+              onClick={() =>
+                editor?.chain().focus().setTextAlign("right").run()
+              }
+            />
+          )}
 
-          <Separator orientation="vertical" className="mx-1.5 h-6" />
-
-          <ToolbarButton
-            icon={<Highlighter size={16} />}
-            tooltip="Highlight"
-            active={editor?.isActive("highlight")}
-            onClick={() =>
-              editor?.chain().focus().toggleHighlight().run()
-            }
-          />
-
-          <Separator orientation="vertical" className="mx-1.5 h-6" />
+          <Separator orientation="vertical" className="mx-1 md:mx-1.5 h-5 md:h-6" />
 
           <ToolbarButton
-            icon={<List size={16} />}
+            icon={<List size={isMobile ? 14 : 16} />}
             tooltip="Bullet List"
             active={editor?.isActive("bulletList")}
             onClick={() =>
               editor?.chain().focus().toggleBulletList().run()
             }
           />
-          <ToolbarButton
-            icon={<ListOrdered size={16} />}
-            tooltip="Ordered List"
-            active={editor?.isActive("orderedList")}
-            onClick={() =>
-              editor?.chain().focus().toggleOrderedList().run()
-            }
-          />
+          {!isMobile && (
+            <>
+              <ToolbarButton
+                icon={<ListOrdered size={16} />}
+                tooltip="Ordered List"
+                active={editor?.isActive("orderedList")}
+                onClick={() =>
+                  editor?.chain().focus().toggleOrderedList().run()
+                }
+              />
 
-          <Separator orientation="vertical" className="mx-1.5 h-6" />
+              <Separator orientation="vertical" className="mx-1.5 h-6" />
+
+              <ToolbarButton
+                icon={<Highlighter size={16} />}
+                tooltip="Highlight"
+                active={editor?.isActive("highlight")}
+                onClick={() =>
+                  editor?.chain().focus().toggleHighlight().run()
+                }
+              />
+            </>
+          )}
+
+          <Separator orientation="vertical" className="mx-1 md:mx-1.5 h-5 md:h-6" />
 
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon"
-                className={cn("h-8 w-8", !hasSelection && "opacity-40")}
+                className={cn("h-7 w-7 md:h-8 md:w-8", !hasSelection && "opacity-40")}
                 disabled={!hasSelection}
                 onClick={openCommentDialog}
               >
-                <MessageSquare size={16} />
+                <MessageSquare size={isMobile ? 14 : 16} />
               </Button>
             </TooltipTrigger>
             <TooltipContent>Add Comment</TooltipContent>
           </Tooltip>
         </div>
 
-        <div className="flex flex-1 overflow-hidden">
-          <div className="flex-1 overflow-y-auto">
-            <div className="mx-auto max-w-3xl py-8">
-              <style>{`
-                .ProseMirror {
-                  color: hsl(var(--foreground));
-                  font-size: 16px;
-                  line-height: 1.75;
-                }
-                .ProseMirror h1 {
-                  font-size: 2em;
-                  font-weight: 700;
-                  margin-top: 1.5em;
-                  margin-bottom: 0.5em;
-                  line-height: 1.2;
-                }
-                .ProseMirror h2 {
-                  font-size: 1.5em;
-                  font-weight: 600;
-                  margin-top: 1.25em;
-                  margin-bottom: 0.5em;
-                  line-height: 1.3;
-                }
-                .ProseMirror h3 {
-                  font-size: 1.25em;
-                  font-weight: 600;
-                  margin-top: 1em;
-                  margin-bottom: 0.5em;
-                  line-height: 1.4;
-                }
-                .ProseMirror p {
-                  margin-bottom: 0.75em;
-                }
-                .ProseMirror ul,
-                .ProseMirror ol {
-                  padding-left: 1.5em;
-                  margin-bottom: 0.75em;
-                }
-                .ProseMirror li {
-                  margin-bottom: 0.25em;
-                }
-                .ProseMirror blockquote {
-                  border-left: 3px solid hsl(var(--border));
-                  padding-left: 1em;
-                  margin-left: 0;
-                  color: hsl(var(--muted-foreground));
-                  font-style: italic;
-                }
-                .ProseMirror code {
-                  background: hsl(var(--muted));
-                  padding: 0.15em 0.3em;
-                  border-radius: 4px;
-                  font-size: 0.9em;
-                }
-                .ProseMirror pre {
-                  background: hsl(var(--muted));
-                  padding: 1em;
-                  border-radius: 8px;
-                  overflow-x: auto;
-                  margin-bottom: 0.75em;
-                }
-                .ProseMirror pre code {
-                  background: none;
-                  padding: 0;
-                }
-                .ProseMirror mark {
-                  background-color: hsl(50, 100%, 50%);
-                  color: black;
-                  border-radius: 2px;
-                  padding: 0 2px;
-                }
-                .ProseMirror p.is-editor-empty:first-child::before {
-                  content: attr(data-placeholder);
-                  float: left;
-                  color: hsl(var(--muted-foreground));
-                  pointer-events: none;
-                  height: 0;
-                }
-                .ProseMirror:focus {
-                  outline: none;
-                }
-                .ProseMirror strong {
-                  font-weight: 700;
-                }
-                .ProseMirror em {
-                  font-style: italic;
-                }
-                .ProseMirror s {
-                  text-decoration: line-through;
-                }
-                .ProseMirror u {
-                  text-decoration: underline;
-                }
-                .ProseMirror hr {
-                  border: none;
-                  border-top: 1px solid hsl(var(--border));
-                  margin: 1.5em 0;
-                }
-              `}</style>
-              <EditorContent editor={editor} />
-            </div>
-          </div>
-
-          <div className="w-80 border-l flex flex-col bg-background/50">
-            <div className="px-4 py-3 border-b flex items-center justify-between">
-              <h3 className="text-sm font-semibold">Comments</h3>
-              <Badge variant="secondary">{comments.length}</Badge>
-            </div>
-            <ScrollArea className="flex-1">
-              <div className="p-3 space-y-3">
-                {comments.length === 0 && (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <MessageSquare
-                      size={32}
-                      strokeWidth={1.5}
-                      className="mx-auto mb-2 opacity-50"
-                    />
-                    <p className="text-xs">No comments yet</p>
-                    <p className="text-xs mt-1">
-                      Select text and click the comment button, or run AI Review
-                    </p>
-                  </div>
-                )}
-                {comments.map((comment) => (
-                  <CommentCard
-                    key={comment.id}
-                    comment={comment}
-                    highlightedText={getHighlightedText(comment)}
-                    onCommentClick={handleCommentClick}
-                    onDelete={handleDeleteComment}
-                    onAccept={handleAcceptComment}
-                    onReject={handleRejectComment}
-                    onGetAIResponse={handleGetAIResponse}
-                    actionLoadingId={actionLoadingId}
-                  />
-                ))}
+        {isMobile ? (
+          <div className="flex flex-col flex-1 overflow-hidden">
+            <div className={cn("overflow-y-auto", mobileCommentsOpen ? "flex-1" : "flex-1")}>
+              <div className="mx-auto max-w-3xl py-4">
+                <EditorStyles />
+                <EditorContent editor={editor} />
               </div>
-            </ScrollArea>
+            </div>
+
+            <div className="border-t bg-background z-10">
+              <button
+                onClick={() => setMobileCommentsOpen(!mobileCommentsOpen)}
+                className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-muted/30 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <MessageSquare size={14} className="text-muted-foreground" />
+                  <span className="text-sm font-medium">Comments</span>
+                  <Badge variant="secondary" className="text-xs">{comments.length}</Badge>
+                </div>
+                {mobileCommentsOpen ? <ChevronDown size={16} className="text-muted-foreground" /> : <ChevronUp size={16} className="text-muted-foreground" />}
+              </button>
+
+              {mobileCommentsOpen && (
+                <ScrollArea className="h-[40vh] border-t">
+                  <div className="p-3 space-y-3">
+                    {comments.length === 0 && (
+                      <div className="text-center py-6 text-muted-foreground">
+                        <MessageSquare size={28} strokeWidth={1.5} className="mx-auto mb-2 opacity-50" />
+                        <p className="text-xs">No comments yet</p>
+                        <p className="text-xs mt-1">Select text and add a comment, or run an AI agent</p>
+                      </div>
+                    )}
+                    {comments.map((comment) => (
+                      <CommentCard
+                        key={comment.id}
+                        comment={comment}
+                        highlightedText={getHighlightedText(comment)}
+                        onCommentClick={(c) => { handleCommentClick(c); setMobileCommentsOpen(false); }}
+                        onDelete={handleDeleteComment}
+                        onAccept={handleAcceptComment}
+                        onReject={handleRejectComment}
+                        onGetAIResponse={handleGetAIResponse}
+                        actionLoadingId={actionLoadingId}
+                      />
+                    ))}
+                  </div>
+                </ScrollArea>
+              )}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex flex-1 overflow-hidden">
+            <div className="flex-1 overflow-y-auto">
+              <div className="mx-auto max-w-3xl py-8">
+                <EditorStyles />
+                <EditorContent editor={editor} />
+              </div>
+            </div>
+
+            <div className="w-80 border-l flex flex-col bg-background/50">
+              <div className="px-4 py-3 border-b flex items-center justify-between">
+                <h3 className="text-sm font-semibold">Comments</h3>
+                <Badge variant="secondary">{comments.length}</Badge>
+              </div>
+              <ScrollArea className="flex-1">
+                <div className="p-3 space-y-3">
+                  {comments.length === 0 && (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <MessageSquare
+                        size={32}
+                        strokeWidth={1.5}
+                        className="mx-auto mb-2 opacity-50"
+                      />
+                      <p className="text-xs">No comments yet</p>
+                      <p className="text-xs mt-1">
+                        Select text and click the comment button, or run AI Review
+                      </p>
+                    </div>
+                  )}
+                  {comments.map((comment) => (
+                    <CommentCard
+                      key={comment.id}
+                      comment={comment}
+                      highlightedText={getHighlightedText(comment)}
+                      onCommentClick={handleCommentClick}
+                      onDelete={handleDeleteComment}
+                      onAccept={handleAcceptComment}
+                      onReject={handleRejectComment}
+                      onGetAIResponse={handleGetAIResponse}
+                      actionLoadingId={actionLoadingId}
+                    />
+                  ))}
+                </div>
+              </ScrollArea>
+            </div>
+          </div>
+        )}
 
         <Dialog open={commentDialogOpen} onOpenChange={setCommentDialogOpen}>
           <DialogContent className="sm:max-w-md">
@@ -887,6 +889,121 @@ function ToolbarButton({
       </TooltipTrigger>
       <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>
+  );
+}
+
+function EditorStyles() {
+  return (
+    <style>{`
+      .ProseMirror {
+        color: hsl(var(--foreground));
+        font-size: 16px;
+        line-height: 1.75;
+      }
+      .ProseMirror h1 {
+        font-size: 2em;
+        font-weight: 700;
+        margin-top: 1.5em;
+        margin-bottom: 0.5em;
+        line-height: 1.2;
+      }
+      .ProseMirror h2 {
+        font-size: 1.5em;
+        font-weight: 600;
+        margin-top: 1.25em;
+        margin-bottom: 0.5em;
+        line-height: 1.3;
+      }
+      .ProseMirror h3 {
+        font-size: 1.25em;
+        font-weight: 600;
+        margin-top: 1em;
+        margin-bottom: 0.5em;
+        line-height: 1.4;
+      }
+      .ProseMirror p {
+        margin-bottom: 0.75em;
+      }
+      .ProseMirror ul,
+      .ProseMirror ol {
+        padding-left: 1.5em;
+        margin-bottom: 0.75em;
+      }
+      .ProseMirror li {
+        margin-bottom: 0.25em;
+      }
+      .ProseMirror blockquote {
+        border-left: 3px solid hsl(var(--border));
+        padding-left: 1em;
+        margin-left: 0;
+        color: hsl(var(--muted-foreground));
+        font-style: italic;
+      }
+      .ProseMirror code {
+        background: hsl(var(--muted));
+        padding: 0.15em 0.3em;
+        border-radius: 4px;
+        font-size: 0.9em;
+      }
+      .ProseMirror pre {
+        background: hsl(var(--muted));
+        padding: 1em;
+        border-radius: 8px;
+        overflow-x: auto;
+        margin-bottom: 0.75em;
+      }
+      .ProseMirror pre code {
+        background: none;
+        padding: 0;
+      }
+      .ProseMirror mark {
+        background-color: hsl(50, 100%, 50%);
+        color: black;
+        border-radius: 2px;
+        padding: 0 2px;
+      }
+      .ProseMirror p.is-editor-empty:first-child::before {
+        content: attr(data-placeholder);
+        float: left;
+        color: hsl(var(--muted-foreground));
+        pointer-events: none;
+        height: 0;
+      }
+      .ProseMirror:focus {
+        outline: none;
+      }
+      .ProseMirror strong {
+        font-weight: 700;
+      }
+      .ProseMirror em {
+        font-style: italic;
+      }
+      .ProseMirror s {
+        text-decoration: line-through;
+      }
+      .ProseMirror u {
+        text-decoration: underline;
+      }
+      .ProseMirror hr {
+        border: none;
+        border-top: 1px solid hsl(var(--border));
+        margin: 1.5em 0;
+      }
+      @media (max-width: 767px) {
+        .ProseMirror {
+          font-size: 15px;
+          padding: 12px 16px !important;
+          min-height: 300px !important;
+        }
+      }
+      .scrollbar-none::-webkit-scrollbar {
+        display: none;
+      }
+      .scrollbar-none {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+    `}</style>
   );
 }
 
