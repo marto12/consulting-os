@@ -5,17 +5,19 @@ import { storage } from "../storage";
 import { runScenarioTool, type ScenarioInput, type ScenarioOutput } from "./scenario-tool";
 import { DEFAULT_PROMPTS, type ProgressCallback } from "./index";
 
-const hasApiKey = !!(
-  process.env.AI_INTEGRATIONS_OPENAI_API_KEY &&
-  process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
-);
+function hasApiKey(): boolean {
+  return !!(
+    process.env.AI_INTEGRATIONS_OPENAI_API_KEY &&
+    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+  );
+}
 
 const DEFAULT_MODEL = "gpt-5-nano";
 
 function createLLM(model?: string, maxTokens?: number): ChatOpenAI | null {
-  if (!hasApiKey) return null;
+  if (!hasApiKey()) return null;
   return new ChatOpenAI({
-    openAIApiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+    apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
     configuration: {
       baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
     },
@@ -110,14 +112,14 @@ export const ConsultingState = Annotation.Root({
   targetStep: Annotation<string>,
   onProgress: Annotation<ProgressCallback>,
 
-  projectDefinition: Annotation<any>({ reducer: (_, b) => b, default: () => null }),
+  projectDefinitionResult: Annotation<any>({ reducer: (_, b) => b, default: () => null }),
   issues: Annotation<any[]>({ reducer: (_, b) => b, default: () => [] }),
   criticLog: Annotation<any[]>({ reducer: (_, b) => b, default: () => [] }),
   criticIteration: Annotation<number>({ reducer: (_, b) => b, default: () => 0 }),
-  hypotheses: Annotation<any>({ reducer: (_, b) => b, default: () => null }),
+  hypothesesResult: Annotation<any>({ reducer: (_, b) => b, default: () => null }),
   executionResults: Annotation<any[]>({ reducer: (_, b) => b, default: () => [] }),
-  summary: Annotation<any>({ reducer: (_, b) => b, default: () => null }),
-  presentation: Annotation<any>({ reducer: (_, b) => b, default: () => null }),
+  summaryResult: Annotation<any>({ reducer: (_, b) => b, default: () => null }),
+  presentationResult: Annotation<any>({ reducer: (_, b) => b, default: () => null }),
 
   deliverableContent: Annotation<any>({ reducer: (_, b) => b, default: () => null }),
   deliverableTitle: Annotation<string>({ reducer: (_, b) => b, default: () => "" }),
@@ -146,7 +148,7 @@ async function projectDefinitionNode(state: ConsultingStateType): Promise<Partia
   const progress = state.onProgress;
   progress("Starting Project Definition agent...", "status");
 
-  if (!hasApiKey) {
+  if (!hasApiKey()) {
     progress("Running in mock mode (no API key configured)", "status");
     const result = {
       decision_statement: `Determine the optimal strategic approach to: ${state.objective}`,
@@ -192,7 +194,7 @@ async function projectDefinitionNode(state: ConsultingStateType): Promise<Partia
       ],
     };
     progress("Analysis complete. Generated project definition with " + result.success_metrics.length + " success metrics.", "status");
-    return { projectDefinition: result, deliverableContent: result, deliverableTitle: "Project Definition" };
+    return { projectDefinitionResult: result, deliverableContent: result, deliverableTitle: "Project Definition" };
   }
 
   const config = await getAgentConfig("project_definition");
@@ -202,14 +204,14 @@ async function projectDefinitionNode(state: ConsultingStateType): Promise<Partia
   progress("LLM response received, parsing output...", "llm");
   const parsed = extractJson(raw);
   progress("Analysis complete. Generated project definition with " + (parsed.success_metrics?.length || 0) + " success metrics.", "status");
-  return { projectDefinition: parsed, deliverableContent: parsed, deliverableTitle: "Project Definition" };
+  return { projectDefinitionResult: parsed, deliverableContent: parsed, deliverableTitle: "Project Definition" };
 }
 
 async function issuesTreeNode(state: ConsultingStateType): Promise<Partial<ConsultingStateType>> {
   const progress = state.onProgress;
   progress("Starting Issues Tree agent...", "status");
 
-  if (!hasApiKey) {
+  if (!hasApiKey()) {
     progress("Running in mock mode (no API key configured)", "status");
     const mockIssues = [
       { id: "1", parentId: null, text: "Market Entry Strategy", priority: "high" },
@@ -266,7 +268,7 @@ async function meceCriticNode(state: ConsultingStateType): Promise<Partial<Consu
   const iteration = state.criticIteration;
   progress(`Running MECE Critic evaluation (iteration ${iteration + 1})...`, "critic");
 
-  if (!hasApiKey) {
+  if (!hasApiKey()) {
     const mockCritic = {
       verdict: "approved" as const,
       scores: {
@@ -342,7 +344,7 @@ async function hypothesisNode(state: ConsultingStateType): Promise<Partial<Consu
   const latestVersion = issueNodesData[0]?.version || 1;
   const latestIssues = issueNodesData.filter((n) => n.version === latestVersion);
 
-  if (!hasApiKey) {
+  if (!hasApiKey()) {
     progress("Running in mock mode (no API key configured)", "status");
     const topIssues = latestIssues.slice(0, 3);
     const hyps = topIssues.map((issue, i) => ({
@@ -366,7 +368,7 @@ async function hypothesisNode(state: ConsultingStateType): Promise<Partial<Consu
     }));
     progress("Analysis complete. Generated " + hyps.length + " hypotheses.", "status");
     return {
-      hypotheses: { hypotheses: hyps, analysisPlan: plans },
+      hypothesesResult: { hypotheses: hyps, analysisPlan: plans },
       deliverableContent: { hypotheses: hyps, analysisPlan: plans },
       deliverableTitle: "Hypotheses & Analysis Plan",
     };
@@ -380,7 +382,7 @@ async function hypothesisNode(state: ConsultingStateType): Promise<Partial<Consu
   const parsed = extractJson(raw);
   progress("Analysis complete. Generated " + (parsed.hypotheses?.length || 0) + " hypotheses.", "status");
   return {
-    hypotheses: parsed,
+    hypothesesResult: parsed,
     deliverableContent: parsed,
     deliverableTitle: "Hypotheses & Analysis Plan",
   };
@@ -425,7 +427,7 @@ async function summaryNode(state: ConsultingStateType): Promise<Partial<Consulti
   const latestVersion = hyps[0]?.version || 1;
   const latestHyps = hyps.filter((h) => h.version === latestVersion);
 
-  if (!hasApiKey) {
+  if (!hasApiKey()) {
     progress("Running in mock mode (no API key configured)", "status");
     const bullets = latestHyps
       .map((h, i) => {
@@ -440,7 +442,7 @@ async function summaryNode(state: ConsultingStateType): Promise<Partial<Consulti
     const summaryText = `# Executive Summary\n\n## Objective\n${state.objective}\n\n## Key Findings\n${bullets}\n\n## Recommendation\nBased on scenario analysis across baseline, optimistic, and pessimistic cases, the proposed strategy shows positive expected returns. The risk-adjusted analysis suggests proceeding with a phased implementation approach, prioritizing the highest-NPV initiatives first.\n\n## Next Steps\n1. Validate assumptions with stakeholder interviews\n2. Develop detailed implementation roadmap\n3. Establish KPI tracking framework\n4. Begin Phase 1 execution within 30 days`;
     progress("Analysis complete. Generated executive summary.", "status");
     return {
-      summary: { summaryText },
+      summaryResult: { summaryText },
       deliverableContent: { summaryText },
       deliverableTitle: "Executive Summary",
     };
@@ -460,7 +462,7 @@ async function summaryNode(state: ConsultingStateType): Promise<Partial<Consulti
   progress("LLM response received, parsing output...", "llm");
   progress("Analysis complete. Generated executive summary.", "status");
   return {
-    summary: { summaryText: summaryText || "Summary generation failed." },
+    summaryResult: { summaryText: summaryText || "Summary generation failed." },
     deliverableContent: { summaryText: summaryText || "Summary generation failed." },
     deliverableTitle: "Executive Summary",
   };
@@ -480,7 +482,7 @@ async function presentationNode(state: ConsultingStateType): Promise<Partial<Con
   const project = await storage.getProject(state.projectId);
   const projectName = project?.name || "Consulting Analysis";
 
-  if (!hasApiKey) {
+  if (!hasApiKey()) {
     progress("Running in mock mode (no API key configured)", "status");
     const mockSlides = [
       { slideIndex: 0, layout: "title_slide", title: projectName, subtitle: "Strategic Analysis & Recommendations", bodyJson: {}, notesText: "Welcome and introductions" },
@@ -495,7 +497,7 @@ async function presentationNode(state: ConsultingStateType): Promise<Partial<Con
     ];
     progress("Analysis complete. Generated " + mockSlides.length + " slides.", "status");
     return {
-      presentation: { slides: mockSlides },
+      presentationResult: { slides: mockSlides },
       deliverableContent: { slides: mockSlides },
       deliverableTitle: "Presentation Deck",
     };
@@ -520,7 +522,7 @@ async function presentationNode(state: ConsultingStateType): Promise<Partial<Con
   const parsed = extractJson(raw);
   progress("Analysis complete. Generated " + (parsed.slides?.length || 0) + " slides.", "status");
   return {
-    presentation: parsed,
+    presentationResult: parsed,
     deliverableContent: parsed,
     deliverableTitle: "Presentation Deck",
   };
@@ -616,7 +618,7 @@ export async function refineWithLangGraph(
 ): Promise<any> {
   onProgress("Processing your feedback...", "progress");
 
-  if (!hasApiKey) {
+  if (!hasApiKey()) {
     onProgress("Applying feedback (mock mode)...", "progress");
     return currentContent;
   }
