@@ -333,6 +333,18 @@ export const vaultChunks = pgTable("vault_chunks", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+export const charts = pgTable("charts", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").references(() => projects.id, { onDelete: "set null" }),
+  datasetId: integer("dataset_id").references(() => datasets.id, { onDelete: "set null" }),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  chartType: text("chart_type").notNull().default("bar"),
+  chartConfig: jsonb("chart_config").notNull().default(sql`'{}'::jsonb`),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const insertProjectSchema = createInsertSchema(projects).omit({
   id: true,
   stage: true,
@@ -367,3 +379,4 @@ export type Document = typeof documents.$inferSelect;
 export type DocumentComment = typeof documentComments.$inferSelect;
 export type VaultFile = typeof vaultFiles.$inferSelect;
 export type VaultChunk = typeof vaultChunks.$inferSelect;
+export type Chart = typeof charts.$inferSelect;
