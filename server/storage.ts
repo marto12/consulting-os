@@ -22,6 +22,8 @@ import {
   stepChatMessages,
   conversations,
   messages,
+  documents,
+  documentComments,
   type Project,
   type InsertProject,
   type StepChatMessage,
@@ -42,6 +44,8 @@ import {
   type WorkflowInstance,
   type WorkflowInstanceStep,
   type Deliverable,
+  type Document,
+  type DocumentComment,
 } from "@shared/schema";
 
 export const storage = {
@@ -717,5 +721,84 @@ export const storage = {
 
   async clearStepChatMessages(stepId: number): Promise<void> {
     await db.delete(stepChatMessages).where(eq(stepChatMessages.stepId, stepId));
+  },
+
+  async createDocument(data: { projectId?: number; title?: string; content?: string; contentJson?: any }): Promise<Document> {
+    const [doc] = await db
+      .insert(documents)
+      .values({
+        projectId: data.projectId || null,
+        title: data.title || "Untitled Document",
+        content: data.content || "",
+        contentJson: data.contentJson || null,
+      })
+      .returning();
+    return doc;
+  },
+
+  async listDocuments(projectId?: number): Promise<Document[]> {
+    if (projectId) {
+      return db.select().from(documents).where(eq(documents.projectId, projectId)).orderBy(desc(documents.updatedAt));
+    }
+    return db.select().from(documents).orderBy(desc(documents.updatedAt));
+  },
+
+  async getDocument(id: number): Promise<Document | undefined> {
+    const [doc] = await db.select().from(documents).where(eq(documents.id, id));
+    return doc;
+  },
+
+  async updateDocument(id: number, data: { title?: string; content?: string; contentJson?: any }): Promise<Document> {
+    const [doc] = await db
+      .update(documents)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(documents.id, id))
+      .returning();
+    return doc;
+  },
+
+  async deleteDocument(id: number): Promise<void> {
+    await db.delete(documents).where(eq(documents.id, id));
+  },
+
+  async createComment(data: { documentId: number; from: number; to: number; content: string; type?: string; proposedText?: string; aiReply?: string }): Promise<DocumentComment> {
+    const [comment] = await db
+      .insert(documentComments)
+      .values({
+        documentId: data.documentId,
+        from: data.from,
+        to: data.to,
+        content: data.content,
+        type: data.type || "user",
+        proposedText: data.proposedText || null,
+        aiReply: data.aiReply || null,
+      })
+      .returning();
+    return comment;
+  },
+
+  async listComments(documentId: number): Promise<DocumentComment[]> {
+    return db
+      .select()
+      .from(documentComments)
+      .where(eq(documentComments.documentId, documentId))
+      .orderBy(asc(documentComments.createdAt));
+  },
+
+  async updateComment(id: number, data: { status?: string; proposedText?: string; aiReply?: string; resolvedAt?: Date }): Promise<DocumentComment> {
+    const [comment] = await db
+      .update(documentComments)
+      .set(data)
+      .where(eq(documentComments.id, id))
+      .returning();
+    return comment;
+  },
+
+  async deleteComment(id: number): Promise<void> {
+    await db.delete(documentComments).where(eq(documentComments.id, id));
+  },
+
+  async deleteDocumentComments(documentId: number): Promise<void> {
+    await db.delete(documentComments).where(eq(documentComments.documentId, documentId));
   },
 };
