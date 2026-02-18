@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
+import multer from "multer";
 import { storage } from "./storage";
 import { registerChatRoutes } from "./replit_integrations/chat/routes";
 import {
@@ -10,6 +11,12 @@ import {
 } from "./agents";
 import { runWorkflowStep, refineWithLangGraph } from "./agents/workflow-graph";
 import { reviewDocument, actionComment, executiveReviewDocument, spotFactCheckCandidates, runFactCheck } from "./agents/document-agents";
+import { processVaultFile, retrieveRelevantContext, formatRAGContext } from "./vault-rag";
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
 
 const STAGE_ORDER = [
   "created",
@@ -1023,6 +1030,112 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const results = await runFactCheck(doc, acceptedCandidates);
       res.json(results);
     } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post("/api/projects/:projectId/vault/upload", upload.single("file"), async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.projectId);
+      const project = await storage.getProject(projectId);
+      if (!project) return res.status(404).json({ error: "Project not found" });
+
+      const file = (req as any).file;
+      if (!file) return res.status(400).json({ error: "No file uploaded" });
+
+      const storagePath = `vault/${projectId}/${Date.now()}_${file.originalname}`;
+
+      const vaultFile = await storage.createVaultFile({
+        projectId,
+        fileName: file.originalname,
+        mimeType: file.mimetype,
+        fileSize: file.size,
+        storagePath,
+      });
+
+      processVaultFile(vaultFile.id, file.buffer).catch((err) =>
+        console.error("Background processing failed:", err)
+      );
+
+      res.status(201).json(vaultFile);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/projects/:projectId/vault", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.projectId);
+      const search = req.query.search as string | undefined;
+      const files = await storage.listVaultFiles(projectId, search);
+      res.json(files);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/projects/:projectId/vault/:fileId", async (req: Request, res: Response) => {
+    try {
+      const file = await storage.getVaultFile(Number(req.params.fileId));
+      if (!file || file.projectId !== Number(req.params.projectId)) {
+        return res.status(404).json({ error: "File not found" });
+      }
+      res.json(file);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/projects/:projectId/vault/:fileId/download", async (req: Request, res: Response) => {
+    try {
+      const file = await storage.getVaultFile(Number(req.params.fileId));
+      if (!file || file.projectId !== Number(req.params.projectId)) {
+        return res.status(404).json({ error: "File not found" });
+      }
+      res.setHeader("Content-Type", file.mimeType);
+      res.setHeader("Content-Disposition", `attachment; filename="${file.fileName}"`);
+      res.send(file.extractedText || "File content not available for download in this mode.");
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/projects/:projectId/vault/:fileId", async (req: Request, res: Response) => {
+    try {
+      const file = await storage.getVaultFile(Number(req.params.fileId));
+      if (!file || file.projectId !== Number(req.params.projectId)) {
+        return res.status(404).json({ error: "File not found" });
+      }
+      await storage.deleteVaultChunksByFile(file.id);
+      await storage.deleteVaultFile(file.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/projects/:projectId/vault/:fileId/chunks", async (req: Request, res: Response) => {
+    try {
+      const file = await storage.getVaultFile(Number(req.params.fileId));
+      if (!file || file.projectId !== Number(req.params.projectId)) {
+        return res.status(404).json({ error: "File not found" });
+      }
+      const chunks = await storage.getVaultChunksByFile(file.id);
+      res.json(chunks.map((c) => ({ id: c.id, chunkIndex: c.chunkIndex, content: c.content, tokenCount: c.tokenCount })));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/projects/:projectId/vault/query", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.projectId);
+      const { query, maxChunks } = req.body;
+      if (!query) return res.status(400).json({ error: "query is required" });
+
+      const results = await retrieveRelevantContext(projectId, query, maxChunks || 10);
+      res.json({ results, formattedContext: formatRAGContext(results) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   registerChatRoutes(app);

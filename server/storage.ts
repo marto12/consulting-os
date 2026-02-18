@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, desc, and, asc } from "drizzle-orm";
+import { eq, desc, and, asc, ilike, sql } from "drizzle-orm";
 import {
   projects,
   issueNodes,
@@ -24,6 +24,8 @@ import {
   messages,
   documents,
   documentComments,
+  vaultFiles,
+  vaultChunks,
   type Project,
   type InsertProject,
   type StepChatMessage,
@@ -46,6 +48,8 @@ import {
   type Deliverable,
   type Document,
   type DocumentComment,
+  type VaultFile,
+  type VaultChunk,
 } from "@shared/schema";
 
 export const storage = {
@@ -800,5 +804,101 @@ export const storage = {
 
   async deleteDocumentComments(documentId: number): Promise<void> {
     await db.delete(documentComments).where(eq(documentComments.documentId, documentId));
+  },
+
+  async createVaultFile(data: {
+    projectId: number;
+    fileName: string;
+    mimeType: string;
+    fileSize: number;
+    storagePath: string;
+    extractedText?: string;
+    embeddingStatus?: string;
+    metadata?: any;
+  }): Promise<VaultFile> {
+    const [file] = await db
+      .insert(vaultFiles)
+      .values({
+        projectId: data.projectId,
+        fileName: data.fileName,
+        mimeType: data.mimeType,
+        fileSize: data.fileSize,
+        storagePath: data.storagePath,
+        extractedText: data.extractedText || null,
+        embeddingStatus: data.embeddingStatus || "pending",
+        metadata: data.metadata || null,
+      })
+      .returning();
+    return file;
+  },
+
+  async listVaultFiles(projectId: number, search?: string): Promise<VaultFile[]> {
+    if (search) {
+      return db
+        .select()
+        .from(vaultFiles)
+        .where(and(eq(vaultFiles.projectId, projectId), ilike(vaultFiles.fileName, `%${search}%`)))
+        .orderBy(desc(vaultFiles.createdAt));
+    }
+    return db
+      .select()
+      .from(vaultFiles)
+      .where(eq(vaultFiles.projectId, projectId))
+      .orderBy(desc(vaultFiles.createdAt));
+  },
+
+  async getVaultFile(id: number): Promise<VaultFile | undefined> {
+    const [file] = await db.select().from(vaultFiles).where(eq(vaultFiles.id, id));
+    return file;
+  },
+
+  async updateVaultFile(id: number, data: Partial<{
+    extractedText: string;
+    embeddingStatus: string;
+    chunkCount: number;
+    metadata: any;
+  }>): Promise<VaultFile> {
+    const [file] = await db
+      .update(vaultFiles)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(vaultFiles.id, id))
+      .returning();
+    return file;
+  },
+
+  async deleteVaultFile(id: number): Promise<void> {
+    await db.delete(vaultFiles).where(eq(vaultFiles.id, id));
+  },
+
+  async createVaultChunks(chunks: {
+    fileId: number;
+    projectId: number;
+    chunkIndex: number;
+    content: string;
+    embedding?: any;
+    tokenCount?: number;
+  }[]): Promise<VaultChunk[]> {
+    if (chunks.length === 0) return [];
+    return db.insert(vaultChunks).values(chunks).returning();
+  },
+
+  async getVaultChunksByFile(fileId: number): Promise<VaultChunk[]> {
+    return db
+      .select()
+      .from(vaultChunks)
+      .where(eq(vaultChunks.fileId, fileId))
+      .orderBy(asc(vaultChunks.chunkIndex));
+  },
+
+  async getVaultChunksByProject(projectId: number): Promise<VaultChunk[]> {
+    return db
+      .select()
+      .from(vaultChunks)
+      .where(eq(vaultChunks.projectId, projectId))
+      .orderBy(asc(vaultChunks.createdAt));
+  },
+
+  async deleteVaultChunksByFile(fileId: number): Promise<void> {
+    await db.delete(vaultChunks).where(eq(vaultChunks.fileId, fileId));
   },
 };
