@@ -9,6 +9,7 @@ import {
   type ProgressCallback,
 } from "./agents";
 import { runWorkflowStep, refineWithLangGraph } from "./agents/workflow-graph";
+import { reviewDocument, actionComment } from "./agents/document-agents";
 
 const STAGE_ORDER = [
   "created",
@@ -965,7 +966,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const doc = await storage.getDocument(Number(req.params.id));
       if (!doc) return res.status(404).json({ error: "Document not found" });
 
-      const { reviewDocument } = await import("./agents/document-agents");
       const comments = await reviewDocument(doc);
       res.json(comments);
     } catch (err: any) { res.status(500).json({ error: err.message }); }
@@ -981,7 +981,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const comment = comments.find(c => c.id === commentId);
       if (!comment) return res.status(404).json({ error: "Comment not found" });
 
-      const { actionComment } = await import("./agents/document-agents");
       const result = await actionComment(doc, comment);
       res.json(result);
     } catch (err: any) { res.status(500).json({ error: err.message }); }
