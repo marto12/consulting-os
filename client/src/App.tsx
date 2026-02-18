@@ -18,6 +18,7 @@ import {
   CreditCard,
   Bell,
   LogOut,
+  FileText,
 } from "lucide-react";
 import { cn } from "./lib/utils";
 import { Button } from "./components/ui/button";
@@ -58,6 +59,8 @@ import Agents from "./pages/Agents";
 import AgentDetail from "./pages/AgentDetail";
 import DataModels from "./pages/DataModels";
 import SettingsPage from "./pages/Settings";
+import DocumentEditor from "./pages/DocumentEditor";
+import Documents from "./pages/Documents";
 import CommandPalette from "./components/CommandPalette";
 import { ProjectProvider, useProjectContext } from "./lib/project-context";
 
@@ -79,6 +82,12 @@ const NAV_SECTIONS = [
     label: "Agents",
     items: [
       { to: "/agents", icon: Bot, label: "All Agents" },
+    ],
+  },
+  {
+    label: "Documents",
+    items: [
+      { to: "/documents", icon: FileText, label: "Word Processor" },
     ],
   },
   {
@@ -199,7 +208,8 @@ function AppSidebar() {
                     location.pathname === item.to ||
                     (item.to === "/projects" && location.pathname.startsWith("/project/")) ||
                     (item.to === "/agents" && location.pathname.startsWith("/agent/")) ||
-                    (item.to === "/workflows" && location.pathname.startsWith("/workflow/"));
+                    (item.to === "/workflows" && location.pathname.startsWith("/workflow/")) ||
+                    (item.to === "/documents" && location.pathname.startsWith("/editor"));
 
                   return (
                     <SidebarMenuItem key={item.to}>
@@ -347,6 +357,9 @@ export default function App() {
           <Route path="/agent/:key" element={<AppLayout><AgentDetail /></AppLayout>} />
           <Route path="/data" element={<AppLayout><DataModels /></AppLayout>} />
           <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
+          <Route path="/documents" element={<AppLayout><Documents /></AppLayout>} />
+          <Route path="/editor" element={<FullWidthLayout><DocumentEditor /></FullWidthLayout>} />
+          <Route path="/editor/:id" element={<FullWidthLayout><DocumentEditor /></FullWidthLayout>} />
           <Route path="/" element={<Navigate to="/projects" replace />} />
           <Route path="*" element={<Navigate to="/projects" replace />} />
         </Routes>
