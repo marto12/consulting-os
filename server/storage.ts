@@ -27,6 +27,7 @@ import {
   vaultFiles,
   vaultChunks,
   datasetRows,
+  charts,
   type Project,
   type InsertProject,
   type StepChatMessage,
@@ -51,6 +52,7 @@ import {
   type DocumentComment,
   type VaultFile,
   type VaultChunk,
+  type Chart,
 } from "@shared/schema";
 
 export const storage = {
@@ -958,5 +960,64 @@ export const storage = {
 
   async deleteVaultChunksByFile(fileId: number): Promise<void> {
     await db.delete(vaultChunks).where(eq(vaultChunks.fileId, fileId));
+  },
+
+  async createChart(data: {
+    projectId?: number;
+    datasetId?: number;
+    name: string;
+    description?: string;
+    chartType: string;
+    chartConfig: any;
+  }): Promise<Chart> {
+    const [chart] = await db
+      .insert(charts)
+      .values({
+        projectId: data.projectId || null,
+        datasetId: data.datasetId || null,
+        name: data.name,
+        description: data.description || "",
+        chartType: data.chartType,
+        chartConfig: data.chartConfig,
+      })
+      .returning();
+    return chart;
+  },
+
+  async listCharts(): Promise<Chart[]> {
+    return db.select().from(charts).orderBy(desc(charts.createdAt));
+  },
+
+  async getChart(id: number): Promise<Chart | undefined> {
+    const [chart] = await db.select().from(charts).where(eq(charts.id, id));
+    return chart;
+  },
+
+  async updateChart(id: number, data: Partial<{
+    name: string;
+    description: string;
+    chartType: string;
+    chartConfig: any;
+    datasetId: number | null;
+    projectId: number | null;
+  }>): Promise<Chart> {
+    const [chart] = await db
+      .update(charts)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(charts.id, id))
+      .returning();
+    return chart;
+  },
+
+  async deleteChart(id: number): Promise<void> {
+    await db.delete(charts).where(eq(charts.id, id));
+  },
+
+  async getChartsByProject(projectId: number): Promise<Chart[]> {
+    return db
+      .select()
+      .from(charts)
+      .where(eq(charts.projectId, projectId))
+      .orderBy(desc(charts.createdAt));
   },
 };

@@ -12,6 +12,10 @@ import {
 import { runWorkflowStep, refineWithLangGraph } from "./agents/workflow-graph";
 import { reviewDocument, actionComment, executiveReviewDocument, spotFactCheckCandidates, runFactCheck, narrativeReviewDocument } from "./agents/document-agents";
 import { processVaultFile, retrieveRelevantContext, formatRAGContext } from "./vault-rag";
+import { generateChartSpec } from "./agents/chart-agent";
+import { db } from "./db";
+import { datasetRows } from "@shared/schema";
+import { eq, asc } from "drizzle-orm";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -1265,6 +1269,127 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const results = await retrieveRelevantContext(projectId, query, maxChunks || 10);
       res.json({ results, formattedContext: formatRAGContext(results) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Charts ──
+  app.get("/api/charts", async (_req: Request, res: Response) => {
+    try {
+      const allCharts = await storage.listCharts();
+      res.json(allCharts);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/charts/:id", async (req: Request, res: Response) => {
+    try {
+      const chart = await storage.getChart(Number(req.params.id));
+      if (!chart) return res.status(404).json({ error: "Chart not found" });
+      res.json(chart);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/charts", async (req: Request, res: Response) => {
+    try {
+      const { projectId, datasetId, name, description, chartType, chartConfig } = req.body;
+      if (!name || !chartType) return res.status(400).json({ error: "name and chartType are required" });
+      const chart = await storage.createChart({
+        projectId: projectId || undefined,
+        datasetId: datasetId || undefined,
+        name,
+        description,
+        chartType,
+        chartConfig: chartConfig || {},
+      });
+      res.status(201).json(chart);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/charts/:id", async (req: Request, res: Response) => {
+    try {
+      const chart = await storage.getChart(Number(req.params.id));
+      if (!chart) return res.status(404).json({ error: "Chart not found" });
+      const updated = await storage.updateChart(chart.id, req.body);
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/charts/:id", async (req: Request, res: Response) => {
+    try {
+      await storage.deleteChart(Number(req.params.id));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/charts/:id/data", async (req: Request, res: Response) => {
+    try {
+      const chart = await storage.getChart(Number(req.params.id));
+      if (!chart) return res.status(404).json({ error: "Chart not found" });
+      if (!chart.datasetId) return res.json({ chart, rows: [] });
+
+      const limit = Number(req.query.limit) || 1000;
+      const rows = await db
+        .select()
+        .from(datasetRows)
+        .where(eq(datasetRows.datasetId, chart.datasetId))
+        .orderBy(asc(datasetRows.rowIndex))
+        .limit(limit);
+      res.json({ chart, rows: rows.map(r => r.data) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/charts/generate", async (req: Request, res: Response) => {
+    try {
+      const { datasetId, prompt, projectId } = req.body;
+      if (!datasetId || !prompt) return res.status(400).json({ error: "datasetId and prompt are required" });
+
+      const dataset = await storage.getDataset(Number(datasetId));
+      if (!dataset) return res.status(404).json({ error: "Dataset not found" });
+
+      const rows = await db
+        .select()
+        .from(datasetRows)
+        .where(eq(datasetRows.datasetId, dataset.id))
+        .orderBy(asc(datasetRows.rowIndex))
+        .limit(50);
+
+      const sampleData = rows.map(r => r.data as Record<string, any>);
+      const columns = sampleData.length > 0 ? Object.keys(sampleData[0]) : [];
+
+      const spec = await generateChartSpec(dataset.name, columns, sampleData, prompt);
+
+      const chart = await storage.createChart({
+        projectId: projectId || undefined,
+        datasetId: dataset.id,
+        name: spec.title || "Untitled Chart",
+        description: spec.description || "",
+        chartType: spec.chartType,
+        chartConfig: spec,
+      });
+
+      res.status(201).json({ chart, spec });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/projects/:id/charts", async (req: Request, res: Response) => {
+    try {
+      const projectCharts = await storage.getChartsByProject(Number(req.params.id));
+      res.json(projectCharts);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
