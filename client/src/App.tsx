@@ -61,6 +61,7 @@ import DataModels from "./pages/DataModels";
 import SettingsPage from "./pages/Settings";
 import DocumentEditor from "./pages/DocumentEditor";
 import Documents from "./pages/Documents";
+import WorkflowEditor from "./pages/WorkflowEditor";
 import CommandPalette from "./components/CommandPalette";
 import { ProjectProvider, useProjectContext } from "./lib/project-context";
 
@@ -353,6 +354,8 @@ export default function App() {
           <Route path="/project/:id" element={<AppLayout><ProjectDetail /></AppLayout>} />
           <Route path="/project/:id/workflow/:stepId" element={<FullWidthLayout><WorkflowStepWorkspace /></FullWidthLayout>} />
           <Route path="/workflows" element={<AppLayout><Workflows /></AppLayout>} />
+          <Route path="/workflow/new" element={<FullWidthLayout><WorkflowEditor /></FullWidthLayout>} />
+          <Route path="/workflow/:id" element={<FullWidthLayout><WorkflowEditor /></FullWidthLayout>} />
           <Route path="/agents" element={<AppLayout><Agents /></AppLayout>} />
           <Route path="/agent/:key" element={<AppLayout><AgentDetail /></AppLayout>} />
           <Route path="/data" element={<AppLayout><DataModels /></AppLayout>} />
