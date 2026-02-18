@@ -18,6 +18,36 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 },
 });
 
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"' && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        current += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ",") {
+        result.push(current.trim());
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
 const STAGE_ORDER = [
   "created",
   "definition_draft",
@@ -803,9 +833,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/data/datasets", async (req: Request, res: Response) => {
     try {
-      const { name, description, owner, accessLevel, schemaJson, metadata } = req.body;
+      const { name, description, owner, accessLevel, sourceType, sourceUrl, schemaJson, metadata } = req.body;
       if (!name) return res.status(400).json({ error: "name is required" });
-      const ds = await storage.createDataset({ name, description, owner, accessLevel, schemaJson, metadata });
+      const ds = await storage.createDataset({ name, description, owner, accessLevel, sourceType, sourceUrl, schemaJson, metadata });
       res.status(201).json(ds);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -817,6 +847,80 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ds = await storage.getDataset(Number(req.params.id));
       if (!ds) return res.status(404).json({ error: "Not found" });
       res.json(ds);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/data/datasets/:id", async (req: Request, res: Response) => {
+    try {
+      const id = Number(req.params.id);
+      const existing = await storage.getDataset(id);
+      if (!existing) return res.status(404).json({ error: "Not found" });
+      const { name, description, sourceType, sourceUrl, schemaJson, metadata, rowCount } = req.body;
+      const ds = await storage.updateDataset(id, { name, description, sourceType, sourceUrl, schemaJson, metadata, rowCount });
+      res.json(ds);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/data/datasets/:id", async (req: Request, res: Response) => {
+    try {
+      const id = Number(req.params.id);
+      const existing = await storage.getDataset(id);
+      if (!existing) return res.status(404).json({ error: "Not found" });
+      await storage.deleteDataset(id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/data/datasets/:id/upload-csv", upload.single("file"), async (req: Request, res: Response) => {
+    try {
+      const id = Number(req.params.id);
+      const existing = await storage.getDataset(id);
+      if (!existing) return res.status(404).json({ error: "Dataset not found" });
+      if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+      const csvText = req.file.buffer.toString("utf-8");
+      const lines = csvText.split(/\r?\n/).filter((l) => l.trim());
+      if (lines.length < 2) return res.status(400).json({ error: "CSV must have a header row and at least one data row" });
+
+      const headers = parseCSVLine(lines[0]);
+      const rows: Array<{ rowIndex: number; data: any }> = [];
+      for (let i = 1; i < lines.length; i++) {
+        const values = parseCSVLine(lines[i]);
+        const row: Record<string, string> = {};
+        headers.forEach((h, idx) => {
+          row[h] = values[idx] || "";
+        });
+        rows.push({ rowIndex: i - 1, data: row });
+      }
+
+      await storage.insertDatasetRows(id, rows);
+      const schemaJson = headers.map((h) => ({ name: h, type: "string" }));
+      const ds = await storage.updateDataset(id, {
+        sourceType: "csv",
+        schemaJson,
+        rowCount: rows.length,
+      });
+      res.json({ dataset: ds, rowCount: rows.length, columns: headers });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/data/datasets/:id/rows", async (req: Request, res: Response) => {
+    try {
+      const id = Number(req.params.id);
+      const existing = await storage.getDataset(id);
+      if (!existing) return res.status(404).json({ error: "Not found" });
+      const limit = Math.min(Number(req.query.limit) || 100, 1000);
+      const offset = Number(req.query.offset) || 0;
+      const rows = await storage.getDatasetRows(id, limit, offset);
+      res.json({ rows, total: existing.rowCount });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
