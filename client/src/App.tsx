@@ -19,6 +19,7 @@ import {
   Bell,
   LogOut,
   FileText,
+  BarChart3,
 } from "lucide-react";
 import { cn } from "./lib/utils";
 import { Button } from "./components/ui/button";
@@ -62,6 +63,8 @@ import SettingsPage from "./pages/Settings";
 import DocumentEditor from "./pages/DocumentEditor";
 import Documents from "./pages/Documents";
 import WorkflowEditor from "./pages/WorkflowEditor";
+import Charts from "./pages/Charts";
+import ChartDetail from "./pages/ChartDetail";
 import CommandPalette from "./components/CommandPalette";
 import { ProjectProvider, useProjectContext } from "./lib/project-context";
 
@@ -89,6 +92,12 @@ const NAV_SECTIONS = [
     label: "Documents",
     items: [
       { to: "/documents", icon: FileText, label: "Word Processor" },
+    ],
+  },
+  {
+    label: "Charts",
+    items: [
+      { to: "/charts", icon: BarChart3, label: "All Charts" },
     ],
   },
   {
@@ -210,7 +219,8 @@ function AppSidebar() {
                     (item.to === "/projects" && location.pathname.startsWith("/project/")) ||
                     (item.to === "/agents" && location.pathname.startsWith("/agent/")) ||
                     (item.to === "/workflows" && location.pathname.startsWith("/workflow/")) ||
-                    (item.to === "/documents" && location.pathname.startsWith("/editor"));
+                    (item.to === "/documents" && location.pathname.startsWith("/editor")) ||
+                    (item.to === "/charts" && location.pathname.startsWith("/charts"));
 
                   return (
                     <SidebarMenuItem key={item.to}>
@@ -359,6 +369,8 @@ export default function App() {
           <Route path="/agents" element={<AppLayout><Agents /></AppLayout>} />
           <Route path="/agent/:key" element={<AppLayout><AgentDetail /></AppLayout>} />
           <Route path="/data" element={<AppLayout><DataModels /></AppLayout>} />
+          <Route path="/charts" element={<AppLayout><Charts /></AppLayout>} />
+          <Route path="/charts/:id" element={<FullWidthLayout><ChartDetail /></FullWidthLayout>} />
           <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
           <Route path="/documents" element={<AppLayout><Documents /></AppLayout>} />
           <Route path="/editor" element={<FullWidthLayout><DocumentEditor /></FullWidthLayout>} />
