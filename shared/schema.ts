@@ -265,6 +265,32 @@ export const pipelineConfigs = pgTable("pipeline_configs", {
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+export const documents = pgTable("documents", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  title: text("title").notNull().default("Untitled Document"),
+  content: text("content").notNull().default(""),
+  contentJson: jsonb("content_json"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const documentComments = pgTable("document_comments", {
+  id: serial("id").primaryKey(),
+  documentId: integer("document_id")
+    .notNull()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  from: integer("from_pos").notNull(),
+  to: integer("to_pos").notNull(),
+  content: text("content").notNull(),
+  type: text("type").notNull().default("user"),
+  status: text("status").notNull().default("pending"),
+  proposedText: text("proposed_text"),
+  aiReply: text("ai_reply"),
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const insertProjectSchema = createInsertSchema(projects).omit({
   id: true,
   stage: true,
@@ -295,3 +321,5 @@ export type Deliverable = typeof deliverables.$inferSelect;
 export type StepChatMessage = typeof stepChatMessages.$inferSelect;
 export type Conversation = typeof conversations.$inferSelect;
 export type Message = typeof messages.$inferSelect;
+export type Document = typeof documents.$inferSelect;
+export type DocumentComment = typeof documentComments.$inferSelect;
