@@ -12,6 +12,12 @@ import {
   Plus,
   Search,
   Command,
+  ChevronsUpDown,
+  Sparkles,
+  BadgeCheck,
+  CreditCard,
+  Bell,
+  LogOut,
 } from "lucide-react";
 import { cn } from "./lib/utils";
 import { Button } from "./components/ui/button";
@@ -33,6 +39,16 @@ import {
   useSidebar,
 } from "./components/ui/sidebar";
 import { Separator } from "./components/ui/separator";
+import { Avatar, AvatarFallback, AvatarImage } from "./components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./components/ui/dropdown-menu";
 import Chat from "./pages/Chat";
 import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
@@ -107,18 +123,18 @@ function ProjectSelector() {
       </SidebarMenuButton>
       {open && (
         <div className={cn(
-          "absolute z-[100] bg-[hsl(222,47%,14%)] border border-sidebar-border rounded-xl shadow-2xl overflow-hidden animate-in fade-in-0 zoom-in-95",
+          "absolute z-[100] bg-popover border border-border rounded-xl shadow-lg overflow-hidden animate-in fade-in-0 zoom-in-95",
           isCollapsed ? "left-[calc(var(--sidebar-width-icon)+8px)] top-0 w-[200px]" : "left-2 right-2 top-[calc(100%+4px)]"
         )}>
-          <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-sidebar-foreground">
+          <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
             {isCollapsed ? "Projects" : "Switch Project"}
           </div>
           {projects.map((p) => (
             <button
               key={p.id}
               className={cn(
-                "flex items-center gap-2 w-full px-3 py-2 text-[13px] font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors text-left",
-                activeProject?.id === p.id && "bg-sidebar-primary/15 text-sidebar-accent-foreground"
+                "flex items-center gap-2 w-full px-3 py-2 text-[13px] font-medium text-foreground/70 hover:bg-accent hover:text-accent-foreground transition-colors text-left",
+                activeProject?.id === p.id && "bg-accent text-accent-foreground"
               )}
               onClick={() => {
                 setActiveProjectId(p.id);
@@ -127,15 +143,15 @@ function ProjectSelector() {
               }}
               data-testid={`project-option-${p.id}`}
             >
-              {!isCollapsed && <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", activeProject?.id === p.id ? "bg-sidebar-primary" : "bg-sidebar-foreground/30")} />}
+              {!isCollapsed && <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", activeProject?.id === p.id ? "bg-primary" : "bg-foreground/20")} />}
               <span className="truncate">{p.name}</span>
             </button>
           ))}
           {projects.length === 0 && (
-            <div className="p-3 text-center text-xs text-sidebar-foreground">No projects yet</div>
+            <div className="p-3 text-center text-xs text-muted-foreground">No projects yet</div>
           )}
           <button
-            className="flex items-center gap-2 w-full px-3 py-2 text-[13px] font-medium text-sidebar-primary hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors border-t border-sidebar-border text-left"
+            className="flex items-center gap-2 w-full px-3 py-2 text-[13px] font-medium text-primary hover:bg-accent hover:text-accent-foreground transition-colors border-t border-border text-left"
             onClick={() => { navigate("/projects"); setOpen(false); }}
             data-testid="project-selector-new"
           >
@@ -205,16 +221,68 @@ function AppSidebar() {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton
-              tooltip="Settings"
-              isActive={location.pathname === "/settings"}
-              asChild
-            >
-              <NavLink to="/settings">
-                <Settings />
-                <span>Settings</span>
-              </NavLink>
-            </SidebarMenuButton>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <SidebarMenuButton
+                  size="lg"
+                  className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+                >
+                  <Avatar className="h-8 w-8 rounded-lg">
+                    <AvatarFallback className="rounded-lg bg-primary text-primary-foreground text-xs">CN</AvatarFallback>
+                  </Avatar>
+                  <div className="grid flex-1 text-left text-sm leading-tight">
+                    <span className="truncate font-semibold">Consultant</span>
+                    <span className="truncate text-xs text-muted-foreground">user@example.com</span>
+                  </div>
+                  <ChevronsUpDown className="ml-auto size-4" />
+                </SidebarMenuButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
+                side="bottom"
+                align="end"
+                sideOffset={4}
+              >
+                <DropdownMenuLabel className="p-0 font-normal">
+                  <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
+                    <Avatar className="h-8 w-8 rounded-lg">
+                      <AvatarFallback className="rounded-lg bg-primary text-primary-foreground text-xs">CN</AvatarFallback>
+                    </Avatar>
+                    <div className="grid flex-1 text-left text-sm leading-tight">
+                      <span className="truncate font-semibold">Consultant</span>
+                      <span className="truncate text-xs text-muted-foreground">user@example.com</span>
+                    </div>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuItem>
+                    <Sparkles />
+                    Upgrade to Pro
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuItem>
+                    <BadgeCheck />
+                    Account
+                  </DropdownMenuItem>
+                  <DropdownMenuItem>
+                    <CreditCard />
+                    Billing
+                  </DropdownMenuItem>
+                  <DropdownMenuItem>
+                    <Bell />
+                    Notifications
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem>
+                  <LogOut />
+                  Log out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
