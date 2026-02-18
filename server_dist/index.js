@@ -375,6 +375,23 @@ var storage = {
   async deleteWorkflowTemplateStep(id) {
     await db.delete(workflowTemplateSteps).where(eq(workflowTemplateSteps.id, id));
   },
+  async deleteWorkflowTemplate(id) {
+    await db.delete(workflowTemplateSteps).where(eq(workflowTemplateSteps.workflowTemplateId, id));
+    await db.delete(workflowTemplates).where(eq(workflowTemplates.id, id));
+  },
+  async replaceWorkflowTemplateSteps(templateId, steps) {
+    await db.delete(workflowTemplateSteps).where(eq(workflowTemplateSteps.workflowTemplateId, templateId));
+    for (const s of steps) {
+      await db.insert(workflowTemplateSteps).values({
+        workflowTemplateId: templateId,
+        stepOrder: s.stepOrder,
+        name: s.name,
+        agentKey: s.agentKey,
+        description: s.description || ""
+      });
+    }
+    return db.select().from(workflowTemplateSteps).where(eq(workflowTemplateSteps.workflowTemplateId, templateId)).orderBy(asc(workflowTemplateSteps.stepOrder));
+  },
   async listAgents() {
     return db.select().from(agents).orderBy(asc(agents.key));
   },
@@ -3548,10 +3565,23 @@ async function registerRoutes(app2) {
   });
   app2.put("/api/workflows/:id", async (req, res) => {
     try {
-      const { name, description } = req.body;
+      const { name, description, steps } = req.body;
       const template = await storage.updateWorkflowTemplate(Number(req.params.id), { name, description });
-      const steps = await storage.getWorkflowTemplateSteps(template.id);
-      res.json({ ...template, steps });
+      let allSteps;
+      if (steps && Array.isArray(steps)) {
+        allSteps = await storage.replaceWorkflowTemplateSteps(template.id, steps);
+      } else {
+        allSteps = await storage.getWorkflowTemplateSteps(template.id);
+      }
+      res.json({ ...template, steps: allSteps });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.delete("/api/workflows/:id", async (req, res) => {
+    try {
+      await storage.deleteWorkflowTemplate(Number(req.params.id));
+      res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
