@@ -508,82 +508,49 @@ export default function DocumentEditor() {
               )}
             </div>
 
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleFactCheckCandidates}
-              disabled={factCandidateLoading}
-              className="border-orange-700 text-orange-300 hover:bg-orange-950/50"
-            >
-              {factCandidateLoading ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <Search size={14} />
-              )}
-              Spot Claims
-            </Button>
-
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleRunFactCheck}
-              disabled={factCheckLoading || !hasAcceptedFactCandidates}
-              className={cn(
-                "border-emerald-700 text-emerald-300 hover:bg-emerald-950/50",
-                !hasAcceptedFactCandidates && "opacity-50"
-              )}
-              title={!hasAcceptedFactCandidates ? "Accept some fact-check candidates first" : "Run fact check on accepted candidates"}
-            >
-              {factCheckLoading ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <ShieldCheck size={14} />
-              )}
-              Fact Check
-            </Button>
-
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleNarrativeReview}
-              disabled={narrativeLoading}
-              className="border-teal-700 text-teal-300 hover:bg-teal-950/50"
-            >
-              {narrativeLoading ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <Lightbulb size={14} />
-              )}
-              Key Narrative
-            </Button>
-
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleExecutiveReview}
-              disabled={execReviewLoading}
-              className="border-purple-700 text-purple-300 hover:bg-purple-950/50"
-            >
-              {execReviewLoading ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <BriefcaseBusiness size={14} />
-              )}
-              Executive Review
-            </Button>
-
-            <Button
-              size="sm"
-              onClick={handleAIReview}
-              disabled={reviewLoading}
-            >
-              {reviewLoading ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <Sparkles size={14} />
-              )}
-              AI Review
-            </Button>
+            <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-1">
+              <button
+                onClick={handleFactCheckCandidates}
+                disabled={factCandidateLoading}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-orange-400 hover:bg-orange-500/10 transition-colors disabled:opacity-50"
+              >
+                {factCandidateLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                Spot Claims
+              </button>
+              <button
+                onClick={handleRunFactCheck}
+                disabled={factCheckLoading || !hasAcceptedFactCandidates}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-50"
+                title={!hasAcceptedFactCandidates ? "Accept some fact-check candidates first" : "Run fact check on accepted candidates"}
+              >
+                {factCheckLoading ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
+                Fact Check
+              </button>
+              <button
+                onClick={handleNarrativeReview}
+                disabled={narrativeLoading}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-teal-400 hover:bg-teal-500/10 transition-colors disabled:opacity-50"
+              >
+                {narrativeLoading ? <Loader2 size={13} className="animate-spin" /> : <Lightbulb size={13} />}
+                Narrative
+              </button>
+              <button
+                onClick={handleExecutiveReview}
+                disabled={execReviewLoading}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-purple-400 hover:bg-purple-500/10 transition-colors disabled:opacity-50"
+              >
+                {execReviewLoading ? <Loader2 size={13} className="animate-spin" /> : <BriefcaseBusiness size={13} />}
+                Executive
+              </button>
+              <button
+                onClick={handleAIReview}
+                disabled={reviewLoading}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                {reviewLoading ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                AI Review
+              </button>
+            </div>
           </div>
         </div>
 
