@@ -429,11 +429,62 @@ const FactCheckRunState = Annotation.Root({
 
 type FactCheckRunStateType = typeof FactCheckRunState.State;
 
+function generateMockNarrativeComments(html: string) {
+  const { plainText, map } = buildPositionMap(html);
+  if (plainText.length === 0 || map.length === 0) return [];
+
+  const sentences = plainText.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
+  const results: Array<{ from: number; to: number; content: string; proposedText: string }> = [];
+
+  if (sentences.length > 0) {
+    const pos = findQuotedTextPosition(sentences[0], plainText, map);
+    if (pos) {
+      results.push({
+        ...pos,
+        content: "Key narrative: This is a core claim that anchors the document's argument. Consider elevating it as an executive takeaway: what decision does it drive?",
+        proposedText: `Key point: ${sentences[0]}`,
+      });
+    }
+  }
+
+  if (sentences.length > 2) {
+    const mid = Math.floor(sentences.length / 2);
+    const pos = findQuotedTextPosition(sentences[mid], plainText, map);
+    if (pos) {
+      results.push({
+        ...pos,
+        content: "Supporting evidence: This section contains important data that backs the main argument. Distill the insight into one executive-level sentence.",
+        proposedText: `Supporting insight: ${sentences[mid]}`,
+      });
+    }
+  }
+
+  if (sentences.length > 3) {
+    const late = Math.floor(sentences.length * 0.75);
+    const pos = findQuotedTextPosition(sentences[late], plainText, map);
+    if (pos) {
+      results.push({
+        ...pos,
+        content: "Action driver: This statement implies a decision or next step. Make the recommended action explicit for the reader.",
+        proposedText: `Recommended action: ${sentences[late]}`,
+      });
+    }
+  }
+
+  return results.length > 0 ? results : [{
+    from: map[0],
+    to: map[Math.min(map.length - 1, 30)] + 1,
+    content: "Key narrative: Extract the main executive takeaway from this section.",
+    proposedText: plainText.slice(0, 30),
+  }];
+}
+
 let _reviewGraph: any = null;
 let _actionGraph: any = null;
 let _executiveReviewGraph: any = null;
 let _factCheckCandidateGraph: any = null;
 let _factCheckRunGraph: any = null;
+let _narrativeGraph: any = null;
 
 function getReviewGraph() {
   if (_reviewGraph) return _reviewGraph;
@@ -796,6 +847,95 @@ Return ONLY valid JSON.`;
     .addEdge("check", END)
     .compile();
   return _factCheckRunGraph;
+}
+
+function getNarrativeGraph() {
+  if (_narrativeGraph) return _narrativeGraph;
+  _narrativeGraph = new StateGraph(ReviewState)
+    .addNode("analyze", async (state: ReviewStateType): Promise<Partial<ReviewStateType>> => {
+      if (!hasApiKey()) {
+        return { reviewComments: generateMockNarrativeComments(state.documentContent) };
+      }
+
+      const plainText = getPlainText(state.documentContent);
+      const llm = createLLM()!;
+      const systemPrompt = `You are a senior strategy consultant who distills complex, technical prose into executive-level key points. Your job is to read the document and identify the core narrative threads — the key messages an executive needs to take away.
+
+For each section of the document that contains dense or technical content, you must:
+1. **Extract the key point** — What is the one sentence an executive needs to remember from this section? Strip away jargon, methodology, and implementation detail. Surface the strategic insight, the business implication, or the decision it supports.
+2. **Identify the narrative role** — Label each key point with its role in the overall argument:
+   - "Core thesis": The central claim or recommendation the document makes
+   - "Supporting evidence": Data or analysis that backs the core thesis
+   - "Risk / caveat": An important qualification, risk, or trade-off the executive should know
+   - "Action driver": A finding that directly implies a decision or next step
+   - "Context setter": Background that frames why this matters now
+3. **Propose an executive-ready rewrite** — Rewrite the technical section as a crisp, action-oriented executive summary sentence. Lead with impact, not method.
+
+Return a JSON array. Each item must have:
+- "quotedText": the EXACT text from the document you are commenting on (copy it verbatim — this is used to locate it in the document)
+- "content": your comment — start with the narrative role label (e.g. "Core thesis:", "Supporting evidence:", "Risk / caveat:", "Action driver:", "Context setter:") followed by a brief explanation of what the key point is and why it matters
+- "proposedText": the executive-ready rewrite of that section — one or two crisp sentences maximum
+
+IMPORTANT: The "quotedText" must be an exact substring from the document text. Copy it character-for-character. Do NOT paraphrase or abbreviate it. Include enough words to be unique (at least 5-10 words).
+
+Return ONLY valid JSON array. Identify 3-6 key narrative points.`;
+
+      try {
+        const response = await llm.invoke([
+          new SystemMessage(systemPrompt),
+          new HumanMessage(`Document Title: ${state.documentTitle}\n\nDocument Content:\n${plainText}`),
+        ]);
+
+        const content = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+
+        if (!content || content.trim().length === 0) {
+          return { reviewComments: generateMockNarrativeComments(state.documentContent) };
+        }
+
+        const parsed = extractJson(content);
+        const comments = Array.isArray(parsed) ? parsed : parsed.comments || parsed.reviewComments || [];
+        const resolved = resolvePositions(comments, state.documentContent);
+        return { reviewComments: resolved.length > 0 ? resolved : generateMockNarrativeComments(state.documentContent) };
+      } catch (e) {
+        console.error("LLM narrative review error, falling back to mock:", e);
+        return { reviewComments: generateMockNarrativeComments(state.documentContent) };
+      }
+    })
+    .addNode("persist", async (state: ReviewStateType): Promise<Partial<ReviewStateType>> => {
+      const saved: DocumentComment[] = [];
+      for (const rc of state.reviewComments) {
+        const comment = await storage.createComment({
+          documentId: state.documentId,
+          from: rc.from,
+          to: rc.to,
+          content: rc.content,
+          type: "narrative",
+          proposedText: rc.proposedText,
+        });
+        saved.push(comment);
+      }
+      return { savedComments: saved };
+    })
+    .addEdge(START, "analyze")
+    .addEdge("analyze", "persist")
+    .addEdge("persist", END)
+    .compile();
+  return _narrativeGraph;
+}
+
+export async function narrativeReviewDocument(doc: Document): Promise<DocumentComment[]> {
+  try {
+    const graph = getNarrativeGraph();
+    const result = await graph.invoke({
+      documentContent: doc.content || "",
+      documentTitle: doc.title || "",
+      documentId: doc.id,
+    });
+    return result.savedComments;
+  } catch (error) {
+    console.error("narrativeReviewDocument error:", error);
+    return [];
+  }
 }
 
 export async function spotFactCheckCandidates(doc: Document): Promise<DocumentComment[]> {

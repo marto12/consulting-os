@@ -33,6 +33,7 @@ import {
   BriefcaseBusiness,
   Search,
   ShieldCheck,
+  Lightbulb,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -96,6 +97,7 @@ export default function DocumentEditor() {
   const [execReviewLoading, setExecReviewLoading] = useState(false);
   const [factCandidateLoading, setFactCandidateLoading] = useState(false);
   const [factCheckLoading, setFactCheckLoading] = useState(false);
+  const [narrativeLoading, setNarrativeLoading] = useState(false);
   const [commentDialogOpen, setCommentDialogOpen] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [selectionRange, setSelectionRange] = useState<{ from: number; to: number } | null>(null);
@@ -284,6 +286,20 @@ export default function DocumentEditor() {
       }
     } catch {}
     setFactCheckLoading(false);
+  }, [fetchComments]);
+
+  const handleNarrativeReview = useCallback(async () => {
+    if (!docIdRef.current) return;
+    setNarrativeLoading(true);
+    try {
+      const res = await fetch(`/api/documents/${docIdRef.current}/narrative-review`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        await fetchComments(docIdRef.current);
+      }
+    } catch {}
+    setNarrativeLoading(false);
   }, [fetchComments]);
 
   const handleAddComment = useCallback(async () => {
@@ -524,6 +540,21 @@ export default function DocumentEditor() {
                 <ShieldCheck size={14} />
               )}
               Fact Check
+            </Button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleNarrativeReview}
+              disabled={narrativeLoading}
+              className="border-teal-700 text-teal-300 hover:bg-teal-950/50"
+            >
+              {narrativeLoading ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Lightbulb size={14} />
+              )}
+              Key Narrative
             </Button>
 
             <Button
@@ -914,6 +945,7 @@ function CommentCard({
   const isAI = comment.type === "ai" || comment.type === "review";
   const isExecutive = comment.type === "executive";
   const isFactCheck = comment.type === "factcheck";
+  const isNarrative = comment.type === "narrative";
   const isLoading = actionLoadingId === comment.id;
 
   const statusVariant =
@@ -923,23 +955,27 @@ function CommentCard({
         ? "destructive"
         : "secondary";
 
-  const borderColor = isFactCheck
-    ? "border-l-orange-500"
-    : isExecutive
-      ? "border-l-purple-500"
-      : isAI
-        ? "border-l-amber-500"
-        : "border-l-blue-500";
+  const borderColor = isNarrative
+    ? "border-l-teal-500"
+    : isFactCheck
+      ? "border-l-orange-500"
+      : isExecutive
+        ? "border-l-purple-500"
+        : isAI
+          ? "border-l-amber-500"
+          : "border-l-blue-500";
 
-  const iconColor = isFactCheck
-    ? "text-orange-500"
-    : isExecutive
-      ? "text-purple-500"
-      : isAI
-        ? "text-amber-500"
-        : "text-blue-500";
+  const iconColor = isNarrative
+    ? "text-teal-500"
+    : isFactCheck
+      ? "text-orange-500"
+      : isExecutive
+        ? "text-purple-500"
+        : isAI
+          ? "text-amber-500"
+          : "text-blue-500";
 
-  const label = isFactCheck ? "Fact Check" : isExecutive ? "Executive" : isAI ? "AI" : "You";
+  const label = isNarrative ? "Narrative" : isFactCheck ? "Fact Check" : isExecutive ? "Executive" : isAI ? "AI" : "You";
 
   return (
     <Card
@@ -951,7 +987,9 @@ function CommentCard({
     >
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-center gap-1.5">
-          {isFactCheck ? (
+          {isNarrative ? (
+            <Lightbulb size={14} className={cn(iconColor, "shrink-0")} />
+          ) : isFactCheck ? (
             <Search size={14} className={cn(iconColor, "shrink-0")} />
           ) : isExecutive ? (
             <BriefcaseBusiness size={14} className={cn(iconColor, "shrink-0")} />
@@ -1044,17 +1082,19 @@ function CommentCard({
         <div className="space-y-2">
           <div className={cn(
             "text-xs rounded px-2 py-1.5",
-            isExecutive
-              ? "bg-purple-950/30 border border-purple-800/30"
-              : "bg-green-950/30 border border-green-800/30"
+            isNarrative
+              ? "bg-teal-950/30 border border-teal-800/30"
+              : isExecutive
+                ? "bg-purple-950/30 border border-purple-800/30"
+                : "bg-green-950/30 border border-green-800/30"
           )}>
             <span className={cn(
               "font-medium text-[10px] uppercase tracking-wider",
-              isExecutive ? "text-purple-400" : "text-green-400"
+              isNarrative ? "text-teal-400" : isExecutive ? "text-purple-400" : "text-green-400"
             )}>
-              Proposed:
+              {isNarrative ? "Executive Key Point:" : "Proposed:"}
             </span>
-            <p className={cn("mt-0.5", isExecutive ? "text-purple-300" : "text-green-300")}>{comment.proposedText}</p>
+            <p className={cn("mt-0.5", isNarrative ? "text-teal-300" : isExecutive ? "text-purple-300" : "text-green-300")}>{comment.proposedText}</p>
           </div>
           <div className="flex gap-1.5">
             <Button
@@ -1108,7 +1148,7 @@ function CommentCard({
         </div>
       )}
 
-      {!isAI && !isExecutive && !isFactCheck && !comment.aiReply && comment.status === "pending" && (
+      {!isAI && !isExecutive && !isFactCheck && !isNarrative && !comment.aiReply && comment.status === "pending" && (
         <Button
           size="sm"
           variant="outline"

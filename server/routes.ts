@@ -10,7 +10,7 @@ import {
   type ProgressCallback,
 } from "./agents";
 import { runWorkflowStep, refineWithLangGraph } from "./agents/workflow-graph";
-import { reviewDocument, actionComment, executiveReviewDocument, spotFactCheckCandidates, runFactCheck } from "./agents/document-agents";
+import { reviewDocument, actionComment, executiveReviewDocument, spotFactCheckCandidates, runFactCheck, narrativeReviewDocument } from "./agents/document-agents";
 import { processVaultFile, retrieveRelevantContext, formatRAGContext } from "./vault-rag";
 
 const upload = multer({
@@ -984,6 +984,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!doc) return res.status(404).json({ error: "Document not found" });
 
       const comments = await executiveReviewDocument(doc);
+      res.json(comments);
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post("/api/documents/:id/narrative-review", async (req: Request, res: Response) => {
+    try {
+      const doc = await storage.getDocument(Number(req.params.id));
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+
+      const comments = await narrativeReviewDocument(doc);
       res.json(comments);
     } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
