@@ -121,6 +121,8 @@ function getStatusBadge(status: string) {
   switch (status) {
     case "completed":
       return <Badge variant="success" className="gap-1"><CheckCircle2 size={10} />Ready</Badge>;
+    case "no_embeddings":
+      return <Badge variant="success" className="gap-1"><CheckCircle2 size={10} />Ready (keyword)</Badge>;
     case "processing":
       return <Badge variant="default" className="gap-1"><Loader2 size={10} className="animate-spin" />Processing</Badge>;
     case "failed":
