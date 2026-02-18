@@ -9,6 +9,7 @@ import express from "express";
 
 // server/routes.ts
 import { createServer } from "node:http";
+import multer from "multer";
 
 // server/db.ts
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -23,6 +24,8 @@ __export(schema_exports, {
   conversations: () => conversations,
   datasets: () => datasets,
   deliverables: () => deliverables,
+  documentComments: () => documentComments,
+  documents: () => documents,
   hypotheses: () => hypotheses,
   insertProjectSchema: () => insertProjectSchema,
   issueNodes: () => issueNodes,
@@ -34,6 +37,9 @@ __export(schema_exports, {
   projects: () => projects,
   runLogs: () => runLogs,
   slides: () => slides,
+  stepChatMessages: () => stepChatMessages,
+  vaultChunks: () => vaultChunks,
+  vaultFiles: () => vaultFiles,
   workflowInstanceSteps: () => workflowInstanceSteps,
   workflowInstances: () => workflowInstances,
   workflowTemplateSteps: () => workflowTemplateSteps,
@@ -217,6 +223,15 @@ var slides = pgTable("slides", {
   version: integer("version").notNull().default(1),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
+var stepChatMessages = pgTable("step_chat_messages", {
+  id: serial("id").primaryKey(),
+  stepId: integer("step_id").notNull().references(() => workflowInstanceSteps.id, { onDelete: "cascade" }),
+  role: text("role").notNull(),
+  content: text("content").notNull(),
+  messageType: text("message_type").notNull().default("message"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
 var agentConfigs = pgTable("agent_configs", {
   id: serial("id").primaryKey(),
   agentType: text("agent_type").notNull().unique(),
@@ -245,6 +260,52 @@ var pipelineConfigs = pgTable("pipeline_configs", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
+var documents = pgTable("documents", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  title: text("title").notNull().default("Untitled Document"),
+  content: text("content").notNull().default(""),
+  contentJson: jsonb("content_json"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+var documentComments = pgTable("document_comments", {
+  id: serial("id").primaryKey(),
+  documentId: integer("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }),
+  from: integer("from_pos").notNull(),
+  to: integer("to_pos").notNull(),
+  content: text("content").notNull(),
+  type: text("type").notNull().default("user"),
+  status: text("status").notNull().default("pending"),
+  proposedText: text("proposed_text"),
+  aiReply: text("ai_reply"),
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+var vaultFiles = pgTable("vault_files", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  fileName: text("file_name").notNull(),
+  mimeType: text("mime_type").notNull(),
+  fileSize: integer("file_size").notNull(),
+  storagePath: text("storage_path").notNull(),
+  extractedText: text("extracted_text"),
+  embeddingStatus: text("embedding_status").notNull().default("pending"),
+  chunkCount: integer("chunk_count").notNull().default(0),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+var vaultChunks = pgTable("vault_chunks", {
+  id: serial("id").primaryKey(),
+  fileId: integer("file_id").notNull().references(() => vaultFiles.id, { onDelete: "cascade" }),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  chunkIndex: integer("chunk_index").notNull(),
+  content: text("content").notNull(),
+  embedding: jsonb("embedding"),
+  tokenCount: integer("token_count").notNull().default(0),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
 var insertProjectSchema = createInsertSchema(projects).omit({
   id: true,
   stage: true,
@@ -262,7 +323,7 @@ var pool = new pg.Pool({
 var db = drizzle(pool, { schema: schema_exports });
 
 // server/storage.ts
-import { eq, desc, asc } from "drizzle-orm";
+import { eq, desc, and, asc, ilike } from "drizzle-orm";
 var storage = {
   async createProject(data) {
     const [project] = await db.insert(projects).values({ ...data, stage: "created" }).returning();
@@ -307,6 +368,9 @@ var storage = {
       configJson: data.configJson || null
     }).returning();
     return step;
+  },
+  async updateWorkflowTemplateStep(id, data) {
+    await db.update(workflowTemplateSteps).set(data).where(eq(workflowTemplateSteps.id, id));
   },
   async deleteWorkflowTemplateStep(id) {
     await db.delete(workflowTemplateSteps).where(eq(workflowTemplateSteps.id, id));
@@ -451,8 +515,14 @@ var storage = {
   async getStepDeliverables(stepId) {
     return db.select().from(deliverables).where(eq(deliverables.stepId, stepId)).orderBy(desc(deliverables.version));
   },
+  async updateDeliverable(id, data) {
+    await db.update(deliverables).set(data).where(eq(deliverables.id, id));
+  },
   async lockDeliverables(stepId) {
     await db.update(deliverables).set({ locked: true }).where(eq(deliverables.stepId, stepId));
+  },
+  async unlockDeliverables(stepId) {
+    await db.update(deliverables).set({ locked: false }).where(eq(deliverables.stepId, stepId));
   },
   async getLatestIssueVersion(projectId) {
     const nodes = await db.select().from(issueNodes).where(eq(issueNodes.projectId, projectId)).orderBy(desc(issueNodes.version));
@@ -594,6 +664,116 @@ var storage = {
   },
   async deletePipeline(id) {
     await db.delete(pipelineConfigs).where(eq(pipelineConfigs.id, id));
+  },
+  async getStepChatMessages(stepId) {
+    return db.select().from(stepChatMessages).where(eq(stepChatMessages.stepId, stepId)).orderBy(asc(stepChatMessages.createdAt));
+  },
+  async insertStepChatMessage(data) {
+    const [msg] = await db.insert(stepChatMessages).values({
+      stepId: data.stepId,
+      role: data.role,
+      content: data.content,
+      messageType: data.messageType || "message",
+      metadata: data.metadata || null
+    }).returning();
+    return msg;
+  },
+  async clearStepChatMessages(stepId) {
+    await db.delete(stepChatMessages).where(eq(stepChatMessages.stepId, stepId));
+  },
+  async createDocument(data) {
+    const [doc] = await db.insert(documents).values({
+      projectId: data.projectId || null,
+      title: data.title || "Untitled Document",
+      content: data.content || "",
+      contentJson: data.contentJson || null
+    }).returning();
+    return doc;
+  },
+  async listDocuments(projectId) {
+    if (projectId) {
+      return db.select().from(documents).where(eq(documents.projectId, projectId)).orderBy(desc(documents.updatedAt));
+    }
+    return db.select().from(documents).orderBy(desc(documents.updatedAt));
+  },
+  async getDocument(id) {
+    const [doc] = await db.select().from(documents).where(eq(documents.id, id));
+    return doc;
+  },
+  async updateDocument(id, data) {
+    const [doc] = await db.update(documents).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(documents.id, id)).returning();
+    return doc;
+  },
+  async deleteDocument(id) {
+    await db.delete(documents).where(eq(documents.id, id));
+  },
+  async createComment(data) {
+    const [comment] = await db.insert(documentComments).values({
+      documentId: data.documentId,
+      from: data.from,
+      to: data.to,
+      content: data.content,
+      type: data.type || "user",
+      proposedText: data.proposedText || null,
+      aiReply: data.aiReply || null
+    }).returning();
+    return comment;
+  },
+  async listComments(documentId) {
+    return db.select().from(documentComments).where(eq(documentComments.documentId, documentId)).orderBy(asc(documentComments.createdAt));
+  },
+  async updateComment(id, data) {
+    const [comment] = await db.update(documentComments).set(data).where(eq(documentComments.id, id)).returning();
+    return comment;
+  },
+  async deleteComment(id) {
+    await db.delete(documentComments).where(eq(documentComments.id, id));
+  },
+  async deleteDocumentComments(documentId) {
+    await db.delete(documentComments).where(eq(documentComments.documentId, documentId));
+  },
+  async createVaultFile(data) {
+    const [file] = await db.insert(vaultFiles).values({
+      projectId: data.projectId,
+      fileName: data.fileName,
+      mimeType: data.mimeType,
+      fileSize: data.fileSize,
+      storagePath: data.storagePath,
+      extractedText: data.extractedText || null,
+      embeddingStatus: data.embeddingStatus || "pending",
+      metadata: data.metadata || null
+    }).returning();
+    return file;
+  },
+  async listVaultFiles(projectId, search) {
+    if (search) {
+      return db.select().from(vaultFiles).where(and(eq(vaultFiles.projectId, projectId), ilike(vaultFiles.fileName, `%${search}%`))).orderBy(desc(vaultFiles.createdAt));
+    }
+    return db.select().from(vaultFiles).where(eq(vaultFiles.projectId, projectId)).orderBy(desc(vaultFiles.createdAt));
+  },
+  async getVaultFile(id) {
+    const [file] = await db.select().from(vaultFiles).where(eq(vaultFiles.id, id));
+    return file;
+  },
+  async updateVaultFile(id, data) {
+    const [file] = await db.update(vaultFiles).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(vaultFiles.id, id)).returning();
+    return file;
+  },
+  async deleteVaultFile(id) {
+    await db.delete(vaultFiles).where(eq(vaultFiles.id, id));
+  },
+  async createVaultChunks(chunks) {
+    if (chunks.length === 0) return [];
+    return db.insert(vaultChunks).values(chunks).returning();
+  },
+  async getVaultChunksByFile(fileId) {
+    return db.select().from(vaultChunks).where(eq(vaultChunks.fileId, fileId)).orderBy(asc(vaultChunks.chunkIndex));
+  },
+  async getVaultChunksByProject(projectId) {
+    return db.select().from(vaultChunks).where(eq(vaultChunks.projectId, projectId)).orderBy(asc(vaultChunks.createdAt));
+  },
+  async deleteVaultChunksByFile(fileId) {
+    await db.delete(vaultChunks).where(eq(vaultChunks.fileId, fileId));
   }
 };
 
@@ -799,6 +979,64 @@ function getModelUsed() {
   return hasApiKey ? DEFAULT_MODEL : "mock";
 }
 var DEFAULT_PROMPTS = {
+  project_definition: `You are a senior consulting engagement manager. Your job is to translate vague client language into a structured, decision-based problem definition before any analysis begins.
+
+Given a raw project brief (objective, constraints, and any other context), you must produce a structured problem definition that includes:
+1. Decision statement \u2014 what decision needs to be made
+2. Governing question \u2014 follows the structure: "Should we [action] in order to achieve [objective], given [constraints], by [time horizon]?"
+3. Decision owner \u2014 who makes the final call
+4. Decision deadline \u2014 when the decision must be made
+5. Success metrics \u2014 measurable criteria with thresholds
+6. Alternatives \u2014 including "do nothing"
+7. Constraints \u2014 budget, regulatory, time, political, operational
+8. Assumptions \u2014 clearly labelled
+9. Initial working hypothesis \u2014 a directional hypothesis to test
+10. Key uncertainties and information gaps
+
+The governing question MUST be:
+- Actionable (not "assess" or "explore")
+- Neutral
+- Specific
+- Time-bound
+- Linked to measurable success criteria
+
+Internal reasoning (do not show to user):
+- Detect whether the problem is topic-framed or decision-framed
+- If topic-framed, convert to decision form
+- Identify implied decision variable
+- Extract or infer decision metric
+- Identify scope boundaries
+- Infer alternatives if not provided
+- Surface missing information
+- Make explicit assumptions rather than asking excessive clarifying questions
+
+Return ONLY valid JSON matching this schema:
+{
+  "decision_statement": "",
+  "governing_question": "",
+  "decision_owner": "",
+  "decision_deadline": "",
+  "success_metrics": [
+    { "metric_name": "", "definition": "", "threshold_or_target": "" }
+  ],
+  "alternatives": ["Option A", "Option B", "Do nothing"],
+  "constraints": {
+    "budget": "",
+    "regulatory": "",
+    "time": "",
+    "political": "",
+    "operational": ""
+  },
+  "assumptions": [""],
+  "initial_hypothesis": "",
+  "key_uncertainties": [""],
+  "information_gaps": [""]
+}
+
+If the problem cannot be converted into a decision form, return:
+{ "status": "insufficient_clarity", "reason": "Unable to identify a concrete decision." }
+
+Do not proceed to issue tree creation. Do not generate analysis. Do not recommend solutions in detail. Make reasonable assumptions when information is missing and clearly label them.`,
   issues_tree: `You are a McKinsey-style consulting analyst. Given a project objective and constraints, produce a MECE issues tree with AT LEAST 3 levels of depth. Return ONLY valid JSON matching this schema:
 {
   "issues": [
@@ -941,60 +1179,221 @@ function getDefaultConfigs() {
     maxTokens: 8192
   }));
 }
-async function getAgentPrompt(agentType) {
-  try {
-    const config = await storage.getAgentConfig(agentType);
-    if (config) return config.systemPrompt;
-  } catch {
-  }
-  return DEFAULT_PROMPTS[agentType] || "";
-}
-async function getAgentModel(agentType) {
-  try {
-    const config = await storage.getAgentConfig(agentType);
-    if (config) return config.model;
-  } catch {
-  }
-  return DEFAULT_MODEL;
-}
-async function getAgentMaxTokens(agentType) {
-  try {
-    const config = await storage.getAgentConfig(agentType);
-    if (config) return config.maxTokens;
-  } catch {
-  }
-  return 8192;
-}
-async function callLLM(systemPrompt, userPrompt, model, maxTokens, retries = 1) {
-  if (!openai2) {
-    return "";
-  }
-  const resolvedModel = model || DEFAULT_MODEL;
-  const resolvedTokens = maxTokens || 8192;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    const messages3 = [
-      { role: "system", content: systemPrompt },
-      {
-        role: "user",
-        content: attempt > 0 ? `${userPrompt}
 
-IMPORTANT: Your previous response was truncated. Please produce a SHORTER, more concise response that fits within the token limit. Use fewer nodes, shorter descriptions, and minimal whitespace in JSON output.` : userPrompt
-      }
-    ];
-    const response = await openai2.chat.completions.create({
-      model: resolvedModel,
-      messages: messages3,
-      max_completion_tokens: resolvedTokens
-    });
-    const content = response.choices[0]?.message?.content || "";
-    const finishReason = response.choices[0]?.finish_reason;
-    if (finishReason === "length" && attempt < retries) {
-      console.log(`LLM response truncated (finish_reason=length), retrying with conciseness hint (attempt ${attempt + 1}/${retries + 1})`);
-      continue;
-    }
-    return content;
+// server/agents/workflow-graph.ts
+import { StateGraph, Annotation, END, START } from "@langchain/langgraph";
+import { ChatOpenAI } from "@langchain/openai";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+
+// server/vault-rag.ts
+import OpenAI3 from "openai";
+var CHUNK_SIZE = 800;
+var CHUNK_OVERLAP = 100;
+var MAX_RAG_CHUNKS = 10;
+function hasApiKey2() {
+  return !!(process.env.AI_INTEGRATIONS_OPENAI_API_KEY && process.env.AI_INTEGRATIONS_OPENAI_BASE_URL);
+}
+function getOpenAIClient() {
+  if (!hasApiKey2()) return null;
+  return new OpenAI3({
+    apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+    baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+  });
+}
+function extractTextFromFile(buffer, mimeType) {
+  if (mimeType.startsWith("text/") || mimeType === "application/json") {
+    return buffer.toString("utf-8");
   }
-  return "";
+  if (mimeType === "application/pdf" || mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || mimeType === "application/msword") {
+    const text2 = buffer.toString("utf-8").replace(/[^\x20-\x7E\n\r\t]/g, " ");
+    const cleaned = text2.split("\n").map((l) => l.trim()).filter((l) => l.length > 3).join("\n");
+    return cleaned || "[Binary document \u2014 text extraction limited]";
+  }
+  if (mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" || mimeType === "application/vnd.ms-excel" || mimeType === "text/csv") {
+    return buffer.toString("utf-8");
+  }
+  return buffer.toString("utf-8").replace(/[^\x20-\x7E\n\r\t]/g, " ").trim() || "[Unsupported file format for text extraction]";
+}
+function chunkText(text2) {
+  if (!text2 || text2.length < 10) return [];
+  const paragraphs = text2.split(/\n\n+/);
+  const chunks = [];
+  let currentChunk = "";
+  for (const para of paragraphs) {
+    if (currentChunk.length + para.length > CHUNK_SIZE && currentChunk.length > 0) {
+      chunks.push(currentChunk.trim());
+      const overlap = currentChunk.slice(-CHUNK_OVERLAP);
+      currentChunk = overlap + "\n\n" + para;
+    } else {
+      currentChunk += (currentChunk ? "\n\n" : "") + para;
+    }
+  }
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim());
+  }
+  if (chunks.length === 0 && text2.trim().length > 0) {
+    for (let i = 0; i < text2.length; i += CHUNK_SIZE - CHUNK_OVERLAP) {
+      const chunk = text2.slice(i, i + CHUNK_SIZE).trim();
+      if (chunk) chunks.push(chunk);
+    }
+  }
+  return chunks;
+}
+async function generateEmbeddings(texts) {
+  const client = getOpenAIClient();
+  if (!client || texts.length === 0) return null;
+  try {
+    const response = await client.embeddings.create({
+      model: "text-embedding-3-small",
+      input: texts
+    });
+    return response.data.map((d) => d.embedding);
+  } catch (err) {
+    console.error("Embedding generation failed:", err.message);
+    return null;
+  }
+}
+async function processVaultFile(fileId, buffer) {
+  const file = await storage.getVaultFile(fileId);
+  if (!file) return;
+  try {
+    await storage.updateVaultFile(fileId, { embeddingStatus: "processing" });
+    const extractedText = extractTextFromFile(buffer, file.mimeType);
+    await storage.updateVaultFile(fileId, { extractedText });
+    const chunks = chunkText(extractedText);
+    if (chunks.length === 0) {
+      await storage.updateVaultFile(fileId, {
+        embeddingStatus: "completed",
+        chunkCount: 0
+      });
+      return;
+    }
+    const embeddings = await generateEmbeddings(chunks);
+    const chunkRecords = chunks.map((content, idx) => ({
+      fileId: file.id,
+      projectId: file.projectId,
+      chunkIndex: idx,
+      content,
+      embedding: embeddings ? embeddings[idx] : null,
+      tokenCount: Math.ceil(content.length / 4)
+    }));
+    await storage.createVaultChunks(chunkRecords);
+    await storage.updateVaultFile(fileId, {
+      embeddingStatus: embeddings ? "completed" : "no_embeddings",
+      chunkCount: chunks.length
+    });
+  } catch (err) {
+    console.error("Vault file processing failed:", err.message);
+    await storage.updateVaultFile(fileId, { embeddingStatus: "failed" });
+  }
+}
+function cosineSimilarity(a, b) {
+  if (!a || !b || a.length !== b.length) return 0;
+  let dot = 0, normA = 0, normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB) || 1);
+}
+async function retrieveRelevantContext(projectId, query, maxChunks = MAX_RAG_CHUNKS) {
+  const allChunks = await storage.getVaultChunksByProject(projectId);
+  if (allChunks.length === 0) return [];
+  const hasEmbeddings = allChunks.some((c) => c.embedding);
+  if (hasEmbeddings) {
+    const queryEmbedding = await generateEmbeddings([query]);
+    if (queryEmbedding && queryEmbedding[0]) {
+      const scored2 = allChunks.filter((c) => c.embedding).map((chunk) => ({
+        chunk,
+        score: cosineSimilarity(queryEmbedding[0], chunk.embedding)
+      })).sort((a, b) => b.score - a.score).slice(0, maxChunks);
+      const fileIds2 = [...new Set(scored2.map((s) => s.chunk.fileId))];
+      const fileMap2 = /* @__PURE__ */ new Map();
+      for (const fid of fileIds2) {
+        const f = await storage.getVaultFile(fid);
+        if (f) fileMap2.set(fid, f.fileName);
+      }
+      return scored2.map((s) => ({
+        content: s.chunk.content,
+        fileName: fileMap2.get(s.chunk.fileId) || "unknown",
+        score: s.score
+      }));
+    }
+  }
+  const queryLower = query.toLowerCase();
+  const keywords = queryLower.split(/\s+/).filter((w) => w.length > 3);
+  const scored = allChunks.map((chunk) => {
+    const contentLower = chunk.content.toLowerCase();
+    let score = 0;
+    for (const kw of keywords) {
+      if (contentLower.includes(kw)) score += 1;
+    }
+    return { chunk, score };
+  });
+  const filtered = scored.filter((s) => s.score > 0).sort((a, b) => b.score - a.score).slice(0, maxChunks);
+  if (filtered.length === 0) {
+    return allChunks.slice(0, maxChunks).map((chunk) => ({
+      content: chunk.content,
+      fileName: "unknown",
+      score: 0
+    }));
+  }
+  const fileIds = [...new Set(filtered.map((s) => s.chunk.fileId))];
+  const fileMap = /* @__PURE__ */ new Map();
+  for (const fid of fileIds) {
+    const f = await storage.getVaultFile(fid);
+    if (f) fileMap.set(fid, f.fileName);
+  }
+  return filtered.map((s) => ({
+    content: s.chunk.content,
+    fileName: fileMap.get(s.chunk.fileId) || "unknown",
+    score: s.score
+  }));
+}
+function formatRAGContext(results) {
+  if (results.length === 0) return "";
+  const sections = results.map(
+    (r, i) => `--- Source: ${r.fileName} (chunk ${i + 1}) ---
+${r.content}`
+  );
+  return `
+
+=== PROJECT VAULT CONTEXT ===
+The following excerpts are from documents uploaded to this project's vault. Use this context to inform your analysis:
+
+${sections.join("\n\n")}
+=== END VAULT CONTEXT ===
+`;
+}
+
+// server/agents/workflow-graph.ts
+function hasApiKey3() {
+  return !!(process.env.AI_INTEGRATIONS_OPENAI_API_KEY && process.env.AI_INTEGRATIONS_OPENAI_BASE_URL);
+}
+var DEFAULT_MODEL2 = "gpt-5-nano";
+function createLLM(model, maxTokens) {
+  if (!hasApiKey3()) return null;
+  return new ChatOpenAI({
+    apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+    configuration: {
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+    },
+    modelName: model || DEFAULT_MODEL2,
+    maxTokens: maxTokens || 8192
+  });
+}
+async function getAgentConfig(agentType) {
+  try {
+    const config = await storage.getAgentConfig(agentType);
+    if (config) return config;
+  } catch {
+  }
+  return {
+    systemPrompt: DEFAULT_PROMPTS[agentType] || "",
+    model: DEFAULT_MODEL2,
+    maxTokens: 8192
+  };
 }
 function repairJson(text2) {
   let s = text2.trim();
@@ -1003,15 +1402,9 @@ function repairJson(text2) {
   const openBrackets = (s.match(/\[/g) || []).length;
   const closeBrackets = (s.match(/\]/g) || []).length;
   s = s.replace(/,\s*([}\]])/g, "$1");
-  if (s.endsWith(",")) {
-    s = s.slice(0, -1);
-  }
-  for (let i = 0; i < openBrackets - closeBrackets; i++) {
-    s += "]";
-  }
-  for (let i = 0; i < openBraces - closeBraces; i++) {
-    s += "}";
-  }
+  if (s.endsWith(",")) s = s.slice(0, -1);
+  for (let i = 0; i < openBrackets - closeBrackets; i++) s += "]";
+  for (let i = 0; i < openBraces - closeBraces; i++) s += "}";
   return s;
 }
 function extractJson(text2) {
@@ -1046,8 +1439,51 @@ function extractJson(text2) {
   }
   return JSON.parse(text2);
 }
+async function callLLMWithLangChain(systemPrompt, userPrompt, model, maxTokens, retries = 1) {
+  const llm = createLLM(model, maxTokens);
+  if (!llm) return "";
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const prompt = attempt > 0 ? `${userPrompt}
+
+IMPORTANT: Your previous response was truncated. Please produce a SHORTER, more concise response that fits within the token limit. Use fewer nodes, shorter descriptions, and minimal whitespace in JSON output.` : userPrompt;
+    const response = await llm.invoke([
+      new SystemMessage(systemPrompt),
+      new HumanMessage(prompt)
+    ]);
+    const content = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+    if (response.response_metadata?.finish_reason === "length" && attempt < retries) {
+      continue;
+    }
+    return content;
+  }
+  return "";
+}
+var ConsultingState = Annotation.Root({
+  projectId: Annotation,
+  objective: Annotation,
+  constraints: Annotation,
+  targetStep: Annotation,
+  onProgress: Annotation,
+  vaultContext: Annotation({ reducer: (_, b) => b, default: () => "" }),
+  projectDefinitionResult: Annotation({ reducer: (_, b) => b, default: () => null }),
+  issues: Annotation({ reducer: (_, b) => b, default: () => [] }),
+  criticLog: Annotation({ reducer: (_, b) => b, default: () => [] }),
+  criticIteration: Annotation({ reducer: (_, b) => b, default: () => 0 }),
+  hypothesesResult: Annotation({ reducer: (_, b) => b, default: () => null }),
+  executionResults: Annotation({ reducer: (_, b) => b, default: () => [] }),
+  summaryResult: Annotation({ reducer: (_, b) => b, default: () => null }),
+  presentationResult: Annotation({ reducer: (_, b) => b, default: () => null }),
+  deliverableContent: Annotation({ reducer: (_, b) => b, default: () => null }),
+  deliverableTitle: Annotation({ reducer: (_, b) => b, default: () => "" }),
+  error: Annotation({ reducer: (_, b) => b, default: () => "" })
+});
+function appendVaultContext(prompt, vaultCtx) {
+  if (!vaultCtx) return prompt;
+  return `${prompt}
+
+${vaultCtx}`;
+}
 function formatTreeForCritic(issues, objective) {
-  const roots = issues.filter((n) => !n.parentId);
   function renderBranch(parentId, indent) {
     const children = issues.filter((n) => n.parentId === parentId);
     return children.map((c) => {
@@ -1064,113 +1500,211 @@ ${sub}` : line;
 Issues Tree (${issues.length} nodes):
 ${treeText}`;
 }
-var MAX_REVISIONS = 2;
-async function issuesTreeAgent(objective, constraints) {
-  if (!openai2) {
-    return {
-      issues: [
-        { id: "1", parentId: null, text: "Market Entry Strategy", priority: "high" },
-        { id: "2", parentId: "1", text: "Target Market Sizing", priority: "high" },
-        { id: "3", parentId: "2", text: "Addressable Market Segments", priority: "high" },
-        { id: "4", parentId: "2", text: "Growth Rate Projections", priority: "medium" },
-        { id: "5", parentId: "1", text: "Competitive Landscape", priority: "medium" },
-        { id: "6", parentId: "5", text: "Key Competitor Positioning", priority: "medium" },
-        { id: "7", parentId: "5", text: "Barrier to Entry Analysis", priority: "high" },
-        { id: "8", parentId: null, text: "Revenue Model Design", priority: "high" },
-        { id: "9", parentId: "8", text: "Pricing Strategy", priority: "high" },
-        { id: "10", parentId: "9", text: "Price Elasticity Testing", priority: "medium" },
-        { id: "11", parentId: "9", text: "Tiered Pricing Structure", priority: "high" },
-        { id: "12", parentId: "8", text: "Channel Mix Selection", priority: "medium" },
-        { id: "13", parentId: "12", text: "Direct Sales Capacity", priority: "medium" },
-        { id: "14", parentId: "12", text: "Partner Distribution", priority: "low" },
-        { id: "15", parentId: null, text: "Operational Readiness", priority: "medium" },
-        { id: "16", parentId: "15", text: "Team Scaling Plan", priority: "medium" },
-        { id: "17", parentId: "16", text: "Hiring Pipeline", priority: "medium" },
-        { id: "18", parentId: "16", text: "Training Programs", priority: "low" },
-        { id: "19", parentId: "15", text: "Technology Infrastructure", priority: "low" },
-        { id: "20", parentId: "19", text: "Platform Architecture", priority: "low" },
-        { id: "21", parentId: "19", text: "Data Pipeline Setup", priority: "medium" }
+async function projectDefinitionNode(state) {
+  const progress = state.onProgress;
+  progress("Starting Project Definition agent...", "status");
+  if (!hasApiKey3()) {
+    progress("Running in mock mode (no API key configured)", "status");
+    const result = {
+      decision_statement: `Determine the optimal strategic approach to: ${state.objective}`,
+      governing_question: `Should we pursue the proposed strategy in order to achieve ${state.objective}, given ${state.constraints || "current resource constraints"}, by the next 12-month planning cycle?`,
+      decision_owner: "Executive Leadership / Project Sponsor",
+      decision_deadline: "Within 4-6 weeks of project initiation",
+      success_metrics: [
+        { metric_name: "Revenue Impact", definition: "Net incremental revenue attributable to the initiative", threshold_or_target: ">$1M within 12 months" },
+        { metric_name: "ROI", definition: "Return on investment over the project period", threshold_or_target: ">15% annualized" },
+        { metric_name: "Implementation Feasibility", definition: "Assessed probability of successful execution", threshold_or_target: ">70% confidence" }
       ],
-      criticLog: [{
-        iteration: 0,
-        critic: {
-          verdict: "approved",
-          scores: {
-            overlap: { score: 5, details: "No overlap between sibling branches" },
-            coverage: { score: 4, details: "Key dimensions covered: market, revenue, operations" },
-            mixedLogics: { score: 4, details: "Consistent strategic decomposition at each level" },
-            branchBalance: { score: 4, details: "Balanced across 3 root branches (7/7/7 nodes)" },
-            labelQuality: { score: 5, details: "All labels are specific and descriptive" }
-          },
-          overallScore: 4,
-          revisionInstructions: ""
-        }
-      }]
+      alternatives: [
+        "Pursue full-scale implementation immediately",
+        "Phased rollout starting with pilot program",
+        "Partner or acquire capability externally",
+        "Do nothing \u2014 maintain current trajectory"
+      ],
+      constraints: {
+        budget: state.constraints?.includes("budget") ? state.constraints : "To be confirmed; assume moderate investment envelope",
+        regulatory: "Standard industry compliance requirements apply",
+        time: state.constraints?.includes("timeline") ? state.constraints : "Decision needed within current planning cycle",
+        political: "Stakeholder alignment required across key business units",
+        operational: "Must be achievable with existing team capacity plus reasonable augmentation"
+      },
+      assumptions: [
+        "Current market conditions remain broadly stable over the analysis period",
+        "Organization has willingness to allocate resources if the case is compelling",
+        "Data sufficient for directional analysis is available or obtainable",
+        "No major regulatory changes expected in the near term"
+      ],
+      initial_hypothesis: `The proposed initiative is likely to deliver positive returns, but the magnitude depends on execution speed and market timing. A phased approach may reduce risk while preserving upside.`,
+      key_uncertainties: [
+        "Actual market size and addressable share",
+        "Competitive response timeline and intensity",
+        "Internal execution capability and speed",
+        "Customer adoption rate assumptions"
+      ],
+      information_gaps: [
+        "Detailed competitive landscape data",
+        "Customer willingness-to-pay research",
+        "Internal cost structure for new capabilities",
+        "Regulatory timeline for any required approvals"
+      ]
     };
+    progress("Analysis complete. Generated project definition with " + result.success_metrics.length + " success metrics.", "status");
+    return { projectDefinitionResult: result, deliverableContent: result, deliverableTitle: "Project Definition" };
   }
-  const generatorPrompt = await getAgentPrompt("issues_tree");
-  const generatorModel = await getAgentModel("issues_tree");
-  const generatorMaxTokens = await getAgentMaxTokens("issues_tree");
-  const criticPrompt = await getAgentPrompt("mece_critic");
-  const criticModel = await getAgentModel("mece_critic");
-  const criticMaxTokens = await getAgentMaxTokens("mece_critic");
-  const baseUserPrompt = `Objective: ${objective}
-Constraints: ${constraints}`;
-  const criticLog = [];
-  let currentTree;
-  let raw = await callLLM(generatorPrompt, baseUserPrompt, generatorModel, generatorMaxTokens);
-  currentTree = extractJson(raw);
-  for (let iteration = 0; iteration <= MAX_REVISIONS; iteration++) {
-    const treeDescription = formatTreeForCritic(currentTree.issues, objective);
-    const criticRaw = await callLLM(criticPrompt, treeDescription, criticModel, criticMaxTokens);
-    let criticResult;
-    try {
-      criticResult = extractJson(criticRaw);
-    } catch {
-      criticResult = {
-        verdict: "approved",
-        scores: {
-          overlap: { score: 3, details: "Could not parse critic response" },
-          coverage: { score: 3, details: "Could not parse critic response" },
-          mixedLogics: { score: 3, details: "Could not parse critic response" },
-          branchBalance: { score: 3, details: "Could not parse critic response" },
-          labelQuality: { score: 3, details: "Could not parse critic response" }
-        },
-        overallScore: 3,
-        revisionInstructions: ""
-      };
-    }
-    criticLog.push({ iteration, critic: criticResult });
-    if (criticResult.verdict === "approved" || iteration === MAX_REVISIONS) {
-      break;
-    }
-    const revisionPrompt = `${baseUserPrompt}
+  const config = await getAgentConfig("project_definition");
+  progress(`Calling LLM with model ${config.model}...`, "llm");
+  const userPrompt = appendVaultContext(`Project Objective: ${state.objective}
+
+Constraints & Context: ${state.constraints}`, state.vaultContext);
+  const raw = await callLLMWithLangChain(config.systemPrompt, userPrompt, config.model, config.maxTokens);
+  progress("LLM response received, parsing output...", "llm");
+  const parsed = extractJson(raw);
+  progress("Analysis complete. Generated project definition with " + (parsed.success_metrics?.length || 0) + " success metrics.", "status");
+  return { projectDefinitionResult: parsed, deliverableContent: parsed, deliverableTitle: "Project Definition" };
+}
+async function issuesTreeNode(state) {
+  const progress = state.onProgress;
+  progress("Starting Issues Tree agent...", "status");
+  if (!hasApiKey3()) {
+    progress("Running in mock mode (no API key configured)", "status");
+    const mockIssues = [
+      { id: "1", parentId: null, text: "Market Entry Strategy", priority: "high" },
+      { id: "2", parentId: "1", text: "Target Market Sizing", priority: "high" },
+      { id: "3", parentId: "2", text: "Addressable Market Segments", priority: "high" },
+      { id: "4", parentId: "2", text: "Growth Rate Projections", priority: "medium" },
+      { id: "5", parentId: "1", text: "Competitive Landscape", priority: "medium" },
+      { id: "6", parentId: "5", text: "Key Competitor Positioning", priority: "medium" },
+      { id: "7", parentId: "5", text: "Barrier to Entry Analysis", priority: "high" },
+      { id: "8", parentId: null, text: "Revenue Model Design", priority: "high" },
+      { id: "9", parentId: "8", text: "Pricing Strategy", priority: "high" },
+      { id: "10", parentId: "9", text: "Price Elasticity Testing", priority: "medium" },
+      { id: "11", parentId: "9", text: "Tiered Pricing Structure", priority: "high" },
+      { id: "12", parentId: "8", text: "Channel Mix Selection", priority: "medium" },
+      { id: "13", parentId: "12", text: "Direct Sales Capacity", priority: "medium" },
+      { id: "14", parentId: "12", text: "Partner Distribution", priority: "low" },
+      { id: "15", parentId: null, text: "Operational Readiness", priority: "medium" },
+      { id: "16", parentId: "15", text: "Team Scaling Plan", priority: "medium" },
+      { id: "17", parentId: "16", text: "Hiring Pipeline", priority: "medium" },
+      { id: "18", parentId: "16", text: "Training Programs", priority: "low" },
+      { id: "19", parentId: "15", text: "Technology Infrastructure", priority: "low" },
+      { id: "20", parentId: "19", text: "Platform Architecture", priority: "low" },
+      { id: "21", parentId: "19", text: "Data Pipeline Setup", priority: "medium" }
+    ];
+    progress("Analysis complete. Generated " + mockIssues.length + " issue nodes.", "status");
+    return { issues: mockIssues, criticIteration: 0 };
+  }
+  const config = await getAgentConfig("issues_tree");
+  const baseUserPrompt = appendVaultContext(`Objective: ${state.objective}
+Constraints: ${state.constraints}`, state.vaultContext);
+  if (state.criticIteration > 0 && state.criticLog.length > 0) {
+    const lastCritic = state.criticLog[state.criticLog.length - 1]?.critic;
+    if (lastCritic) {
+      progress("Revising tree based on critic feedback...", "critic");
+      const revisionPrompt = `${baseUserPrompt}
 
 ---
 PREVIOUS TREE (needs revision):
-${formatTreeForCritic(currentTree.issues, objective)}
+${formatTreeForCritic(state.issues, state.objective)}
 
 ---
-MECE CRITIC FEEDBACK (iteration ${iteration + 1}):
-Overall Score: ${criticResult.overallScore}/5
-Overlap: ${criticResult.scores.overlap.score}/5 \u2014 ${criticResult.scores.overlap.details}
-Coverage: ${criticResult.scores.coverage.score}/5 \u2014 ${criticResult.scores.coverage.details}
-Mixed Logics: ${criticResult.scores.mixedLogics.score}/5 \u2014 ${criticResult.scores.mixedLogics.details}
-Branch Balance: ${criticResult.scores.branchBalance.score}/5 \u2014 ${criticResult.scores.branchBalance.details}
-Label Quality: ${criticResult.scores.labelQuality.score}/5 \u2014 ${criticResult.scores.labelQuality.details}
+MECE CRITIC FEEDBACK (iteration ${state.criticIteration}):
+Overall Score: ${lastCritic.overallScore}/5
+Overlap: ${lastCritic.scores.overlap.score}/5 \u2014 ${lastCritic.scores.overlap.details}
+Coverage: ${lastCritic.scores.coverage.score}/5 \u2014 ${lastCritic.scores.coverage.details}
+Mixed Logics: ${lastCritic.scores.mixedLogics.score}/5 \u2014 ${lastCritic.scores.mixedLogics.details}
+Branch Balance: ${lastCritic.scores.branchBalance.score}/5 \u2014 ${lastCritic.scores.branchBalance.details}
+Label Quality: ${lastCritic.scores.labelQuality.score}/5 \u2014 ${lastCritic.scores.labelQuality.details}
 
 REVISION INSTRUCTIONS:
-${criticResult.revisionInstructions}
+${lastCritic.revisionInstructions}
 
 Please produce a REVISED issues tree that addresses ALL the critic's feedback. Return the full tree in the same JSON format.`;
-    raw = await callLLM(generatorPrompt, revisionPrompt, generatorModel, generatorMaxTokens);
-    currentTree = extractJson(raw);
+      const raw2 = await callLLMWithLangChain(config.systemPrompt, revisionPrompt, config.model, config.maxTokens);
+      const parsed2 = extractJson(raw2);
+      return { issues: parsed2.issues || parsed2 };
+    }
   }
-  return { ...currentTree, criticLog };
+  progress(`Calling LLM with model ${config.model}...`, "llm");
+  const raw = await callLLMWithLangChain(config.systemPrompt, baseUserPrompt, config.model, config.maxTokens);
+  progress("LLM response received, parsing output...", "llm");
+  const parsed = extractJson(raw);
+  return { issues: parsed.issues || parsed, criticIteration: 0 };
 }
-async function hypothesisAgent(issues) {
-  if (!openai2) {
-    const topIssues = issues.slice(0, 3);
+var MAX_REVISIONS = 2;
+async function meceCriticNode(state) {
+  const progress = state.onProgress;
+  const iteration = state.criticIteration;
+  progress(`Running MECE Critic evaluation (iteration ${iteration + 1})...`, "critic");
+  if (!hasApiKey3()) {
+    const mockCritic = {
+      verdict: "approved",
+      scores: {
+        overlap: { score: 5, details: "No overlap between sibling branches" },
+        coverage: { score: 4, details: "Key dimensions covered: market, revenue, operations" },
+        mixedLogics: { score: 4, details: "Consistent strategic decomposition at each level" },
+        branchBalance: { score: 4, details: "Balanced across 3 root branches (7/7/7 nodes)" },
+        labelQuality: { score: 5, details: "All labels are specific and descriptive" }
+      },
+      overallScore: 4,
+      revisionInstructions: ""
+    };
+    progress(`Critic verdict: ${mockCritic.verdict}, score: ${mockCritic.overallScore}/5`, "critic");
+    return {
+      criticLog: [...state.criticLog, { iteration, critic: mockCritic }],
+      criticIteration: iteration + 1
+    };
+  }
+  const config = await getAgentConfig("mece_critic");
+  const treeDescription = formatTreeForCritic(state.issues, state.objective);
+  const criticRaw = await callLLMWithLangChain(config.systemPrompt, treeDescription, config.model, config.maxTokens);
+  let criticResult;
+  try {
+    criticResult = extractJson(criticRaw);
+  } catch {
+    criticResult = {
+      verdict: "approved",
+      scores: {
+        overlap: { score: 3, details: "Could not parse critic response" },
+        coverage: { score: 3, details: "Could not parse critic response" },
+        mixedLogics: { score: 3, details: "Could not parse critic response" },
+        branchBalance: { score: 3, details: "Could not parse critic response" },
+        labelQuality: { score: 3, details: "Could not parse critic response" }
+      },
+      overallScore: 3,
+      revisionInstructions: ""
+    };
+  }
+  progress(`Critic verdict: ${criticResult.verdict}, score: ${criticResult.overallScore}/5`, "critic");
+  return {
+    criticLog: [...state.criticLog, { iteration, critic: criticResult }],
+    criticIteration: iteration + 1
+  };
+}
+function meceCriticRouter(state) {
+  const lastCritic = state.criticLog[state.criticLog.length - 1]?.critic;
+  if (!lastCritic) return "finalize_issues";
+  if (lastCritic.verdict === "approved" || state.criticIteration > MAX_REVISIONS) {
+    return "finalize_issues";
+  }
+  return "issues_tree";
+}
+async function finalizeIssuesNode(state) {
+  const progress = state.onProgress;
+  progress("Analysis complete. Generated " + state.issues.length + " issue nodes.", "status");
+  return {
+    deliverableContent: { issues: state.issues, criticLog: state.criticLog },
+    deliverableTitle: "Issues Tree"
+  };
+}
+async function hypothesisNode(state) {
+  const progress = state.onProgress;
+  progress("Starting Hypothesis agent...", "status");
+  const issueNodesData = await storage.getIssueNodes(state.projectId);
+  const latestVersion = issueNodesData[0]?.version || 1;
+  const latestIssues = issueNodesData.filter((n) => n.version === latestVersion);
+  if (!hasApiKey3()) {
+    progress("Running in mock mode (no API key configured)", "status");
+    const topIssues = latestIssues.slice(0, 3);
     const hyps = topIssues.map((issue, i) => ({
       issueNodeId: String(issue.id),
       statement: `If we address "${issue.text}", we can achieve 15-25% improvement in the target metric`,
@@ -1190,50 +1724,74 @@ async function hypothesisAgent(issues) {
       },
       requiredDataset: "Financial projections + market data"
     }));
-    return { hypotheses: hyps, analysisPlan: plans };
+    progress("Analysis complete. Generated " + hyps.length + " hypotheses.", "status");
+    return {
+      hypothesesResult: { hypotheses: hyps, analysisPlan: plans },
+      deliverableContent: { hypotheses: hyps, analysisPlan: plans },
+      deliverableTitle: "Hypotheses & Analysis Plan"
+    };
   }
-  const issuesList = issues.map((i) => `- [ID:${i.id}] ${i.text} (${i.priority})`).join("\n");
-  const systemPrompt = await getAgentPrompt("hypothesis");
-  const model = await getAgentModel("hypothesis");
-  const maxTokens = await getAgentMaxTokens("hypothesis");
-  const raw = await callLLM(systemPrompt, `Issues:
-${issuesList}`, model, maxTokens);
-  return extractJson(raw);
+  const issuesList = latestIssues.map((i) => `- [ID:${i.id}] ${i.text} (${i.priority})`).join("\n");
+  const config = await getAgentConfig("hypothesis");
+  progress(`Calling LLM with model ${config.model}...`, "llm");
+  const raw = await callLLMWithLangChain(config.systemPrompt, appendVaultContext(`Issues:
+${issuesList}`, state.vaultContext), config.model, config.maxTokens);
+  progress("LLM response received, parsing output...", "llm");
+  const parsed = extractJson(raw);
+  progress("Analysis complete. Generated " + (parsed.hypotheses?.length || 0) + " hypotheses.", "status");
+  return {
+    hypothesesResult: parsed,
+    deliverableContent: parsed,
+    deliverableTitle: "Hypotheses & Analysis Plan"
+  };
 }
-async function executionAgent(plans) {
+async function executionNode(state) {
+  const progress = state.onProgress;
+  progress("Starting Execution agent...", "status");
+  const plans = await storage.getAnalysisPlan(state.projectId);
   const results = [];
-  for (const plan of plans) {
+  for (let idx = 0; idx < plans.length; idx++) {
+    const plan = plans[idx];
+    progress(`Running scenario ${idx + 1} of ${plans.length}...`, "status");
+    const pJson = plan.parametersJson;
     const params = {
-      baselineRevenue: plan.parameters.baselineRevenue || 1e6,
-      growthRate: plan.parameters.growthRate || 0.1,
-      costReduction: plan.parameters.costReduction || 0.05,
-      timeHorizonYears: plan.parameters.timeHorizonYears || 5,
-      volatility: plan.parameters.volatility || 0.15
+      baselineRevenue: pJson?.baselineRevenue || 1e6,
+      growthRate: pJson?.growthRate || 0.1,
+      costReduction: pJson?.costReduction || 0.05,
+      timeHorizonYears: pJson?.timeHorizonYears || 5,
+      volatility: pJson?.volatility || 0.15
     };
     const outputs = runScenarioTool(params);
-    results.push({
-      toolName: "run_scenario_tool",
-      inputs: params,
-      outputs
-    });
+    results.push({ toolName: "run_scenario_tool", inputs: params, outputs });
   }
-  return results;
+  progress("Analysis complete. Generated " + results.length + " scenario results.", "status");
+  return {
+    executionResults: results,
+    deliverableContent: results,
+    deliverableTitle: "Scenario Analysis Results"
+  };
 }
-async function summaryAgent(objective, constraints, hypotheses2, modelRuns2) {
-  if (!openai2) {
-    const bullets = hypotheses2.map((h, i) => {
-      const run = modelRuns2[i];
+async function summaryNode(state) {
+  const progress = state.onProgress;
+  progress("Starting Summary agent...", "status");
+  const hyps = await storage.getHypotheses(state.projectId);
+  const runs = await storage.getModelRuns(state.projectId);
+  const latestVersion = hyps[0]?.version || 1;
+  const latestHyps = hyps.filter((h) => h.version === latestVersion);
+  if (!hasApiKey3()) {
+    progress("Running in mock mode (no API key configured)", "status");
+    const bullets = latestHyps.map((h, i) => {
+      const run = runs[i];
       const summary = run?.outputsJson?.summary;
       if (summary) {
         return `- ${h.statement}: Expected NPV of $${summary.expectedValue?.toLocaleString() || "N/A"} with risk-adjusted return of ${summary.riskAdjustedReturn || "N/A"}%`;
       }
       return `- ${h.statement}: Analysis pending`;
     }).join("\n");
-    return {
-      summaryText: `# Executive Summary
+    const summaryText2 = `# Executive Summary
 
 ## Objective
-${objective}
+${state.objective}
 
 ## Key Findings
 ${bullets}
@@ -1245,174 +1803,728 @@ Based on scenario analysis across baseline, optimistic, and pessimistic cases, t
 1. Validate assumptions with stakeholder interviews
 2. Develop detailed implementation roadmap
 3. Establish KPI tracking framework
-4. Begin Phase 1 execution within 30 days`
+4. Begin Phase 1 execution within 30 days`;
+    progress("Analysis complete. Generated executive summary.", "status");
+    return {
+      summaryResult: { summaryText: summaryText2 },
+      deliverableContent: { summaryText: summaryText2 },
+      deliverableTitle: "Executive Summary"
     };
   }
-  const hypList = hypotheses2.map((h, i) => {
-    const run = modelRuns2[i];
+  const hypList = latestHyps.map((h, i) => {
+    const run = runs[i];
     return `Hypothesis: ${h.statement}
 Metric: ${h.metric}
 Model Results: ${JSON.stringify(run?.outputsJson?.summary || "No results")}`;
   }).join("\n\n");
-  const systemPrompt = await getAgentPrompt("summary");
-  const model = await getAgentModel("summary");
-  const maxTokens = await getAgentMaxTokens("summary");
-  const userPrompt = `Objective: ${objective}
-Constraints: ${constraints}
+  const config = await getAgentConfig("summary");
+  progress(`Calling LLM with model ${config.model}...`, "llm");
+  const userPrompt = appendVaultContext(`Objective: ${state.objective}
+Constraints: ${state.constraints}
 
 Hypotheses & Results:
-${hypList}`;
-  const summaryText = await callLLM(systemPrompt, userPrompt, model, maxTokens);
-  return { summaryText: summaryText || "Summary generation failed." };
+${hypList}`, state.vaultContext);
+  const summaryText = await callLLMWithLangChain(config.systemPrompt, userPrompt, config.model, config.maxTokens);
+  progress("LLM response received, parsing output...", "llm");
+  progress("Analysis complete. Generated executive summary.", "status");
+  return {
+    summaryResult: { summaryText: summaryText || "Summary generation failed." },
+    deliverableContent: { summaryText: summaryText || "Summary generation failed." },
+    deliverableTitle: "Executive Summary"
+  };
 }
-async function presentationAgent(projectName, objective, summaryText, hypotheses2, modelRuns2) {
-  if (!openai2) {
+async function presentationNode(state) {
+  const progress = state.onProgress;
+  progress("Starting Presentation agent...", "status");
+  const narrs = await storage.getNarratives(state.projectId);
+  const hyps = await storage.getHypotheses(state.projectId);
+  const runs = await storage.getModelRuns(state.projectId);
+  const latestVersion = hyps[0]?.version || 1;
+  const latestHyps = hyps.filter((h) => h.version === latestVersion);
+  const latestNarr = narrs[0];
+  const project = await storage.getProject(state.projectId);
+  const projectName = project?.name || "Consulting Analysis";
+  if (!hasApiKey3()) {
+    progress("Running in mock mode (no API key configured)", "status");
     const mockSlides = [
-      {
-        slideIndex: 0,
-        layout: "title_slide",
-        title: projectName,
-        subtitle: "Strategic Analysis & Recommendations",
-        bodyJson: {},
-        notesText: "Welcome and introductions"
-      },
-      {
-        slideIndex: 1,
-        layout: "section_header",
-        title: "Executive Summary",
-        subtitle: "Key findings from our analysis",
-        bodyJson: {},
-        notesText: "Transition to executive overview"
-      },
-      {
-        slideIndex: 2,
-        layout: "title_body",
-        title: "Objective & Scope",
-        subtitle: null,
-        bodyJson: {
-          bullets: [
-            objective,
-            "Multi-scenario financial modeling",
-            "Risk-adjusted return analysis",
-            "Data-driven recommendations"
-          ]
-        },
-        notesText: "Review the project scope and analytical approach"
-      },
-      {
-        slideIndex: 3,
-        layout: "metrics",
-        title: "Key Financial Metrics",
-        subtitle: null,
-        bodyJson: {
-          metrics: (() => {
-            const run = modelRuns2[0]?.outputsJson?.summary;
-            return [
-              { label: "Expected NPV", value: run ? `$${(run.expectedValue / 1e3).toFixed(0)}K` : "$850K", change: "+22%" },
-              { label: "Best Case", value: run ? `$${(run.optimisticNpv / 1e3).toFixed(0)}K` : "$1.2M", change: "Upside" },
-              { label: "Risk-Adj Return", value: run ? `${run.riskAdjustedReturn}%` : "18%", change: "+5pp" }
-            ];
-          })()
-        },
-        notesText: "Walk through each metric and its implications"
-      },
-      {
-        slideIndex: 4,
-        layout: "two_column",
-        title: "Scenario Comparison",
-        subtitle: null,
-        bodyJson: {
-          leftTitle: "Baseline Scenario",
-          leftBullets: [
-            "Conservative growth assumptions",
-            "Moderate cost efficiencies",
-            "Stable market conditions"
-          ],
-          rightTitle: "Optimistic Scenario",
-          rightBullets: [
-            "Accelerated market capture",
-            "Full cost reduction realized",
-            "Favorable competitive dynamics"
-          ]
-        },
-        notesText: "Compare the two primary scenarios"
-      },
-      {
-        slideIndex: 5,
-        layout: "title_body",
-        title: "Key Findings",
-        subtitle: null,
-        bodyJson: {
-          bullets: hypotheses2.slice(0, 4).map(
-            (h) => h.statement.length > 60 ? h.statement.slice(0, 57) + "..." : h.statement
-          )
-        },
-        notesText: "Detail each hypothesis and supporting evidence"
-      },
-      {
-        slideIndex: 6,
-        layout: "title_body",
-        title: "Recommendations",
-        subtitle: null,
-        bodyJson: {
-          bullets: [
-            "Proceed with phased implementation",
-            "Prioritize highest-NPV initiatives",
-            "Establish KPI tracking framework",
-            "Conduct monthly progress reviews"
-          ]
-        },
-        notesText: "Present the recommended course of action"
-      },
-      {
-        slideIndex: 7,
-        layout: "title_body",
-        title: "Next Steps",
-        subtitle: "30-60-90 Day Plan",
-        bodyJson: {
-          bullets: [
-            "Days 1-30: Stakeholder alignment",
-            "Days 31-60: Pilot program launch",
-            "Days 61-90: Scale & optimize",
-            "Ongoing: Monthly KPI review"
-          ]
-        },
-        notesText: "Outline the implementation timeline"
-      },
-      {
-        slideIndex: 8,
-        layout: "section_header",
-        title: "Thank You",
-        subtitle: "Questions & Discussion",
-        bodyJson: {},
-        notesText: "Open floor for Q&A"
-      }
+      { slideIndex: 0, layout: "title_slide", title: projectName, subtitle: "Strategic Analysis & Recommendations", bodyJson: {}, notesText: "Welcome and introductions" },
+      { slideIndex: 1, layout: "section_header", title: "Executive Summary", subtitle: "Key findings from our analysis", bodyJson: {}, notesText: "Transition to executive overview" },
+      { slideIndex: 2, layout: "title_body", title: "Objective & Scope", subtitle: null, bodyJson: { bullets: [state.objective, "Multi-scenario financial modeling", "Risk-adjusted return analysis", "Data-driven recommendations"] }, notesText: "Review the project scope and analytical approach" },
+      { slideIndex: 3, layout: "metrics", title: "Key Financial Metrics", subtitle: null, bodyJson: { metrics: (() => {
+        const run = runs[0]?.outputsJson?.summary;
+        return [{ label: "Expected NPV", value: run ? `$${(run.expectedValue / 1e3).toFixed(0)}K` : "$850K", change: "+22%" }, { label: "Best Case", value: run ? `$${(run.optimisticNpv / 1e3).toFixed(0)}K` : "$1.2M", change: "Upside" }, { label: "Risk-Adj Return", value: run ? `${run.riskAdjustedReturn}%` : "18%", change: "+5pp" }];
+      })() }, notesText: "Walk through each metric and its implications" },
+      { slideIndex: 4, layout: "two_column", title: "Scenario Comparison", subtitle: null, bodyJson: { leftTitle: "Baseline Scenario", leftBullets: ["Conservative growth assumptions", "Moderate cost efficiencies", "Stable market conditions"], rightTitle: "Optimistic Scenario", rightBullets: ["Accelerated market capture", "Full cost reduction realized", "Favorable competitive dynamics"] }, notesText: "Compare the two primary scenarios" },
+      { slideIndex: 5, layout: "title_body", title: "Key Findings", subtitle: null, bodyJson: { bullets: latestHyps.slice(0, 4).map((h) => h.statement.length > 60 ? h.statement.slice(0, 57) + "..." : h.statement) }, notesText: "Detail each hypothesis and supporting evidence" },
+      { slideIndex: 6, layout: "title_body", title: "Recommendations", subtitle: null, bodyJson: { bullets: ["Proceed with phased implementation", "Prioritize highest-NPV initiatives", "Establish KPI tracking framework", "Conduct monthly progress reviews"] }, notesText: "Present the recommended course of action" },
+      { slideIndex: 7, layout: "title_body", title: "Next Steps", subtitle: "30-60-90 Day Plan", bodyJson: { bullets: ["Days 1-30: Stakeholder alignment", "Days 31-60: Pilot program launch", "Days 61-90: Scale & optimize", "Ongoing: Monthly KPI review"] }, notesText: "Outline the implementation timeline" },
+      { slideIndex: 8, layout: "section_header", title: "Thank You", subtitle: "Questions & Discussion", bodyJson: {}, notesText: "Open floor for Q&A" }
     ];
-    return { slides: mockSlides };
+    progress("Analysis complete. Generated " + mockSlides.length + " slides.", "status");
+    return {
+      presentationResult: { slides: mockSlides },
+      deliverableContent: { slides: mockSlides },
+      deliverableTitle: "Presentation Deck"
+    };
   }
-  const hypSummary = hypotheses2.map((h, i) => {
-    const run = modelRuns2[i];
-    const results = run?.outputsJson?.summary ? `NPV: $${run.outputsJson.summary.expectedValue?.toLocaleString()}, Risk-Adj Return: ${run.outputsJson.summary.riskAdjustedReturn}%` : "No results";
+  const hypSummary = latestHyps.map((h, i) => {
+    const run = runs[i];
+    const oJson = run?.outputsJson;
+    const results = oJson?.summary ? `NPV: $${oJson.summary.expectedValue?.toLocaleString()}, Risk-Adj Return: ${oJson.summary.riskAdjustedReturn}%` : "No results";
     return `- ${h.statement} (${h.metric}): ${results}`;
   }).join("\n");
-  const systemPrompt = await getAgentPrompt("presentation");
-  const model = await getAgentModel("presentation");
-  const maxTokens = await getAgentMaxTokens("presentation");
-  const userPrompt = `Project: ${projectName}
-Objective: ${objective}
+  const config = await getAgentConfig("presentation");
+  progress(`Calling LLM with model ${config.model}...`, "llm");
+  const userPrompt = appendVaultContext(`Project: ${projectName}
+Objective: ${state.objective}
 
 Executive Summary:
-${summaryText}
+${latestNarr?.summaryText || "No summary available"}
 
 Hypotheses & Results:
-${hypSummary}`;
-  const raw = await callLLM(systemPrompt, userPrompt, model, maxTokens);
-  return extractJson(raw);
+${hypSummary}`, state.vaultContext);
+  const raw = await callLLMWithLangChain(config.systemPrompt, userPrompt, config.model, config.maxTokens);
+  progress("LLM response received, parsing output...", "llm");
+  const parsed = extractJson(raw);
+  progress("Analysis complete. Generated " + (parsed.slides?.length || 0) + " slides.", "status");
+  return {
+    presentationResult: parsed,
+    deliverableContent: parsed,
+    deliverableTitle: "Presentation Deck"
+  };
+}
+function routeToStep(state) {
+  return state.targetStep;
+}
+function buildIssuesTreeSubgraph() {
+  const graph = new StateGraph(ConsultingState).addNode("issues_tree", issuesTreeNode).addNode("mece_critic", meceCriticNode).addNode("finalize_issues", finalizeIssuesNode).addEdge(START, "issues_tree").addEdge("issues_tree", "mece_critic").addConditionalEdges("mece_critic", meceCriticRouter, {
+    issues_tree: "issues_tree",
+    finalize_issues: "finalize_issues"
+  }).addEdge("finalize_issues", END);
+  return graph.compile();
+}
+function buildConsultingWorkflow() {
+  const issuesSubgraph = buildIssuesTreeSubgraph();
+  const graph = new StateGraph(ConsultingState).addNode("project_definition", projectDefinitionNode).addNode("issues_tree_subgraph", issuesSubgraph).addNode("hypothesis", hypothesisNode).addNode("execution", executionNode).addNode("summary", summaryNode).addNode("presentation", presentationNode).addConditionalEdges(START, routeToStep, {
+    project_definition: "project_definition",
+    issues_tree: "issues_tree_subgraph",
+    hypothesis: "hypothesis",
+    execution: "execution",
+    summary: "summary",
+    presentation: "presentation"
+  }).addEdge("project_definition", END).addEdge("issues_tree_subgraph", END).addEdge("hypothesis", END).addEdge("execution", END).addEdge("summary", END).addEdge("presentation", END);
+  return graph.compile();
+}
+var _workflow = null;
+function getConsultingWorkflow() {
+  if (!_workflow) {
+    _workflow = buildConsultingWorkflow();
+  }
+  return _workflow;
+}
+async function runWorkflowStep(projectId, agentKey, onProgress = () => {
+}) {
+  const project = await storage.getProject(projectId);
+  if (!project) throw new Error("Project not found");
+  let vaultContext = "";
+  try {
+    const ragQuery = `${project.objective} ${project.constraints}`;
+    const ragResults = await retrieveRelevantContext(projectId, ragQuery, 8);
+    if (ragResults.length > 0) {
+      vaultContext = formatRAGContext(ragResults);
+      onProgress(`Retrieved ${ragResults.length} relevant vault excerpts for context.`, "status");
+    }
+  } catch (err) {
+    console.error("RAG retrieval failed (non-fatal):", err.message);
+  }
+  const workflow = getConsultingWorkflow();
+  const result = await workflow.invoke({
+    projectId,
+    objective: project.objective,
+    constraints: project.constraints,
+    targetStep: agentKey === "issues_tree" ? "issues_tree" : agentKey,
+    onProgress,
+    vaultContext
+  });
+  return {
+    deliverableContent: result.deliverableContent,
+    deliverableTitle: result.deliverableTitle
+  };
+}
+async function refineWithLangGraph(agentKey, currentContent, userFeedback, projectContext, onProgress = () => {
+}) {
+  onProgress("Processing your feedback...", "progress");
+  if (!hasApiKey3()) {
+    onProgress("Applying feedback (mock mode)...", "progress");
+    return currentContent;
+  }
+  const config = await getAgentConfig(agentKey);
+  const refinementPrompt = `You previously generated the following output for this project:
+
+Project Objective: ${projectContext.objective}
+Constraints: ${projectContext.constraints}
+
+Your previous output:
+${JSON.stringify(currentContent, null, 2)}
+
+The user has requested the following changes:
+"${userFeedback}"
+
+Please regenerate the COMPLETE output incorporating the user's feedback. Return the FULL updated output in the same JSON format as before. Do not return partial updates - return the entire revised document.`;
+  onProgress(`Calling LLM with model ${config.model} to refine output...`, "llm");
+  const raw = await callLLMWithLangChain(config.systemPrompt, refinementPrompt, config.model, config.maxTokens);
+  onProgress("LLM response received, parsing refined output...", "llm");
+  const parsed = extractJson(raw);
+  onProgress("Refinement complete.", "status");
+  return parsed;
+}
+
+// server/agents/document-agents.ts
+import { StateGraph as StateGraph2, Annotation as Annotation2, END as END2, START as START2 } from "@langchain/langgraph";
+import { ChatOpenAI as ChatOpenAI2 } from "@langchain/openai";
+import { HumanMessage as HumanMessage2, SystemMessage as SystemMessage2 } from "@langchain/core/messages";
+function hasApiKey4() {
+  return !!(process.env.AI_INTEGRATIONS_OPENAI_API_KEY && process.env.AI_INTEGRATIONS_OPENAI_BASE_URL);
+}
+var DEFAULT_MODEL3 = "gpt-5-nano";
+function createLLM2() {
+  if (!hasApiKey4()) return null;
+  return new ChatOpenAI2({
+    apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+    configuration: {
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+    },
+    modelName: DEFAULT_MODEL3,
+    maxTokens: 4096
+  });
+}
+function extractJson2(text2) {
+  const fenced = text2.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) {
+    try {
+      return JSON.parse(fenced[1].trim());
+    } catch {
+    }
+  }
+  const objMatch = text2.match(/[\[{][\s\S]*[\]}]/);
+  if (objMatch) {
+    try {
+      return JSON.parse(objMatch[0]);
+    } catch {
+    }
+  }
+  return JSON.parse(text2);
+}
+function generateMockReviewComments(documentContent) {
+  const len = documentContent.length;
+  if (len === 0) return [];
+  return [
+    {
+      from: 1,
+      to: Math.min(20, Math.max(2, len)),
+      content: "Consider strengthening the opening to better capture the reader's attention.",
+      proposedText: documentContent.replace(/<[^>]*>/g, "").slice(0, 20)
+    },
+    {
+      from: Math.max(1, Math.floor(len * 0.4)),
+      to: Math.min(Math.floor(len * 0.4) + 30, Math.max(2, len)),
+      content: "This section could be more concise. Consider tightening the language.",
+      proposedText: documentContent.replace(/<[^>]*>/g, "").slice(Math.floor(len * 0.3), Math.floor(len * 0.3) + 20)
+    },
+    {
+      from: Math.max(1, len - 30),
+      to: Math.max(2, len),
+      content: "The conclusion could be stronger. Consider ending with a clear call to action.",
+      proposedText: documentContent.replace(/<[^>]*>/g, "").slice(-20)
+    }
+  ];
+}
+var ReviewState = Annotation2.Root({
+  documentContent: Annotation2,
+  documentTitle: Annotation2,
+  documentId: Annotation2,
+  reviewComments: Annotation2({
+    reducer: (_, b) => b,
+    default: () => []
+  }),
+  savedComments: Annotation2({
+    reducer: (_, b) => b,
+    default: () => []
+  })
+});
+var ActionState = Annotation2.Root({
+  documentContent: Annotation2,
+  documentId: Annotation2,
+  comment: Annotation2,
+  aiReply: Annotation2({ reducer: (_, b) => b, default: () => "" }),
+  proposedText: Annotation2({ reducer: (_, b) => b, default: () => "" }),
+  updatedComment: Annotation2({ reducer: (_, b) => b, default: () => null })
+});
+function generateMockExecutiveReviewComments(documentContent) {
+  const len = documentContent.length;
+  if (len === 0) return [];
+  const plainText = documentContent.replace(/<[^>]*>/g, "");
+  return [
+    {
+      from: 1,
+      to: Math.min(40, Math.max(2, len)),
+      content: "Missing 'so what': This section jumps straight into details without framing why the reader should care. Lead with the strategic implication or business impact before explaining the how.",
+      proposedText: plainText.slice(0, 30)
+    },
+    {
+      from: Math.max(1, Math.floor(len * 0.3)),
+      to: Math.min(Math.floor(len * 0.3) + 50, Math.max(2, len)),
+      content: "Too technical too early: This dives into implementation specifics before establishing the strategic context. An executive reader needs to understand the decision at stake and its impact before the supporting analysis.",
+      proposedText: plainText.slice(Math.floor(len * 0.25), Math.floor(len * 0.25) + 30)
+    },
+    {
+      from: Math.max(1, Math.floor(len * 0.6)),
+      to: Math.min(Math.floor(len * 0.6) + 50, Math.max(2, len)),
+      content: "Weak strategic framing: This reads like a technical report rather than a strategic recommendation. Rewrite to lead with the insight and what action the reader should take, then support with evidence.",
+      proposedText: plainText.slice(Math.floor(len * 0.55), Math.floor(len * 0.55) + 30)
+    }
+  ];
+}
+var FactCheckState = Annotation2.Root({
+  documentContent: Annotation2,
+  documentTitle: Annotation2,
+  documentId: Annotation2,
+  candidates: Annotation2({
+    reducer: (_, b) => b,
+    default: () => []
+  }),
+  savedComments: Annotation2({
+    reducer: (_, b) => b,
+    default: () => []
+  })
+});
+var FactCheckRunState = Annotation2.Root({
+  documentContent: Annotation2,
+  documentId: Annotation2,
+  acceptedCandidates: Annotation2,
+  results: Annotation2({
+    reducer: (_, b) => b,
+    default: () => []
+  })
+});
+function generateMockFactCheckCandidates(documentContent) {
+  const len = documentContent.length;
+  if (len === 0) return [];
+  const plainText = documentContent.replace(/<[^>]*>/g, "");
+  return [
+    {
+      from: 1,
+      to: Math.min(50, Math.max(2, len)),
+      content: "Potential unsubstantiated claim: This statement makes an assertion that may need a source or supporting evidence to verify its accuracy."
+    },
+    {
+      from: Math.max(1, Math.floor(len * 0.4)),
+      to: Math.min(Math.floor(len * 0.4) + 60, Math.max(2, len)),
+      content: "Contains a specific figure or statistic: This number should be verified against the original data source to confirm accuracy."
+    },
+    {
+      from: Math.max(1, Math.floor(len * 0.7)),
+      to: Math.min(Math.floor(len * 0.7) + 40, Math.max(2, len)),
+      content: "Broad generalization: This claim is stated as fact but may be opinion or an oversimplification that requires qualification."
+    }
+  ];
+}
+var _reviewGraph = null;
+var _actionGraph = null;
+var _executiveReviewGraph = null;
+var _factCheckCandidateGraph = null;
+var _factCheckRunGraph = null;
+function getReviewGraph() {
+  if (_reviewGraph) return _reviewGraph;
+  _reviewGraph = new StateGraph2(ReviewState).addNode("analyze", async (state) => {
+    if (!hasApiKey4()) {
+      return { reviewComments: generateMockReviewComments(state.documentContent) };
+    }
+    const llm = createLLM2();
+    const systemPrompt = `You are a critical document reviewer. Analyze the provided text and identify areas for improvement including clarity, grammar, style, structure, and content quality.
+
+Return a JSON array of review comments. Each comment must have:
+- "from": character position where the issue starts (1-indexed, matching ProseMirror positions)
+- "to": character position where the issue ends
+- "content": your review note explaining the issue
+- "proposedText": the suggested replacement text for that range
+
+Return ONLY valid JSON array. Example:
+[{"from": 1, "to": 15, "content": "Weak opening", "proposedText": "A stronger opening"}]
+
+Be specific with character positions. Identify 2-5 meaningful issues.`;
+    try {
+      const response = await llm.invoke([
+        new SystemMessage2(systemPrompt),
+        new HumanMessage2(`Document Title: ${state.documentTitle}
+
+Document Content:
+${state.documentContent}`)
+      ]);
+      const content = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+      if (!content || content.trim().length === 0) {
+        return { reviewComments: generateMockReviewComments(state.documentContent) };
+      }
+      const parsed = extractJson2(content);
+      const comments = Array.isArray(parsed) ? parsed : parsed.comments || parsed.reviewComments || [];
+      const validated = comments.map((c) => ({
+        from: Math.max(1, Math.min(c.from || 1, state.documentContent.length)),
+        to: Math.max(1, Math.min(c.to || 1, state.documentContent.length)),
+        content: c.content || "Review comment",
+        proposedText: c.proposedText || ""
+      }));
+      return { reviewComments: validated.length > 0 ? validated : generateMockReviewComments(state.documentContent) };
+    } catch (e) {
+      console.error("LLM review error, falling back to mock:", e);
+      return { reviewComments: generateMockReviewComments(state.documentContent) };
+    }
+  }).addNode("persist", async (state) => {
+    const saved = [];
+    for (const rc of state.reviewComments) {
+      const comment = await storage.createComment({
+        documentId: state.documentId,
+        from: rc.from,
+        to: rc.to,
+        content: rc.content,
+        type: "ai",
+        proposedText: rc.proposedText
+      });
+      saved.push(comment);
+    }
+    return { savedComments: saved };
+  }).addEdge(START2, "analyze").addEdge("analyze", "persist").addEdge("persist", END2).compile();
+  return _reviewGraph;
+}
+function getActionGraph() {
+  if (_actionGraph) return _actionGraph;
+  _actionGraph = new StateGraph2(ActionState).addNode("plan", async (state) => {
+    const highlightedText = state.documentContent.slice(state.comment.from, state.comment.to);
+    if (!hasApiKey4()) {
+      return {
+        aiReply: `I've reviewed your comment: "${state.comment.content}". Here is a suggested revision for the highlighted text.`,
+        proposedText: highlightedText ? `[Revised] ${highlightedText}` : "Suggested replacement text"
+      };
+    }
+    const llm = createLLM2();
+    const systemPrompt = `You are a document editing assistant. A user has left a comment on a specific part of a document. Your job is to propose a specific text change that addresses the comment.
+
+Return a JSON object with:
+- "aiReply": A brief explanation of what you changed and why
+- "proposedText": The replacement text for the highlighted range
+
+Return ONLY valid JSON. Example:
+{"aiReply": "I rephrased this for clarity.", "proposedText": "The improved text here"}`;
+    try {
+      const response = await llm.invoke([
+        new SystemMessage2(systemPrompt),
+        new HumanMessage2(`Document content:
+${state.documentContent}
+
+Highlighted text (positions ${state.comment.from}-${state.comment.to}):
+"${highlightedText}"
+
+User comment: ${state.comment.content}`)
+      ]);
+      const content = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+      if (!content || content.trim().length === 0) {
+        return {
+          aiReply: `I've reviewed your comment: "${state.comment.content}". Here is a suggested revision.`,
+          proposedText: highlightedText ? `[Revised] ${highlightedText}` : "Suggested replacement text"
+        };
+      }
+      const parsed = extractJson2(content);
+      return {
+        aiReply: parsed.aiReply || "Here is my suggested revision.",
+        proposedText: parsed.proposedText || highlightedText
+      };
+    } catch {
+      return {
+        aiReply: "I've reviewed the comment and suggest a revision.",
+        proposedText: highlightedText || "Suggested replacement text"
+      };
+    }
+  }).addNode("persist", async (state) => {
+    const updated = await storage.updateComment(state.comment.id, {
+      aiReply: state.aiReply,
+      proposedText: state.proposedText
+    });
+    return { updatedComment: updated };
+  }).addEdge(START2, "plan").addEdge("plan", "persist").addEdge("persist", END2).compile();
+  return _actionGraph;
+}
+function getExecutiveReviewGraph() {
+  if (_executiveReviewGraph) return _executiveReviewGraph;
+  _executiveReviewGraph = new StateGraph2(ReviewState).addNode("analyze", async (state) => {
+    if (!hasApiKey4()) {
+      return { reviewComments: generateMockExecutiveReviewComments(state.documentContent) };
+    }
+    const llm = createLLM2();
+    const systemPrompt = `You are a senior consulting partner reviewing a document through an executive lens. Your job is to identify sections that fail the "so what" test \u2014 places where the writing dives into technical details, methodology, or implementation specifics without first establishing WHY the reader should care.
+
+Your review criteria:
+1. **Missing "So What"**: Flag sections that present findings or data without stating the strategic implication. Every paragraph should answer "why does this matter to the decision-maker?"
+2. **Technical Too Early**: Identify where the document leads with methodology, technical architecture, data pipelines, algorithms, or implementation details before establishing the business context or strategic framing.
+3. **Buried Insight**: Call out when the key insight or recommendation is buried at the end of a dense paragraph instead of leading with it.
+4. **No Action Orientation**: Flag sections that describe what was done or found but fail to state what the reader should DO with this information.
+5. **Audience Mismatch**: Identify language, jargon, or detail level that assumes a technical audience when the document should be written for executives or decision-makers.
+
+For each issue, propose a rewritten version that:
+- Leads with the strategic implication or business impact
+- States the "so what" upfront
+- Moves technical details to supporting evidence rather than the lead
+- Ends with a clear recommendation or next step
+
+Return a JSON array of review comments. Each comment must have:
+- "from": character position where the issue starts (1-indexed, matching ProseMirror positions)
+- "to": character position where the issue ends
+- "content": your executive review note \u2014 start with a category label like "Missing 'so what':", "Too technical too early:", "Buried insight:", "No action orientation:", or "Audience mismatch:"
+- "proposedText": the suggested rewrite that leads with strategic framing
+
+Return ONLY valid JSON array. Identify 2-5 meaningful issues.`;
+    try {
+      const response = await llm.invoke([
+        new SystemMessage2(systemPrompt),
+        new HumanMessage2(`Document Title: ${state.documentTitle}
+
+Document Content:
+${state.documentContent}`)
+      ]);
+      const content = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+      if (!content || content.trim().length === 0) {
+        return { reviewComments: generateMockExecutiveReviewComments(state.documentContent) };
+      }
+      const parsed = extractJson2(content);
+      const comments = Array.isArray(parsed) ? parsed : parsed.comments || parsed.reviewComments || [];
+      const validated = comments.map((c) => ({
+        from: Math.max(1, Math.min(c.from || 1, state.documentContent.length)),
+        to: Math.max(1, Math.min(c.to || 1, state.documentContent.length)),
+        content: c.content || "Executive review comment",
+        proposedText: c.proposedText || ""
+      }));
+      return { reviewComments: validated.length > 0 ? validated : generateMockExecutiveReviewComments(state.documentContent) };
+    } catch (e) {
+      console.error("LLM executive review error, falling back to mock:", e);
+      return { reviewComments: generateMockExecutiveReviewComments(state.documentContent) };
+    }
+  }).addNode("persist", async (state) => {
+    const saved = [];
+    for (const rc of state.reviewComments) {
+      const comment = await storage.createComment({
+        documentId: state.documentId,
+        from: rc.from,
+        to: rc.to,
+        content: rc.content,
+        type: "executive",
+        proposedText: rc.proposedText
+      });
+      saved.push(comment);
+    }
+    return { savedComments: saved };
+  }).addEdge(START2, "analyze").addEdge("analyze", "persist").addEdge("persist", END2).compile();
+  return _executiveReviewGraph;
+}
+function getFactCheckCandidateGraph() {
+  if (_factCheckCandidateGraph) return _factCheckCandidateGraph;
+  _factCheckCandidateGraph = new StateGraph2(FactCheckState).addNode("spot", async (state) => {
+    if (!hasApiKey4()) {
+      return { candidates: generateMockFactCheckCandidates(state.documentContent) };
+    }
+    const llm = createLLM2();
+    const systemPrompt = `You are a fact-checking analyst. Your job is to scan a document and identify statements, claims, statistics, or assertions that should be fact-checked. Look for:
+
+1. **Specific statistics or numbers** \u2014 e.g. "revenue grew 40%", "47 microservices", "120ms latency"
+2. **Unsubstantiated claims** \u2014 assertions stated as fact without citing a source
+3. **Bold or sweeping generalizations** \u2014 e.g. "the best in the industry", "always leads to"
+4. **Historical or factual claims** \u2014 dates, events, attributions that could be wrong
+5. **Causal claims** \u2014 statements implying cause and effect without evidence
+
+Do NOT flag opinions clearly marked as opinions, or obvious rhetorical devices.
+
+Return a JSON array of candidate items. Each must have:
+- "from": character position where the claim starts (1-indexed, ProseMirror positions)
+- "to": character position where the claim ends
+- "content": a brief note explaining WHY this should be fact-checked (start with a category like "Statistic:", "Unsubstantiated claim:", "Generalization:", "Causal claim:", or "Historical claim:")
+
+Return ONLY valid JSON array. Identify 2-6 candidates.`;
+    try {
+      const response = await llm.invoke([
+        new SystemMessage2(systemPrompt),
+        new HumanMessage2(`Document Title: ${state.documentTitle}
+
+Document Content:
+${state.documentContent}`)
+      ]);
+      const content = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+      if (!content || content.trim().length === 0) {
+        return { candidates: generateMockFactCheckCandidates(state.documentContent) };
+      }
+      const parsed = extractJson2(content);
+      const items = Array.isArray(parsed) ? parsed : parsed.candidates || parsed.comments || [];
+      const validated = items.map((c) => ({
+        from: Math.max(1, Math.min(c.from || 1, state.documentContent.length)),
+        to: Math.max(1, Math.min(c.to || 1, state.documentContent.length)),
+        content: c.content || "Candidate for fact-checking"
+      }));
+      return { candidates: validated.length > 0 ? validated : generateMockFactCheckCandidates(state.documentContent) };
+    } catch (e) {
+      console.error("LLM factcheck candidate error, falling back to mock:", e);
+      return { candidates: generateMockFactCheckCandidates(state.documentContent) };
+    }
+  }).addNode("persist", async (state) => {
+    const saved = [];
+    for (const c of state.candidates) {
+      const comment = await storage.createComment({
+        documentId: state.documentId,
+        from: c.from,
+        to: c.to,
+        content: c.content,
+        type: "factcheck",
+        proposedText: ""
+      });
+      saved.push(comment);
+    }
+    return { savedComments: saved };
+  }).addEdge(START2, "spot").addEdge("spot", "persist").addEdge("persist", END2).compile();
+  return _factCheckCandidateGraph;
+}
+function getFactCheckRunGraph() {
+  if (_factCheckRunGraph) return _factCheckRunGraph;
+  _factCheckRunGraph = new StateGraph2(FactCheckRunState).addNode("check", async (state) => {
+    const updatedComments = [];
+    for (const candidate of state.acceptedCandidates) {
+      const highlightedText = state.documentContent.slice(
+        Math.max(0, candidate.from - 1),
+        candidate.to
+      );
+      let verdict = "";
+      if (!hasApiKey4()) {
+        verdict = `Fact check result: The claim "${highlightedText.slice(0, 50)}..." appears to be a reasonable assertion but could not be independently verified. Recommend adding a source citation to strengthen credibility.`;
+      } else {
+        const llm = createLLM2();
+        const systemPrompt = `You are a rigorous fact-checker. You are given a specific claim or statement from a document. Your job is to assess its accuracy.
+
+Evaluate the claim and return a JSON object with:
+- "verdict": One of "Verified", "Likely Accurate", "Unverifiable", "Misleading", or "Inaccurate"
+- "explanation": A clear 2-3 sentence explanation of your assessment. Include what you found, why you reached this conclusion, and any caveats.
+- "recommendation": A brief suggestion (e.g. "Add source citation", "Rephrase to qualify the claim", "Remove or correct this figure")
+
+Return ONLY valid JSON.`;
+        try {
+          const response = await llm.invoke([
+            new SystemMessage2(systemPrompt),
+            new HumanMessage2(`Claim to fact-check: "${highlightedText}"
+
+Original reviewer note: ${candidate.content}
+
+Full document context:
+${state.documentContent}`)
+          ]);
+          const content = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+          if (content && content.trim().length > 0) {
+            try {
+              const parsed = extractJson2(content);
+              verdict = `[${parsed.verdict || "Reviewed"}] ${parsed.explanation || "Review complete."} Recommendation: ${parsed.recommendation || "No specific recommendation."}`;
+            } catch {
+              verdict = content.trim().slice(0, 500);
+            }
+          } else {
+            verdict = `Fact check result: The claim "${highlightedText.slice(0, 50)}..." could not be independently verified at this time. Consider adding a source citation.`;
+          }
+        } catch (e) {
+          console.error("LLM fact check error for candidate:", candidate.id, e);
+          verdict = `Fact check result: Unable to verify this claim at this time. Manual verification recommended.`;
+        }
+      }
+      const updated = await storage.updateComment(candidate.id, {
+        aiReply: verdict,
+        status: "accepted"
+      });
+      updatedComments.push(updated);
+    }
+    return { results: updatedComments };
+  }).addEdge(START2, "check").addEdge("check", END2).compile();
+  return _factCheckRunGraph;
+}
+async function spotFactCheckCandidates(doc) {
+  try {
+    const graph = getFactCheckCandidateGraph();
+    const result = await graph.invoke({
+      documentContent: doc.content || "",
+      documentTitle: doc.title || "",
+      documentId: doc.id
+    });
+    return result.savedComments;
+  } catch (error) {
+    console.error("spotFactCheckCandidates error:", error);
+    return [];
+  }
+}
+async function runFactCheck(doc, acceptedCandidates) {
+  try {
+    const graph = getFactCheckRunGraph();
+    const result = await graph.invoke({
+      documentContent: doc.content || "",
+      documentId: doc.id,
+      acceptedCandidates
+    });
+    return result.results;
+  } catch (error) {
+    console.error("runFactCheck error:", error);
+    return [];
+  }
+}
+async function executiveReviewDocument(doc) {
+  try {
+    const graph = getExecutiveReviewGraph();
+    const result = await graph.invoke({
+      documentContent: doc.content || "",
+      documentTitle: doc.title || "",
+      documentId: doc.id
+    });
+    return result.savedComments;
+  } catch (error) {
+    console.error("executiveReviewDocument error:", error);
+    return [];
+  }
+}
+async function reviewDocument(doc) {
+  try {
+    const graph = getReviewGraph();
+    const result = await graph.invoke({
+      documentContent: doc.content || "",
+      documentTitle: doc.title || "",
+      documentId: doc.id
+    });
+    return result.savedComments;
+  } catch (error) {
+    console.error("reviewDocument error:", error);
+    return [];
+  }
+}
+async function actionComment(doc, comment) {
+  try {
+    const graph = getActionGraph();
+    const result = await graph.invoke({
+      documentContent: doc.content || "",
+      documentId: doc.id,
+      comment
+    });
+    return result.updatedComment || comment;
+  } catch (error) {
+    console.error("actionComment error:", error);
+    return comment;
+  }
 }
 
 // server/routes.ts
+var upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }
+});
 var STAGE_ORDER = [
   "created",
+  "definition_draft",
+  "definition_approved",
   "issues_draft",
   "issues_approved",
   "hypotheses_draft",
@@ -1425,20 +2537,31 @@ var STAGE_ORDER = [
   "complete"
 ];
 var APPROVE_MAP = {
+  definition_draft: "definition_approved",
   issues_draft: "issues_approved",
   hypotheses_draft: "hypotheses_approved",
   execution_done: "execution_approved",
   summary_draft: "summary_approved",
   presentation_draft: "complete"
 };
+var UNAPPROVE_MAP = {
+  definition_approved: "definition_draft",
+  issues_approved: "issues_draft",
+  hypotheses_approved: "hypotheses_draft",
+  execution_approved: "execution_done",
+  summary_approved: "summary_draft",
+  complete: "presentation_draft"
+};
 var RUN_NEXT_MAP = {
-  created: "issues_draft",
+  created: "definition_draft",
+  definition_approved: "issues_draft",
   issues_approved: "hypotheses_draft",
   hypotheses_approved: "execution_done",
   execution_approved: "summary_draft",
   summary_approved: "presentation_draft"
 };
 var DEFAULT_AGENTS = [
+  { key: "project_definition", name: "Project Definition", role: "Framing", roleColor: "#F59E0B", description: "Translates vague briefs into structured, decision-based problem definitions with governing questions, success metrics, and initial hypotheses" },
   { key: "issues_tree", name: "Issues Tree", role: "Generator", roleColor: "#3B82F6", description: "Builds MECE issues tree from project objective" },
   { key: "mece_critic", name: "MECE Critic", role: "Quality Gate", roleColor: "#8B5CF6", description: "Validates MECE structure and compliance" },
   { key: "hypothesis", name: "Hypothesis", role: "Analyst", roleColor: "#0891B2", description: "Generates testable hypotheses and analysis plans" },
@@ -1447,11 +2570,12 @@ var DEFAULT_AGENTS = [
   { key: "presentation", name: "Presentation", role: "Designer", roleColor: "#E11D48", description: "Creates professional slide deck" }
 ];
 var DEFAULT_WORKFLOW_STEPS = [
-  { stepOrder: 1, name: "Issues Tree", agentKey: "issues_tree" },
-  { stepOrder: 2, name: "Hypotheses & Analysis Plan", agentKey: "hypothesis" },
-  { stepOrder: 3, name: "Execution", agentKey: "execution" },
-  { stepOrder: 4, name: "Executive Summary", agentKey: "summary" },
-  { stepOrder: 5, name: "Presentation", agentKey: "presentation" }
+  { stepOrder: 1, name: "Project Definition", agentKey: "project_definition" },
+  { stepOrder: 2, name: "Issues Tree", agentKey: "issues_tree" },
+  { stepOrder: 3, name: "Hypotheses & Analysis Plan", agentKey: "hypothesis" },
+  { stepOrder: 4, name: "Execution", agentKey: "execution" },
+  { stepOrder: 5, name: "Executive Summary", agentKey: "summary" },
+  { stepOrder: 6, name: "Presentation", agentKey: "presentation" }
 ];
 async function ensureDefaults() {
   for (const a of DEFAULT_AGENTS) {
@@ -1461,13 +2585,29 @@ async function ensureDefaults() {
   if (templates.length === 0) {
     const template = await storage.createWorkflowTemplate({
       name: "Consulting Analysis",
-      description: "Standard consulting workflow: Issues Tree -> Hypotheses -> Execution -> Summary -> Presentation"
+      description: "Standard consulting workflow: Project Definition -> Issues Tree -> Hypotheses -> Execution -> Summary -> Presentation"
     });
     for (const step of DEFAULT_WORKFLOW_STEPS) {
       await storage.addWorkflowTemplateStep({
         workflowTemplateId: template.id,
         ...step
       });
+    }
+  } else {
+    for (const template of templates) {
+      const steps = await storage.getWorkflowTemplateSteps(template.id);
+      const hasDefinition = steps.some((s) => s.agentKey === "project_definition");
+      if (!hasDefinition) {
+        for (const s of steps) {
+          await storage.updateWorkflowTemplateStep(s.id, { stepOrder: s.stepOrder + 1 });
+        }
+        await storage.addWorkflowTemplateStep({
+          workflowTemplateId: template.id,
+          stepOrder: 1,
+          name: "Project Definition",
+          agentKey: "project_definition"
+        });
+      }
     }
   }
 }
@@ -1562,164 +2702,260 @@ async function registerRoutes(app2) {
       res.status(500).json({ error: err.message });
     }
   });
-  app2.post("/api/projects/:id/workflow/steps/:stepId/run", async (req, res) => {
-    try {
-      const projectId = Number(req.params.id);
-      const stepId = Number(req.params.stepId);
-      const project = await storage.getProject(projectId);
-      if (!project) return res.status(404).json({ error: "Project not found" });
-      const step = await storage.getWorkflowInstanceStep(stepId);
-      if (!step) return res.status(404).json({ error: "Step not found" });
-      await storage.updateWorkflowInstanceStep(stepId, { status: "running" });
-      const modelUsed = getModelUsed();
-      const runLog = await storage.insertRunLog(
-        projectId,
-        step.agentKey,
-        { stepId, agentKey: step.agentKey },
-        modelUsed
-      );
-      try {
-        let deliverableContent = null;
-        let deliverableTitle = step.name;
-        if (step.agentKey === "issues_tree") {
-          const result = await issuesTreeAgent(project.objective, project.constraints);
-          const version = await storage.getLatestIssueVersion(projectId) + 1;
-          const idMap = /* @__PURE__ */ new Map();
-          let remaining = [...result.issues];
-          let pass = 0;
-          while (remaining.length > 0 && pass < 10) {
-            pass++;
-            const canInsert = remaining.filter((n) => !n.parentId || idMap.has(n.parentId));
-            const cannotInsert = remaining.filter((n) => n.parentId && !idMap.has(n.parentId));
-            if (canInsert.length === 0) break;
-            const insertedNodes = await storage.insertIssueNodes(
-              projectId,
-              version,
-              canInsert.map((n) => ({
-                parentId: n.parentId ? idMap.get(n.parentId) || null : null,
-                text: n.text,
-                priority: n.priority
-              }))
-            );
-            canInsert.forEach((n, i) => {
-              idMap.set(n.id, insertedNodes[i].id);
-            });
-            remaining = cannotInsert;
-          }
-          deliverableContent = result;
-          deliverableTitle = "Issues Tree";
-          await storage.updateProjectStage(projectId, "issues_draft");
-        } else if (step.agentKey === "hypothesis") {
-          const issueNodesData = await storage.getIssueNodes(projectId);
-          const latestVersion = issueNodesData[0]?.version || 1;
-          const latestIssues = issueNodesData.filter((n) => n.version === latestVersion);
-          const result = await hypothesisAgent(latestIssues.map((n) => ({ id: n.id, text: n.text, priority: n.priority })));
-          const version = await storage.getLatestHypothesisVersion(projectId) + 1;
-          const insertedHyps = await storage.insertHypotheses(
+  const STAGE_MAP = {
+    project_definition: "definition_draft",
+    issues_tree: "issues_draft",
+    hypothesis: "hypotheses_draft",
+    execution: "execution_done",
+    summary: "summary_draft",
+    presentation: "presentation_draft"
+  };
+  async function persistAgentResults(projectId, agentKey, deliverableContent) {
+    if (agentKey === "issues_tree") {
+      const issues = deliverableContent?.issues || deliverableContent;
+      if (Array.isArray(issues)) {
+        const version = await storage.getLatestIssueVersion(projectId) + 1;
+        const idMap = /* @__PURE__ */ new Map();
+        let remaining = [...issues];
+        let pass = 0;
+        while (remaining.length > 0 && pass < 10) {
+          pass++;
+          const canInsert = remaining.filter((n) => !n.parentId || idMap.has(n.parentId));
+          const cannotInsert = remaining.filter((n) => n.parentId && !idMap.has(n.parentId));
+          if (canInsert.length === 0) break;
+          const insertedNodes = await storage.insertIssueNodes(
             projectId,
             version,
-            result.hypotheses.map((h) => ({
-              issueNodeId: null,
-              statement: h.statement,
-              metric: h.metric,
-              dataSource: h.dataSource,
-              method: h.method
+            canInsert.map((n) => ({
+              parentId: n.parentId ? idMap.get(n.parentId) || null : null,
+              text: n.text,
+              priority: n.priority
             }))
           );
+          canInsert.forEach((n, i) => {
+            idMap.set(n.id, insertedNodes[i].id);
+          });
+          remaining = cannotInsert;
+        }
+      }
+    } else if (agentKey === "hypothesis") {
+      const result = deliverableContent;
+      if (result?.hypotheses) {
+        const version = await storage.getLatestHypothesisVersion(projectId) + 1;
+        const insertedHyps = await storage.insertHypotheses(
+          projectId,
+          version,
+          result.hypotheses.map((h) => ({
+            issueNodeId: null,
+            statement: h.statement,
+            metric: h.metric,
+            dataSource: h.dataSource,
+            method: h.method
+          }))
+        );
+        if (result.analysisPlan) {
           await storage.insertAnalysisPlan(
             projectId,
-            result.analysisPlan.map((p, i) => ({
+            result.analysisPlan.map((p) => ({
               hypothesisId: insertedHyps[p.hypothesisIndex]?.id || insertedHyps[0]?.id || null,
               method: p.method,
               parametersJson: p.parameters,
               requiredDataset: p.requiredDataset
             }))
           );
-          deliverableContent = result;
-          deliverableTitle = "Hypotheses & Analysis Plan";
-          await storage.updateProjectStage(projectId, "hypotheses_draft");
-        } else if (step.agentKey === "execution") {
-          const plans = await storage.getAnalysisPlan(projectId);
-          const results = await executionAgent(
-            plans.map((p) => ({ method: p.method, parameters: p.parametersJson, requiredDataset: p.requiredDataset }))
-          );
-          for (const r of results) {
-            await storage.insertModelRun(projectId, r.toolName, r.inputs, r.outputs);
-          }
-          deliverableContent = results;
-          deliverableTitle = "Scenario Analysis Results";
-          await storage.updateProjectStage(projectId, "execution_done");
-        } else if (step.agentKey === "summary") {
-          const hyps = await storage.getHypotheses(projectId);
-          const runs = await storage.getModelRuns(projectId);
-          const latestVersion = hyps[0]?.version || 1;
-          const latestHyps = hyps.filter((h) => h.version === latestVersion);
-          const result = await summaryAgent(
-            project.objective,
-            project.constraints,
-            latestHyps.map((h) => ({ statement: h.statement, metric: h.metric })),
-            runs.map((r) => ({ inputsJson: r.inputsJson, outputsJson: r.outputsJson }))
-          );
-          const version = await storage.getLatestNarrativeVersion(projectId) + 1;
-          await storage.insertNarrative(projectId, version, result.summaryText);
-          deliverableContent = result;
-          deliverableTitle = "Executive Summary";
-          await storage.updateProjectStage(projectId, "summary_draft");
-        } else if (step.agentKey === "presentation") {
-          const narrs = await storage.getNarratives(projectId);
-          const hyps = await storage.getHypotheses(projectId);
-          const runs = await storage.getModelRuns(projectId);
-          const latestVersion = hyps[0]?.version || 1;
-          const latestHyps = hyps.filter((h) => h.version === latestVersion);
-          const latestNarr = narrs[0];
-          const result = await presentationAgent(
-            project.name,
-            project.objective,
-            latestNarr?.summaryText || "No summary available",
-            latestHyps.map((h) => ({ statement: h.statement, metric: h.metric })),
-            runs.map((r) => ({ inputsJson: r.inputsJson, outputsJson: r.outputsJson }))
-          );
-          const slideVersion = await storage.getLatestSlideVersion(projectId) + 1;
-          await storage.insertSlides(
-            projectId,
-            slideVersion,
-            result.slides.map((s) => ({
-              slideIndex: s.slideIndex,
-              layout: s.layout,
-              title: s.title,
-              subtitle: s.subtitle || void 0,
-              bodyJson: s.bodyJson,
-              notesText: s.notesText || void 0
-            }))
-          );
-          deliverableContent = result;
-          deliverableTitle = "Presentation Deck";
-          await storage.updateProjectStage(projectId, "presentation_draft");
         }
-        if (deliverableContent) {
-          await storage.createDeliverable({
-            projectId,
-            stepId,
-            title: deliverableTitle,
-            contentJson: deliverableContent
-          });
-        }
-        await storage.updateWorkflowInstanceStep(stepId, {
-          status: "completed",
-          outputSummary: { title: deliverableTitle }
-        });
-        await storage.updateRunLog(runLog.id, deliverableContent, "success");
-        const updatedProject = await storage.getProject(projectId);
-        const instance = await storage.getWorkflowInstance(projectId);
-        if (instance) {
-          await storage.updateWorkflowInstanceCurrentStep(instance.id, step.stepOrder);
-        }
-        res.json({ project: updatedProject, step: await storage.getWorkflowInstanceStep(stepId) });
-      } catch (agentErr) {
-        await storage.updateWorkflowInstanceStep(stepId, { status: "failed" });
-        await storage.updateRunLog(runLog.id, null, "failed", agentErr.message);
-        res.status(500).json({ error: `Agent failed: ${agentErr.message}` });
       }
+    } else if (agentKey === "execution") {
+      const results = Array.isArray(deliverableContent) ? deliverableContent : [];
+      for (const r of results) {
+        await storage.insertModelRun(projectId, r.toolName, r.inputs, r.outputs);
+      }
+    } else if (agentKey === "summary") {
+      if (deliverableContent?.summaryText) {
+        const version = await storage.getLatestNarrativeVersion(projectId) + 1;
+        await storage.insertNarrative(projectId, version, deliverableContent.summaryText);
+      }
+    } else if (agentKey === "presentation") {
+      if (deliverableContent?.slides) {
+        const slideVersion = await storage.getLatestSlideVersion(projectId) + 1;
+        await storage.insertSlides(
+          projectId,
+          slideVersion,
+          deliverableContent.slides.map((s) => ({
+            slideIndex: s.slideIndex,
+            layout: s.layout,
+            title: s.title,
+            subtitle: s.subtitle || void 0,
+            bodyJson: s.bodyJson,
+            notesText: s.notesText || void 0
+          }))
+        );
+      }
+    }
+  }
+  async function executeStepAgent(projectId, stepId, onProgress = () => {
+  }) {
+    const project = await storage.getProject(projectId);
+    if (!project) throw new Error("Project not found");
+    const step = await storage.getWorkflowInstanceStep(stepId);
+    if (!step) throw new Error("Step not found");
+    await storage.updateWorkflowInstanceStep(stepId, { status: "running" });
+    const modelUsed = getModelUsed();
+    const runLog = await storage.insertRunLog(
+      projectId,
+      step.agentKey,
+      { stepId, agentKey: step.agentKey },
+      modelUsed
+    );
+    try {
+      const result = await runWorkflowStep(projectId, step.agentKey, onProgress);
+      const { deliverableContent, deliverableTitle } = result;
+      await persistAgentResults(projectId, step.agentKey, deliverableContent);
+      const newStage = STAGE_MAP[step.agentKey];
+      if (newStage) {
+        await storage.updateProjectStage(projectId, newStage);
+      }
+      if (deliverableContent) {
+        await storage.createDeliverable({
+          projectId,
+          stepId,
+          title: deliverableTitle,
+          contentJson: deliverableContent
+        });
+      }
+      await storage.updateWorkflowInstanceStep(stepId, {
+        status: "completed",
+        outputSummary: { title: deliverableTitle }
+      });
+      await storage.updateRunLog(runLog.id, deliverableContent, "success");
+      const updatedProject = await storage.getProject(projectId);
+      const instance = await storage.getWorkflowInstance(projectId);
+      if (instance) {
+        await storage.updateWorkflowInstanceCurrentStep(instance.id, step.stepOrder);
+      }
+      return {
+        project: updatedProject,
+        step: await storage.getWorkflowInstanceStep(stepId),
+        deliverableTitle
+      };
+    } catch (agentErr) {
+      await storage.updateWorkflowInstanceStep(stepId, { status: "failed" });
+      await storage.updateRunLog(runLog.id, null, "failed", agentErr.message);
+      throw new Error(`Agent failed: ${agentErr.message}`);
+    }
+  }
+  app2.post("/api/projects/:id/workflow/steps/:stepId/run", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const stepId = Number(req.params.stepId);
+      const result = await executeStepAgent(projectId, stepId);
+      res.json({ project: result.project, step: result.step });
+    } catch (err) {
+      const status = err.message?.startsWith("Agent failed:") ? 500 : err.message === "Project not found" || err.message === "Step not found" ? 404 : 500;
+      res.status(status).json({ error: err.message });
+    }
+  });
+  app2.get("/api/projects/:id/workflow/steps/:stepId/run-stream", async (req, res) => {
+    const projectId = Number(req.params.id);
+    const stepId = Number(req.params.stepId);
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+    let closed = false;
+    req.on("close", () => {
+      closed = true;
+    });
+    function sendSSE(type, content) {
+      if (closed) return;
+      const payload = JSON.stringify({ type, content, timestamp: Date.now() });
+      res.write(`data: ${payload}
+
+`);
+    }
+    sendSSE("connected", "Stream connected");
+    const onProgress = (message, type) => {
+      sendSSE(type || "progress", message);
+      storage.insertStepChatMessage({
+        stepId,
+        role: "assistant",
+        content: message,
+        messageType: type || "progress"
+      }).catch(() => {
+      });
+    };
+    try {
+      const result = await executeStepAgent(projectId, stepId, onProgress);
+      const stepDeliverables = await storage.getStepDeliverables(stepId);
+      if (stepDeliverables.length > 0) {
+        const latestDel = stepDeliverables[0];
+        await storage.insertStepChatMessage({
+          stepId,
+          role: "assistant",
+          content: JSON.stringify(latestDel.contentJson),
+          messageType: "deliverable",
+          metadata: { deliverableId: latestDel.id, title: latestDel.title, version: latestDel.version, agentKey: result.step?.agentKey }
+        });
+      }
+      sendSSE("complete", JSON.stringify({ deliverableTitle: result.deliverableTitle, project: result.project, step: result.step }));
+    } catch (err) {
+      sendSSE("error", err.message || "Unknown error");
+    } finally {
+      if (!closed) res.end();
+    }
+  });
+  app2.get("/api/projects/:id/workflow/steps/:stepId/chat", async (req, res) => {
+    try {
+      const stepId = Number(req.params.stepId);
+      const messages3 = await storage.getStepChatMessages(stepId);
+      res.json(messages3);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/projects/:id/workflow/steps/:stepId/chat", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const stepId = Number(req.params.stepId);
+      const { message } = req.body;
+      if (!message) return res.status(400).json({ error: "message is required" });
+      const project = await storage.getProject(projectId);
+      if (!project) return res.status(404).json({ error: "Project not found" });
+      const step = await storage.getWorkflowInstanceStep(stepId);
+      if (!step) return res.status(404).json({ error: "Step not found" });
+      await storage.insertStepChatMessage({
+        stepId,
+        role: "user",
+        content: message,
+        messageType: "message"
+      });
+      const stepDeliverables = await storage.getStepDeliverables(stepId);
+      const currentDeliverable = stepDeliverables[0];
+      if (currentDeliverable) {
+        const refined = await refineWithLangGraph(
+          step.agentKey,
+          currentDeliverable.contentJson,
+          message,
+          { objective: project.objective, constraints: project.constraints }
+        );
+        await storage.updateDeliverable(currentDeliverable.id, { contentJson: refined });
+        await storage.insertStepChatMessage({
+          stepId,
+          role: "assistant",
+          content: JSON.stringify(refined),
+          messageType: "deliverable",
+          metadata: { deliverableId: currentDeliverable.id, title: currentDeliverable.title, version: currentDeliverable.version, agentKey: step.agentKey }
+        });
+      } else {
+        await storage.insertStepChatMessage({
+          stepId,
+          role: "assistant",
+          content: "No deliverable found to refine. Please run the agent first.",
+          messageType: "message"
+        });
+      }
+      const messages3 = await storage.getStepChatMessages(stepId);
+      res.json(messages3);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1742,6 +2978,37 @@ async function registerRoutes(app2) {
       res.status(500).json({ error: err.message });
     }
   });
+  app2.post("/api/projects/:id/workflow/steps/:stepId/unapprove", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const stepId = Number(req.params.stepId);
+      const project = await storage.getProject(projectId);
+      if (!project) return res.status(404).json({ error: "Project not found" });
+      const step = await storage.getWorkflowInstanceStep(stepId);
+      if (!step) return res.status(404).json({ error: "Step not found" });
+      if (step.status !== "approved") {
+        return res.status(400).json({ error: "Step is not approved" });
+      }
+      const instance = await storage.getWorkflowInstance(projectId);
+      if (instance) {
+        const steps = await storage.getWorkflowInstanceSteps(instance.id);
+        const laterSteps = steps.filter((s) => s.stepOrder > step.stepOrder && s.status !== "not_started");
+        if (laterSteps.length > 0) {
+          return res.status(400).json({ error: "Cannot unapprove: later steps have already been started. Unapprove them first." });
+        }
+      }
+      await storage.updateWorkflowInstanceStep(stepId, { status: "completed" });
+      await storage.unlockDeliverables(stepId);
+      const prevStage = UNAPPROVE_MAP[project.stage];
+      if (prevStage) {
+        await storage.updateProjectStage(projectId, prevStage);
+      }
+      const updatedProject = await storage.getProject(projectId);
+      res.json(updatedProject);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
   app2.post("/api/projects/:id/run-next", async (req, res) => {
     try {
       const projectId = Number(req.params.id);
@@ -1755,6 +3022,7 @@ async function registerRoutes(app2) {
       if (instance) {
         const steps = await storage.getWorkflowInstanceSteps(instance.id);
         const agentKeyMap = {
+          definition_draft: "project_definition",
           issues_draft: "issues_tree",
           hypotheses_draft: "hypothesis",
           execution_done: "execution",
@@ -1775,95 +3043,22 @@ async function registerRoutes(app2) {
           return res.json(result.project || await storage.getProject(projectId));
         }
       }
+      const agentKeyForStage = {
+        definition_draft: "project_definition",
+        issues_draft: "issues_tree",
+        hypotheses_draft: "hypothesis",
+        execution_done: "execution",
+        summary_draft: "summary",
+        presentation_draft: "presentation"
+      };
+      const agentKey = agentKeyForStage[nextStage];
       const modelUsed = getModelUsed();
       const runLog = await storage.insertRunLog(projectId, nextStage, { currentStage: project.stage }, modelUsed);
       try {
-        if (nextStage === "issues_draft") {
-          const result = await issuesTreeAgent(project.objective, project.constraints);
-          const version = await storage.getLatestIssueVersion(projectId) + 1;
-          const idMap = /* @__PURE__ */ new Map();
-          let remaining = [...result.issues];
-          let pass = 0;
-          while (remaining.length > 0 && pass < 10) {
-            pass++;
-            const canInsert = remaining.filter((n) => !n.parentId || idMap.has(n.parentId));
-            const cannotInsert = remaining.filter((n) => n.parentId && !idMap.has(n.parentId));
-            if (canInsert.length === 0) break;
-            const insertedNodes = await storage.insertIssueNodes(
-              projectId,
-              version,
-              canInsert.map((n) => ({ parentId: n.parentId ? idMap.get(n.parentId) || null : null, text: n.text, priority: n.priority }))
-            );
-            canInsert.forEach((n, i) => {
-              idMap.set(n.id, insertedNodes[i].id);
-            });
-            remaining = cannotInsert;
-          }
-          await storage.updateRunLog(runLog.id, result, "success");
-        } else if (nextStage === "hypotheses_draft") {
-          const issueNodesData = await storage.getIssueNodes(projectId);
-          const latestVersion = issueNodesData[0]?.version || 1;
-          const latestIssues = issueNodesData.filter((n) => n.version === latestVersion);
-          const result = await hypothesisAgent(latestIssues.map((n) => ({ id: n.id, text: n.text, priority: n.priority })));
-          const version = await storage.getLatestHypothesisVersion(projectId) + 1;
-          const insertedHyps = await storage.insertHypotheses(
-            projectId,
-            version,
-            result.hypotheses.map((h) => ({ issueNodeId: null, statement: h.statement, metric: h.metric, dataSource: h.dataSource, method: h.method }))
-          );
-          await storage.insertAnalysisPlan(
-            projectId,
-            result.analysisPlan.map((p, i) => ({
-              hypothesisId: insertedHyps[p.hypothesisIndex]?.id || insertedHyps[0]?.id || null,
-              method: p.method,
-              parametersJson: p.parameters,
-              requiredDataset: p.requiredDataset
-            }))
-          );
-          await storage.updateRunLog(runLog.id, result, "success");
-        } else if (nextStage === "execution_done") {
-          const plans = await storage.getAnalysisPlan(projectId);
-          const results = await executionAgent(plans.map((p) => ({ method: p.method, parameters: p.parametersJson, requiredDataset: p.requiredDataset })));
-          for (const r of results) {
-            await storage.insertModelRun(projectId, r.toolName, r.inputs, r.outputs);
-          }
-          await storage.updateRunLog(runLog.id, results, "success");
-        } else if (nextStage === "summary_draft") {
-          const hyps = await storage.getHypotheses(projectId);
-          const runs = await storage.getModelRuns(projectId);
-          const latestVersion = hyps[0]?.version || 1;
-          const latestHyps = hyps.filter((h) => h.version === latestVersion);
-          const result = await summaryAgent(
-            project.objective,
-            project.constraints,
-            latestHyps.map((h) => ({ statement: h.statement, metric: h.metric })),
-            runs.map((r) => ({ inputsJson: r.inputsJson, outputsJson: r.outputsJson }))
-          );
-          const version = await storage.getLatestNarrativeVersion(projectId) + 1;
-          await storage.insertNarrative(projectId, version, result.summaryText);
-          await storage.updateRunLog(runLog.id, result, "success");
-        } else if (nextStage === "presentation_draft") {
-          const narrs = await storage.getNarratives(projectId);
-          const hyps = await storage.getHypotheses(projectId);
-          const runs = await storage.getModelRuns(projectId);
-          const latestVersion = hyps[0]?.version || 1;
-          const latestHyps = hyps.filter((h) => h.version === latestVersion);
-          const latestNarr = narrs[0];
-          const result = await presentationAgent(
-            project.name,
-            project.objective,
-            latestNarr?.summaryText || "No summary available",
-            latestHyps.map((h) => ({ statement: h.statement, metric: h.metric })),
-            runs.map((r) => ({ inputsJson: r.inputsJson, outputsJson: r.outputsJson }))
-          );
-          const slideVersion = await storage.getLatestSlideVersion(projectId) + 1;
-          await storage.insertSlides(
-            projectId,
-            slideVersion,
-            result.slides.map((s) => ({ slideIndex: s.slideIndex, layout: s.layout, title: s.title, subtitle: s.subtitle || void 0, bodyJson: s.bodyJson, notesText: s.notesText || void 0 }))
-          );
-          await storage.updateRunLog(runLog.id, result, "success");
-        }
+        const result = await runWorkflowStep(projectId, agentKey, () => {
+        });
+        await persistAgentResults(projectId, agentKey, result.deliverableContent);
+        await storage.updateRunLog(runLog.id, result.deliverableContent, "success");
         const updated = await storage.updateProjectStage(projectId, nextStage);
         res.json(updated);
       } catch (agentErr) {
@@ -1897,7 +3092,8 @@ async function registerRoutes(app2) {
       const project = await storage.getProject(projectId);
       if (!project) return res.status(404).json({ error: "Not found" });
       const stageMap = {
-        issues: "created",
+        definition: "created",
+        issues: "definition_approved",
         hypotheses: "issues_approved",
         execution: "hypotheses_approved",
         summary: "execution_approved",
@@ -1907,6 +3103,7 @@ async function registerRoutes(app2) {
       if (!targetStage) return res.status(400).json({ error: `Invalid step "${step}"` });
       const currentIdx = STAGE_ORDER.indexOf(project.stage);
       const stepDraftStages = {
+        definition: "definition_draft",
         issues: "issues_draft",
         hypotheses: "hypotheses_draft",
         execution: "execution_done",
@@ -2116,12 +3313,13 @@ async function registerRoutes(app2) {
   });
   app2.get("/api/agents/detail/:key", async (req, res) => {
     try {
-      const agent = await storage.getAgentByKey(req.params.key);
+      const keyParam = req.params.key;
+      const agent = await storage.getAgentByKey(keyParam);
       if (!agent) return res.status(404).json({ error: "Agent not found" });
-      const saved = await storage.getAgentConfig(req.params.key);
+      const saved = await storage.getAgentConfig(keyParam);
       res.json({
         ...agent,
-        systemPrompt: saved?.systemPrompt || agent.promptTemplate || DEFAULT_PROMPTS[req.params.key] || "",
+        systemPrompt: saved?.systemPrompt || agent.promptTemplate || DEFAULT_PROMPTS[keyParam] || "",
         configModel: saved?.model || agent.model,
         configMaxTokens: saved?.maxTokens || agent.maxTokens
       });
@@ -2165,6 +3363,238 @@ async function registerRoutes(app2) {
     try {
       await storage.deletePipeline(Number(req.params.id));
       res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/documents", async (req, res) => {
+    try {
+      const projectId = req.query.projectId ? Number(req.query.projectId) : void 0;
+      res.json(await storage.listDocuments(projectId));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/documents", async (req, res) => {
+    try {
+      const { projectId, title, content, contentJson } = req.body;
+      res.status(201).json(await storage.createDocument({ projectId, title, content, contentJson }));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/documents/:id", async (req, res) => {
+    try {
+      const doc = await storage.getDocument(Number(req.params.id));
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+      res.json(doc);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.put("/api/documents/:id", async (req, res) => {
+    try {
+      res.json(await storage.updateDocument(Number(req.params.id), req.body));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.delete("/api/documents/:id", async (req, res) => {
+    try {
+      await storage.deleteDocument(Number(req.params.id));
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/documents/:id/comments", async (req, res) => {
+    try {
+      res.json(await storage.listComments(Number(req.params.id)));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/documents/:id/comments", async (req, res) => {
+    try {
+      const { from, to, content, type, proposedText, aiReply } = req.body;
+      res.status(201).json(await storage.createComment({
+        documentId: Number(req.params.id),
+        from,
+        to,
+        content,
+        type,
+        proposedText,
+        aiReply
+      }));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.put("/api/comments/:id", async (req, res) => {
+    try {
+      res.json(await storage.updateComment(Number(req.params.id), req.body));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.delete("/api/comments/:id", async (req, res) => {
+    try {
+      await storage.deleteComment(Number(req.params.id));
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/documents/:id/review", async (req, res) => {
+    try {
+      const doc = await storage.getDocument(Number(req.params.id));
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+      const comments = await reviewDocument(doc);
+      res.json(comments);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/documents/:id/executive-review", async (req, res) => {
+    try {
+      const doc = await storage.getDocument(Number(req.params.id));
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+      const comments = await executiveReviewDocument(doc);
+      res.json(comments);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/documents/:id/comments/:commentId/action", async (req, res) => {
+    try {
+      const doc = await storage.getDocument(Number(req.params.id));
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+      const commentId = Number(req.params.commentId);
+      const comments = await storage.listComments(doc.id);
+      const comment = comments.find((c) => c.id === commentId);
+      if (!comment) return res.status(404).json({ error: "Comment not found" });
+      const result = await actionComment(doc, comment);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/documents/:id/factcheck-candidates", async (req, res) => {
+    try {
+      const doc = await storage.getDocument(Number(req.params.id));
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+      const comments = await spotFactCheckCandidates(doc);
+      res.json(comments);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/documents/:id/factcheck", async (req, res) => {
+    try {
+      const doc = await storage.getDocument(Number(req.params.id));
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+      const allComments = await storage.listComments(doc.id);
+      const acceptedCandidates = allComments.filter(
+        (c) => c.type === "factcheck" && c.status === "accepted"
+      );
+      if (acceptedCandidates.length === 0) {
+        return res.status(400).json({ error: "No accepted fact-check candidates found. Accept some candidates first." });
+      }
+      const results = await runFactCheck(doc, acceptedCandidates);
+      res.json(results);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/projects/:projectId/vault/upload", upload.single("file"), async (req, res) => {
+    try {
+      const projectId = Number(req.params.projectId);
+      const project = await storage.getProject(projectId);
+      if (!project) return res.status(404).json({ error: "Project not found" });
+      const file = req.file;
+      if (!file) return res.status(400).json({ error: "No file uploaded" });
+      const storagePath = `vault/${projectId}/${Date.now()}_${file.originalname}`;
+      const vaultFile = await storage.createVaultFile({
+        projectId,
+        fileName: file.originalname,
+        mimeType: file.mimetype,
+        fileSize: file.size,
+        storagePath
+      });
+      processVaultFile(vaultFile.id, file.buffer).catch(
+        (err) => console.error("Background processing failed:", err)
+      );
+      res.status(201).json(vaultFile);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/projects/:projectId/vault", async (req, res) => {
+    try {
+      const projectId = Number(req.params.projectId);
+      const search = req.query.search;
+      const files = await storage.listVaultFiles(projectId, search);
+      res.json(files);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/projects/:projectId/vault/:fileId", async (req, res) => {
+    try {
+      const file = await storage.getVaultFile(Number(req.params.fileId));
+      if (!file || file.projectId !== Number(req.params.projectId)) {
+        return res.status(404).json({ error: "File not found" });
+      }
+      res.json(file);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/projects/:projectId/vault/:fileId/download", async (req, res) => {
+    try {
+      const file = await storage.getVaultFile(Number(req.params.fileId));
+      if (!file || file.projectId !== Number(req.params.projectId)) {
+        return res.status(404).json({ error: "File not found" });
+      }
+      res.setHeader("Content-Type", file.mimeType);
+      res.setHeader("Content-Disposition", `attachment; filename="${file.fileName}"`);
+      res.send(file.extractedText || "File content not available for download in this mode.");
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.delete("/api/projects/:projectId/vault/:fileId", async (req, res) => {
+    try {
+      const file = await storage.getVaultFile(Number(req.params.fileId));
+      if (!file || file.projectId !== Number(req.params.projectId)) {
+        return res.status(404).json({ error: "File not found" });
+      }
+      await storage.deleteVaultChunksByFile(file.id);
+      await storage.deleteVaultFile(file.id);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/projects/:projectId/vault/:fileId/chunks", async (req, res) => {
+    try {
+      const file = await storage.getVaultFile(Number(req.params.fileId));
+      if (!file || file.projectId !== Number(req.params.projectId)) {
+        return res.status(404).json({ error: "File not found" });
+      }
+      const chunks = await storage.getVaultChunksByFile(file.id);
+      res.json(chunks.map((c) => ({ id: c.id, chunkIndex: c.chunkIndex, content: c.content, tokenCount: c.tokenCount })));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/projects/:projectId/vault/query", async (req, res) => {
+    try {
+      const projectId = Number(req.params.projectId);
+      const { query, maxChunks } = req.body;
+      if (!query) return res.status(400).json({ error: "query is required" });
+      const results = await retrieveRelevantContext(projectId, query, maxChunks || 10);
+      res.json({ results, formattedContext: formatRAGContext(results) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
