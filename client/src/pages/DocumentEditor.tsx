@@ -30,6 +30,7 @@ import {
   Bot,
   Cloud,
   CloudOff,
+  BriefcaseBusiness,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -90,6 +91,7 @@ export default function DocumentEditor() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [loading, setLoading] = useState(true);
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [execReviewLoading, setExecReviewLoading] = useState(false);
   const [commentDialogOpen, setCommentDialogOpen] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [selectionRange, setSelectionRange] = useState<{ from: number; to: number } | null>(null);
@@ -236,6 +238,20 @@ export default function DocumentEditor() {
       }
     } catch {}
     setReviewLoading(false);
+  }, [fetchComments]);
+
+  const handleExecutiveReview = useCallback(async () => {
+    if (!docIdRef.current) return;
+    setExecReviewLoading(true);
+    try {
+      const res = await fetch(`/api/documents/${docIdRef.current}/executive-review`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        await fetchComments(docIdRef.current);
+      }
+    } catch {}
+    setExecReviewLoading(false);
   }, [fetchComments]);
 
   const handleAddComment = useCallback(async () => {
@@ -439,6 +455,21 @@ export default function DocumentEditor() {
                 </>
               )}
             </div>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleExecutiveReview}
+              disabled={execReviewLoading}
+              className="border-purple-700 text-purple-300 hover:bg-purple-950/50"
+            >
+              {execReviewLoading ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <BriefcaseBusiness size={14} />
+              )}
+              Executive Review
+            </Button>
 
             <Button
               size="sm"
@@ -811,6 +842,7 @@ function CommentCard({
   actionLoadingId: number | null;
 }) {
   const isAI = comment.type === "ai" || comment.type === "review";
+  const isExecutive = comment.type === "executive";
   const isLoading = actionLoadingId === comment.id;
 
   const statusVariant =
@@ -820,23 +852,39 @@ function CommentCard({
         ? "destructive"
         : "secondary";
 
+  const borderColor = isExecutive
+    ? "border-l-purple-500"
+    : isAI
+      ? "border-l-amber-500"
+      : "border-l-blue-500";
+
+  const iconColor = isExecutive
+    ? "text-purple-500"
+    : isAI
+      ? "text-amber-500"
+      : "text-blue-500";
+
+  const label = isExecutive ? "Executive" : isAI ? "AI" : "You";
+
   return (
     <Card
       className={cn(
         "p-3 cursor-pointer hover:bg-accent/30 transition-colors border-l-[3px]",
-        isAI ? "border-l-amber-500" : "border-l-blue-500"
+        borderColor
       )}
       onClick={() => onCommentClick(comment)}
     >
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-center gap-1.5">
-          {isAI ? (
-            <Bot size={14} className="text-amber-500 shrink-0" />
+          {isExecutive ? (
+            <BriefcaseBusiness size={14} className={cn(iconColor, "shrink-0")} />
+          ) : isAI ? (
+            <Bot size={14} className={cn(iconColor, "shrink-0")} />
           ) : (
-            <MessageSquare size={14} className="text-blue-500 shrink-0" />
+            <MessageSquare size={14} className={cn(iconColor, "shrink-0")} />
           )}
           <span className="text-xs font-medium text-muted-foreground">
-            {isAI ? "AI" : "You"}
+            {label}
           </span>
         </div>
         <div className="flex items-center gap-1">
@@ -867,11 +915,19 @@ function CommentCard({
 
       {comment.proposedText && comment.status === "pending" && (
         <div className="space-y-2">
-          <div className="text-xs bg-green-950/30 border border-green-800/30 rounded px-2 py-1.5">
-            <span className="text-green-400 font-medium text-[10px] uppercase tracking-wider">
+          <div className={cn(
+            "text-xs rounded px-2 py-1.5",
+            isExecutive
+              ? "bg-purple-950/30 border border-purple-800/30"
+              : "bg-green-950/30 border border-green-800/30"
+          )}>
+            <span className={cn(
+              "font-medium text-[10px] uppercase tracking-wider",
+              isExecutive ? "text-purple-400" : "text-green-400"
+            )}>
               Proposed:
             </span>
-            <p className="mt-0.5 text-green-300">{comment.proposedText}</p>
+            <p className={cn("mt-0.5", isExecutive ? "text-purple-300" : "text-green-300")}>{comment.proposedText}</p>
           </div>
           <div className="flex gap-1.5">
             <Button

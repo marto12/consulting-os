@@ -93,8 +93,35 @@ const ActionState = Annotation.Root({
 
 type ActionStateType = typeof ActionState.State;
 
+function generateMockExecutiveReviewComments(documentContent: string) {
+  const len = documentContent.length;
+  if (len === 0) return [];
+  const plainText = documentContent.replace(/<[^>]*>/g, "");
+  return [
+    {
+      from: 1,
+      to: Math.min(40, Math.max(2, len)),
+      content: "Missing 'so what': This section jumps straight into details without framing why the reader should care. Lead with the strategic implication or business impact before explaining the how.",
+      proposedText: plainText.slice(0, 30),
+    },
+    {
+      from: Math.max(1, Math.floor(len * 0.3)),
+      to: Math.min(Math.floor(len * 0.3) + 50, Math.max(2, len)),
+      content: "Too technical too early: This dives into implementation specifics before establishing the strategic context. An executive reader needs to understand the decision at stake and its impact before the supporting analysis.",
+      proposedText: plainText.slice(Math.floor(len * 0.25), Math.floor(len * 0.25) + 30),
+    },
+    {
+      from: Math.max(1, Math.floor(len * 0.6)),
+      to: Math.min(Math.floor(len * 0.6) + 50, Math.max(2, len)),
+      content: "Weak strategic framing: This reads like a technical report rather than a strategic recommendation. Rewrite to lead with the insight and what action the reader should take, then support with evidence.",
+      proposedText: plainText.slice(Math.floor(len * 0.55), Math.floor(len * 0.55) + 30),
+    },
+  ];
+}
+
 let _reviewGraph: any = null;
 let _actionGraph: any = null;
+let _executiveReviewGraph: any = null;
 
 function getReviewGraph() {
   if (_reviewGraph) return _reviewGraph;
@@ -228,6 +255,103 @@ Return ONLY valid JSON. Example:
     .addEdge("persist", END)
     .compile();
   return _actionGraph;
+}
+
+function getExecutiveReviewGraph() {
+  if (_executiveReviewGraph) return _executiveReviewGraph;
+  _executiveReviewGraph = new StateGraph(ReviewState)
+    .addNode("analyze", async (state: ReviewStateType): Promise<Partial<ReviewStateType>> => {
+      if (!hasApiKey()) {
+        return { reviewComments: generateMockExecutiveReviewComments(state.documentContent) };
+      }
+
+      const llm = createLLM()!;
+      const systemPrompt = `You are a senior consulting partner reviewing a document through an executive lens. Your job is to identify sections that fail the "so what" test — places where the writing dives into technical details, methodology, or implementation specifics without first establishing WHY the reader should care.
+
+Your review criteria:
+1. **Missing "So What"**: Flag sections that present findings or data without stating the strategic implication. Every paragraph should answer "why does this matter to the decision-maker?"
+2. **Technical Too Early**: Identify where the document leads with methodology, technical architecture, data pipelines, algorithms, or implementation details before establishing the business context or strategic framing.
+3. **Buried Insight**: Call out when the key insight or recommendation is buried at the end of a dense paragraph instead of leading with it.
+4. **No Action Orientation**: Flag sections that describe what was done or found but fail to state what the reader should DO with this information.
+5. **Audience Mismatch**: Identify language, jargon, or detail level that assumes a technical audience when the document should be written for executives or decision-makers.
+
+For each issue, propose a rewritten version that:
+- Leads with the strategic implication or business impact
+- States the "so what" upfront
+- Moves technical details to supporting evidence rather than the lead
+- Ends with a clear recommendation or next step
+
+Return a JSON array of review comments. Each comment must have:
+- "from": character position where the issue starts (1-indexed, matching ProseMirror positions)
+- "to": character position where the issue ends
+- "content": your executive review note — start with a category label like "Missing 'so what':", "Too technical too early:", "Buried insight:", "No action orientation:", or "Audience mismatch:"
+- "proposedText": the suggested rewrite that leads with strategic framing
+
+Return ONLY valid JSON array. Identify 2-5 meaningful issues.`;
+
+      try {
+        const response = await llm.invoke([
+          new SystemMessage(systemPrompt),
+          new HumanMessage(`Document Title: ${state.documentTitle}\n\nDocument Content:\n${state.documentContent}`),
+        ]);
+
+        const content = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+
+        if (!content || content.trim().length === 0) {
+          return { reviewComments: generateMockExecutiveReviewComments(state.documentContent) };
+        }
+
+        const parsed = extractJson(content);
+        const comments = Array.isArray(parsed) ? parsed : parsed.comments || parsed.reviewComments || [];
+        const validated = comments.map((c: any) => ({
+          from: Math.max(1, Math.min(c.from || 1, state.documentContent.length)),
+          to: Math.max(1, Math.min(c.to || 1, state.documentContent.length)),
+          content: c.content || "Executive review comment",
+          proposedText: c.proposedText || "",
+        }));
+        return { reviewComments: validated.length > 0 ? validated : generateMockExecutiveReviewComments(state.documentContent) };
+      } catch (e) {
+        console.error("LLM executive review error, falling back to mock:", e);
+        return { reviewComments: generateMockExecutiveReviewComments(state.documentContent) };
+      }
+    })
+    .addNode("persist", async (state: ReviewStateType): Promise<Partial<ReviewStateType>> => {
+      const saved: DocumentComment[] = [];
+      for (const rc of state.reviewComments) {
+        const comment = await storage.createComment({
+          documentId: state.documentId,
+          from: rc.from,
+          to: rc.to,
+          content: rc.content,
+          type: "executive",
+          proposedText: rc.proposedText,
+        });
+        saved.push(comment);
+      }
+      return { savedComments: saved };
+    })
+    .addEdge(START, "analyze")
+    .addEdge("analyze", "persist")
+    .addEdge("persist", END)
+    .compile();
+  return _executiveReviewGraph;
+}
+
+export async function executiveReviewDocument(doc: Document): Promise<DocumentComment[]> {
+  try {
+    const graph = getExecutiveReviewGraph();
+
+    const result = await graph.invoke({
+      documentContent: doc.content || "",
+      documentTitle: doc.title || "",
+      documentId: doc.id,
+    });
+
+    return result.savedComments;
+  } catch (error) {
+    console.error("executiveReviewDocument error:", error);
+    return [];
+  }
 }
 
 export async function reviewDocument(doc: Document): Promise<DocumentComment[]> {

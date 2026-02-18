@@ -9,7 +9,7 @@ import {
   type ProgressCallback,
 } from "./agents";
 import { runWorkflowStep, refineWithLangGraph } from "./agents/workflow-graph";
-import { reviewDocument, actionComment } from "./agents/document-agents";
+import { reviewDocument, actionComment, executiveReviewDocument } from "./agents/document-agents";
 
 const STAGE_ORDER = [
   "created",
@@ -967,6 +967,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!doc) return res.status(404).json({ error: "Document not found" });
 
       const comments = await reviewDocument(doc);
+      res.json(comments);
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post("/api/documents/:id/executive-review", async (req: Request, res: Response) => {
+    try {
+      const doc = await storage.getDocument(Number(req.params.id));
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+
+      const comments = await executiveReviewDocument(doc);
       res.json(comments);
     } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
