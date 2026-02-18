@@ -80,23 +80,29 @@ ${JSON.stringify(sampleRows.slice(0, 5), null, 2)}
 
 User request: ${userPrompt}`;
 
-  const response = await client.chat.completions.create({
-    model: "gpt-5-nano",
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
-    ],
-    max_tokens: 1024,
-  });
+  try {
+    const response = await client.chat.completions.create({
+      model: "gpt-5-nano",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      max_completion_tokens: 1024,
+    });
 
-  const content = response.choices[0]?.message?.content || "";
-  return extractJson(content) as ChartSpec;
+    const content = response.choices[0]?.message?.content || "";
+    return extractJson(content) as ChartSpec;
+  } catch (err) {
+    console.error("Chart generation LLM error, falling back to mock:", err);
+    return getMockChartSpec(columns, userPrompt);
+  }
 }
 
 function getMockChartSpec(columns: string[], userPrompt: string): ChartSpec {
   const lowerPrompt = userPrompt.toLowerCase();
-  const numericCols = columns.filter(c => !["name", "label", "category", "date", "month", "year", "id", "type", "status"].some(k => c.toLowerCase().includes(k)));
-  const categoryCols = columns.filter(c => ["name", "label", "category", "date", "month", "year", "type", "status"].some(k => c.toLowerCase().includes(k)));
+  const categoryHints = ["name", "label", "category", "date", "month", "year", "id", "type", "status", "region", "country", "city", "state", "department", "product", "group", "segment"];
+  const numericCols = columns.filter(c => !categoryHints.some(k => c.toLowerCase().includes(k)));
+  const categoryCols = columns.filter(c => categoryHints.some(k => c.toLowerCase().includes(k)));
 
   let chartType: ChartSpec["chartType"] = "bar";
   if (lowerPrompt.includes("pie")) chartType = "pie";
