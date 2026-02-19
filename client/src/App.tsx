@@ -20,6 +20,7 @@ import {
   LogOut,
   FileText,
   BarChart3,
+  Presentation,
 } from "lucide-react";
 import { cn } from "./lib/utils";
 import { Button } from "./components/ui/button";
@@ -65,6 +66,8 @@ import Documents from "./pages/Documents";
 import WorkflowEditor from "./pages/WorkflowEditor";
 import Charts from "./pages/Charts";
 import ChartDetail from "./pages/ChartDetail";
+import Presentations from "./pages/Presentations";
+import SlideEditor from "./pages/SlideEditor";
 import CommandPalette from "./components/CommandPalette";
 import { ProjectProvider, useProjectContext } from "./lib/project-context";
 
@@ -92,6 +95,12 @@ const NAV_SECTIONS = [
     label: "Documents",
     items: [
       { to: "/documents", icon: FileText, label: "Word Processor" },
+    ],
+  },
+  {
+    label: "Presentations",
+    items: [
+      { to: "/presentations", icon: Presentation, label: "Slide Decks" },
     ],
   },
   {
@@ -220,6 +229,7 @@ function AppSidebar() {
                     (item.to === "/agents" && location.pathname.startsWith("/agent/")) ||
                     (item.to === "/workflows" && location.pathname.startsWith("/workflow/")) ||
                     (item.to === "/documents" && location.pathname.startsWith("/editor")) ||
+                    (item.to === "/presentations" && location.pathname.startsWith("/slides")) ||
                     (item.to === "/charts" && location.pathname.startsWith("/charts"));
 
                   return (
@@ -375,6 +385,8 @@ export default function App() {
           <Route path="/documents" element={<AppLayout><Documents /></AppLayout>} />
           <Route path="/editor" element={<FullWidthLayout><DocumentEditor /></FullWidthLayout>} />
           <Route path="/editor/:id" element={<FullWidthLayout><DocumentEditor /></FullWidthLayout>} />
+          <Route path="/presentations" element={<AppLayout><Presentations /></AppLayout>} />
+          <Route path="/slides/:id" element={<FullWidthLayout><SlideEditor /></FullWidthLayout>} />
           <Route path="/" element={<Navigate to="/projects" replace />} />
           <Route path="*" element={<Navigate to="/projects" replace />} />
         </Routes>
