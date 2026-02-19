@@ -226,7 +226,6 @@ export const presentations = pgTable("presentations", {
 export const slides = pgTable("slides", {
   id: serial("id").primaryKey(),
   projectId: integer("project_id")
-    .notNull()
     .references(() => projects.id, { onDelete: "cascade" }),
   presentationId: integer("presentation_id").references(() => presentations.id, { onDelete: "cascade" }),
   slideIndex: integer("slide_index").notNull(),

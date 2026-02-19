@@ -723,7 +723,7 @@ export const storage = {
 
   async createSlide(data: {
     presentationId: number;
-    projectId: number;
+    projectId?: number | null;
     slideIndex: number;
     layout?: string;
     title: string;
@@ -734,7 +734,7 @@ export const storage = {
   }): Promise<Slide> {
     const [s] = await db.insert(slides).values({
       presentationId: data.presentationId,
-      projectId: data.projectId,
+      projectId: data.projectId || null,
       slideIndex: data.slideIndex,
       layout: data.layout || "title_body",
       title: data.title,

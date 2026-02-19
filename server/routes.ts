@@ -1481,7 +1481,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const existing = await storage.getPresentationSlides(presId);
       const slide = await storage.createSlide({
         presentationId: presId,
-        projectId: pres.projectId || 0,
+        projectId: pres.projectId || null,
         slideIndex: req.body.slideIndex ?? existing.length,
         layout: req.body.layout || "title_body",
         title: req.body.title || "New Slide",
@@ -1646,7 +1646,7 @@ Return ONLY the JSON array, no other text.`
         const s = generatedSlides[i];
         const slide = await storage.createSlide({
           presentationId: presId,
-          projectId: pres.projectId || 0,
+          projectId: pres.projectId || null,
           slideIndex: i,
           layout: s.layout || "title_body",
           title: s.title || `Slide ${i + 1}`,
