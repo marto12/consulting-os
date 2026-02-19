@@ -9,7 +9,7 @@ import {
   DEFAULT_PROMPTS,
   type ProgressCallback,
 } from "./agents";
-import { runWorkflowStep, refineWithLangGraph } from "./agents/workflow-graph";
+import { runWorkflowStep, refineWithLangGraph, refineWithLangGraphStreaming } from "./agents/workflow-graph";
 import { reviewDocument, actionComment, executiveReviewDocument, spotFactCheckCandidates, runFactCheck, narrativeReviewDocument } from "./agents/document-agents";
 import { processVaultFile, retrieveRelevantContext, formatRAGContext } from "./vault-rag";
 import { generateChartSpec } from "./agents/chart-agent";
@@ -494,15 +494,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
         messageType: "message",
       });
 
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.flushHeaders();
+
+      let closed = false;
+      req.on("close", () => { closed = true; });
+
+      function sendSSE(type: string, content: string) {
+        if (closed) return;
+        res.write(`data: ${JSON.stringify({ type, content, timestamp: Date.now() })}\n\n`);
+      }
+
+      sendSSE("connected", "Stream connected");
+
       const stepDeliverables = await storage.getStepDeliverables(stepId);
       const currentDeliverable = stepDeliverables[0];
 
       if (currentDeliverable) {
-        const refined = await refineWithLangGraph(
+        const onProgress: ProgressCallback = (msg: string, type?: string) => {
+          sendSSE(type || "progress", msg);
+        };
+
+        const onToken = (token: string) => {
+          sendSSE("token", token);
+        };
+
+        const refined = await refineWithLangGraphStreaming(
           step.agentKey,
           currentDeliverable.contentJson,
           message,
-          { objective: project.objective, constraints: project.constraints }
+          { objective: project.objective, constraints: project.constraints },
+          onProgress,
+          onToken,
         );
 
         await storage.updateDeliverable(currentDeliverable.id, { contentJson: refined });
@@ -514,7 +539,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           messageType: "deliverable",
           metadata: { deliverableId: currentDeliverable.id, title: currentDeliverable.title, version: currentDeliverable.version, agentKey: step.agentKey },
         });
+
+        sendSSE("complete", JSON.stringify({
+          deliverableContent: refined,
+          deliverableId: currentDeliverable.id,
+          title: currentDeliverable.title,
+          version: currentDeliverable.version,
+          agentKey: step.agentKey,
+        }));
       } else {
+        sendSSE("progress", "No deliverable found to refine. Please run the agent first.");
+        sendSSE("complete", JSON.stringify({ noDeliverable: true }));
+
         await storage.insertStepChatMessage({
           stepId,
           role: "assistant",
@@ -523,10 +559,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const messages = await storage.getStepChatMessages(stepId);
-      res.json(messages);
+      if (!closed) res.end();
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      if (res.headersSent) {
+        res.write(`data: ${JSON.stringify({ type: "error", content: err.message || "Unknown error", timestamp: Date.now() })}\n\n`);
+        res.end();
+      } else {
+        res.status(500).json({ error: err.message });
+      }
     }
   });
 

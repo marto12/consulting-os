@@ -644,7 +644,22 @@ export async function refineWithLangGraph(
   }
 
   const config = await getAgentConfig(agentKey);
-  const refinementPrompt = `You previously generated the following output for this project:
+  const refinementPrompt = buildRefinementPrompt(currentContent, userFeedback, projectContext);
+
+  onProgress(`Calling LLM with model ${config.model} to refine output...`, "llm");
+  const raw = await callLLMWithLangChain(config.systemPrompt, refinementPrompt, config.model, config.maxTokens);
+  onProgress("LLM response received, parsing refined output...", "llm");
+  const parsed = extractJson(raw);
+  onProgress("Refinement complete.", "status");
+  return parsed;
+}
+
+function buildRefinementPrompt(
+  currentContent: any,
+  userFeedback: string,
+  projectContext: { objective: string; constraints: string }
+): string {
+  return `You previously generated the following output for this project:
 
 Project Objective: ${projectContext.objective}
 Constraints: ${projectContext.constraints}
@@ -656,11 +671,55 @@ The user has requested the following changes:
 "${userFeedback}"
 
 Please regenerate the COMPLETE output incorporating the user's feedback. Return the FULL updated output in the same JSON format as before. Do not return partial updates - return the entire revised document.`;
+}
 
-  onProgress(`Calling LLM with model ${config.model} to refine output...`, "llm");
-  const raw = await callLLMWithLangChain(config.systemPrompt, refinementPrompt, config.model, config.maxTokens);
-  onProgress("LLM response received, parsing refined output...", "llm");
-  const parsed = extractJson(raw);
+export type StreamTokenCallback = (token: string) => void;
+
+export async function refineWithLangGraphStreaming(
+  agentKey: string,
+  currentContent: any,
+  userFeedback: string,
+  projectContext: { objective: string; constraints: string },
+  onProgress: ProgressCallback = () => {},
+  onToken: StreamTokenCallback = () => {},
+): Promise<any> {
+  onProgress("Processing your feedback...", "progress");
+
+  if (!hasApiKey()) {
+    onProgress("Applying feedback (mock mode)...", "progress");
+    const mockContent = JSON.stringify(currentContent, null, 2);
+    for (let i = 0; i < mockContent.length; i += 20) {
+      const chunk = mockContent.slice(i, i + 20);
+      onToken(chunk);
+      await new Promise(r => setTimeout(r, 15));
+    }
+    return currentContent;
+  }
+
+  const config = await getAgentConfig(agentKey);
+  const refinementPrompt = buildRefinementPrompt(currentContent, userFeedback, projectContext);
+
+  onProgress(`Refining with ${config.model}...`, "llm");
+
+  const llm = createLLM(config.model, config.maxTokens);
+  if (!llm) return currentContent;
+
+  let accumulated = "";
+  const stream = await llm.stream([
+    new SystemMessage(config.systemPrompt),
+    new HumanMessage(refinementPrompt),
+  ]);
+
+  for await (const chunk of stream) {
+    const token = typeof chunk.content === "string" ? chunk.content : JSON.stringify(chunk.content);
+    if (token) {
+      accumulated += token;
+      onToken(token);
+    }
+  }
+
+  onProgress("Parsing refined output...", "llm");
+  const parsed = extractJson(accumulated);
   onProgress("Refinement complete.", "status");
   return parsed;
 }
