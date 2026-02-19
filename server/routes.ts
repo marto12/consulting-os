@@ -1671,6 +1671,136 @@ Return ONLY the JSON array, no other text.`
     }
   });
 
+  app.post("/api/editor-chat", async (req: Request, res: Response) => {
+    try {
+      const { editorType, editorId, mode, message, editorContent, history } = req.body;
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.flushHeaders();
+
+      let closed = false;
+      req.on("close", () => { closed = true; });
+
+      function sendEvent(data: Record<string, any>) {
+        if (closed) return;
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      }
+
+      const openai = new (await import("openai")).default({
+        apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+        baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+      });
+
+      const contentLabel = editorType === "document" ? "Document" : "Slide Deck";
+      const contentSnippet = (editorContent || "").replace(/<[^>]*>/g, "").slice(0, 12000);
+
+      if (mode.startsWith("workflow:")) {
+        const workflowId = Number(mode.split(":")[1]);
+        const wfSteps = await storage.getWorkflowTemplateSteps(workflowId);
+
+        sendEvent({ status: "starting", message: "Starting workflow..." });
+
+        let accumulatedContext = `${contentLabel} content:\n${contentSnippet}\n\nUser request: ${message}`;
+
+        for (let i = 0; i < wfSteps.length; i++) {
+          const step = wfSteps[i];
+          sendEvent({ workflowStep: `Step ${i + 1}/${wfSteps.length}: ${step.name}` });
+          sendEvent({ status: "running", message: `Running ${step.name}...`, agentName: step.name });
+
+          const agentConfig = await storage.getAgentConfig(step.agentKey);
+          const systemPrompt = agentConfig?.systemPrompt || DEFAULT_PROMPTS[step.agentKey] || `You are a ${step.name} agent.`;
+
+          try {
+            const stream = await openai.chat.completions.create({
+              model: agentConfig?.model || "gpt-5-nano",
+              messages: [
+                { role: "system", content: `${systemPrompt}\n\nYou are operating within a workflow pipeline. Analyze the input and produce output that flows to the next step. Be concise and structured.` },
+                { role: "user", content: accumulatedContext },
+              ],
+              stream: true,
+              max_completion_tokens: agentConfig?.maxTokens || 4096,
+            });
+
+            let stepOutput = "";
+            for await (const chunk of stream) {
+              const token = chunk.choices[0]?.delta?.content || "";
+              if (token) {
+                stepOutput += token;
+                sendEvent({ content: token });
+              }
+            }
+
+            accumulatedContext = `Previous step (${step.name}) output:\n${stepOutput}\n\nOriginal ${contentLabel} content:\n${contentSnippet}\n\nOriginal user request: ${message}`;
+          } catch (err: any) {
+            sendEvent({ content: `\n\n[${step.name} encountered an error: ${err.message}]\n` });
+          }
+        }
+
+        sendEvent({ done: true });
+        if (!closed) res.end();
+        return;
+      }
+
+      let systemPrompt: string;
+      let agentName = "";
+
+      if (mode === "general") {
+        systemPrompt = `You are a helpful AI assistant embedded in a ${editorType === "document" ? "word processor" : "slide editor"}. You have access to the user's current ${contentLabel.toLowerCase()} content. Help them with writing, editing, analysis, brainstorming, and any other questions. Be concise and actionable.\n\n${contentLabel} content:\n${contentSnippet}`;
+        agentName = "General Assistant";
+      } else {
+        const agentConfig = await storage.getAgentConfig(mode);
+        systemPrompt = agentConfig?.systemPrompt || DEFAULT_PROMPTS[mode] || `You are a ${mode} agent. Help the user with their ${contentLabel.toLowerCase()}.`;
+        systemPrompt = `${systemPrompt}\n\nYou are operating inside an editor chat. The user is asking you to apply your expertise to their current ${contentLabel.toLowerCase()}. Provide actionable feedback and suggestions.\n\n${contentLabel} content:\n${contentSnippet}`;
+
+        const agentRecord = await storage.getAgentByKey(mode);
+        agentName = agentRecord?.name || mode;
+      }
+
+      sendEvent({ status: "connecting", message: `${agentName} is thinking...`, agentName });
+
+      const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
+        { role: "system", content: systemPrompt },
+      ];
+
+      if (history && Array.isArray(history)) {
+        for (const h of history.slice(-10)) {
+          chatMessages.push({ role: h.role as "user" | "assistant", content: h.content });
+        }
+      }
+      chatMessages.push({ role: "user", content: message });
+
+      sendEvent({ status: "streaming", message: "Generating response..." });
+
+      const stream = await openai.chat.completions.create({
+        model: "gpt-5-nano",
+        messages: chatMessages,
+        stream: true,
+        max_completion_tokens: 4096,
+      });
+
+      for await (const chunk of stream) {
+        const token = chunk.choices[0]?.delta?.content || "";
+        if (token) {
+          sendEvent({ content: token });
+        }
+      }
+
+      sendEvent({ done: true });
+      if (!closed) res.end();
+    } catch (error: any) {
+      console.error("Editor chat error:", error);
+      if (res.headersSent) {
+        res.write(`data: ${JSON.stringify({ error: error.message || "Failed to process request" })}\n\n`);
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+        res.end();
+      } else {
+        res.status(500).json({ error: "Failed to process request" });
+      }
+    }
+  });
+
   registerChatRoutes(app);
 
   const httpServer = createServer(app);
