@@ -1435,6 +1435,242 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Presentations ──
+  app.get("/api/presentations", async (_req: Request, res: Response) => {
+    try {
+      res.json(await storage.listPresentations());
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post("/api/presentations", async (req: Request, res: Response) => {
+    try {
+      const pres = await storage.createPresentation(req.body);
+      res.status(201).json(pres);
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get("/api/presentations/:id", async (req: Request, res: Response) => {
+    try {
+      const pres = await storage.getPresentation(Number(req.params.id));
+      if (!pres) return res.status(404).json({ error: "Not found" });
+      const presSlides = await storage.getPresentationSlides(pres.id);
+      res.json({ ...pres, slides: presSlides });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.patch("/api/presentations/:id", async (req: Request, res: Response) => {
+    try {
+      const pres = await storage.updatePresentation(Number(req.params.id), req.body);
+      res.json(pres);
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.delete("/api/presentations/:id", async (req: Request, res: Response) => {
+    try {
+      await storage.deletePresentation(Number(req.params.id));
+      res.json({ ok: true });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ── Slides ──
+  app.post("/api/presentations/:id/slides", async (req: Request, res: Response) => {
+    try {
+      const presId = Number(req.params.id);
+      const pres = await storage.getPresentation(presId);
+      if (!pres) return res.status(404).json({ error: "Presentation not found" });
+      const existing = await storage.getPresentationSlides(presId);
+      const slide = await storage.createSlide({
+        presentationId: presId,
+        projectId: pres.projectId || 0,
+        slideIndex: req.body.slideIndex ?? existing.length,
+        layout: req.body.layout || "title_body",
+        title: req.body.title || "New Slide",
+        subtitle: req.body.subtitle,
+        bodyJson: req.body.bodyJson || {},
+        elements: req.body.elements || [],
+        notesText: req.body.notesText,
+      });
+      res.status(201).json(slide);
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.patch("/api/slides/:id", async (req: Request, res: Response) => {
+    try {
+      const slide = await storage.updateSlide(Number(req.params.id), req.body);
+      res.json(slide);
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.delete("/api/slides/:id", async (req: Request, res: Response) => {
+    try {
+      await storage.deleteSlide(Number(req.params.id));
+      res.json({ ok: true });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post("/api/presentations/:id/reorder", async (req: Request, res: Response) => {
+    try {
+      await storage.reorderSlides(Number(req.params.id), req.body.slideIds);
+      res.json({ ok: true });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ── Generate slides from document ──
+  app.post("/api/presentations/:id/generate-from-document", async (req: Request, res: Response) => {
+    try {
+      const presId = Number(req.params.id);
+      const pres = await storage.getPresentation(presId);
+      if (!pres) return res.status(404).json({ error: "Presentation not found" });
+
+      const { documentId, documentContent } = req.body;
+      let content = documentContent;
+
+      if (documentId && !content) {
+        const doc = await storage.getDocument(Number(documentId));
+        if (!doc) return res.status(404).json({ error: "Document not found" });
+        content = doc.content;
+      }
+
+      if (!content) return res.status(400).json({ error: "No content provided" });
+
+      const plainText = content.replace(/<[^>]*>/g, "").trim();
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.flushHeaders();
+
+      let closed = false;
+      req.on("close", () => { closed = true; });
+      function sendEvent(data: any) {
+        if (closed) return;
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      }
+
+      sendEvent({ status: "analyzing", message: "Analyzing document structure..." });
+
+      const useMock = !process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+      let generatedSlides: any[] = [];
+
+      if (useMock) {
+        const paragraphs = plainText.split(/\n\n+/).filter((p: string) => p.trim().length > 20);
+        sendEvent({ status: "generating", message: "Generating slide outlines..." });
+
+        generatedSlides.push({
+          layout: "title_only",
+          title: paragraphs[0]?.slice(0, 80) || "Presentation",
+          subtitle: "Generated from document",
+          bodyJson: {},
+          elements: [],
+        });
+
+        const bodyParagraphs = paragraphs.slice(1);
+        for (let i = 0; i < bodyParagraphs.length; i += 3) {
+          const chunk = bodyParagraphs.slice(i, i + 3);
+          const bullets = chunk.map((p: string) => {
+            const sentences = p.split(/[.!?]+/).filter((s: string) => s.trim());
+            return sentences[0]?.trim().slice(0, 120) || p.slice(0, 120);
+          });
+          generatedSlides.push({
+            layout: "title_body",
+            title: bullets[0]?.slice(0, 60) || `Section ${Math.floor(i / 3) + 1}`,
+            bodyJson: { bullets },
+            elements: [],
+          });
+          sendEvent({ status: "generating", message: `Generated slide ${generatedSlides.length}...` });
+        }
+
+        if (generatedSlides.length < 2) {
+          generatedSlides.push({
+            layout: "title_body",
+            title: "Key Points",
+            bodyJson: { bullets: ["Summary of key findings", "Recommendations", "Next steps"] },
+            elements: [],
+          });
+        }
+      } else {
+        const { default: OpenAI } = await import("openai");
+        const openai = new OpenAI();
+
+        sendEvent({ status: "generating", message: "AI is creating slides..." });
+
+        const completion = await openai.chat.completions.create({
+          model: "gpt-5.1-mini",
+          messages: [
+            {
+              role: "system",
+              content: `You are a presentation designer. Convert the given document into a structured slide deck.
+Return a JSON array of slides. Each slide has:
+- "layout": one of "title_only", "title_body", "two_column", "blank"
+- "title": string (concise slide title)
+- "subtitle": optional string
+- "bodyJson": object with "bullets" array of strings for key points
+- "elements": empty array
+
+Guidelines:
+- First slide should be a title slide (layout: "title_only")
+- Each slide should have 3-5 bullet points max
+- Keep titles under 60 characters
+- Keep bullets concise and actionable
+- Create 5-15 slides depending on content length
+- End with a summary or next steps slide
+
+Return ONLY the JSON array, no other text.`
+            },
+            {
+              role: "user",
+              content: plainText.slice(0, 12000),
+            },
+          ],
+          max_completion_tokens: 4096,
+        });
+
+        const raw = completion.choices[0]?.message?.content || "[]";
+        try {
+          const jsonMatch = raw.match(/\[[\s\S]*\]/);
+          generatedSlides = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
+        } catch {
+          generatedSlides = [{
+            layout: "title_body",
+            title: "Generated Content",
+            bodyJson: { bullets: ["Failed to parse AI output — please try again."] },
+            elements: [],
+          }];
+        }
+      }
+
+      sendEvent({ status: "saving", message: `Saving ${generatedSlides.length} slides...` });
+
+      const created: any[] = [];
+      for (let i = 0; i < generatedSlides.length; i++) {
+        const s = generatedSlides[i];
+        const slide = await storage.createSlide({
+          presentationId: presId,
+          projectId: pres.projectId || 0,
+          slideIndex: i,
+          layout: s.layout || "title_body",
+          title: s.title || `Slide ${i + 1}`,
+          subtitle: s.subtitle,
+          bodyJson: s.bodyJson || {},
+          elements: s.elements || [],
+          notesText: s.notesText,
+        });
+        created.push(slide);
+      }
+
+      sendEvent({ done: true, slides: created });
+      if (!closed) res.end();
+    } catch (err: any) {
+      console.error("Generate slides error:", err);
+      if (res.headersSent) {
+        res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+        res.end();
+      } else {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  });
+
   registerChatRoutes(app);
 
   const httpServer = createServer(app);
