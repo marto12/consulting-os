@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import EditorChatPanel from "../components/EditorChatPanel";
 import {
   Plus, Trash2, ChevronLeft, Type, Image, Square, Layout,
   Bold, Italic, AlignLeft, AlignCenter, AlignRight,
@@ -755,6 +756,20 @@ export default function SlideEditor() {
           )}
         </div>
       </div>
+      {pres && (
+        <EditorChatPanel
+          editorType="slides"
+          editorId={Number(id)}
+          getContentFn={() => {
+            if (!pres) return "";
+            return pres.slides
+              .map((s, i) =>
+                `Slide ${i + 1}:\n${(s.elements || []).filter(e => e.type === "text").map(e => e.content).join("\n")}`
+              )
+              .join("\n\n");
+          }}
+        />
+      )}
     </div>
   );
 }

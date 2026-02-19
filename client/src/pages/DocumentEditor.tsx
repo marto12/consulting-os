@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import EditorChatPanel from "../components/EditorChatPanel";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -857,6 +858,13 @@ export default function DocumentEditor() {
           </DialogContent>
         </Dialog>
       </div>
+      {doc && editor && (
+        <EditorChatPanel
+          editorType="document"
+          editorId={Number(id)}
+          getContentFn={() => editor.getHTML()}
+        />
+      )}
     </TooltipProvider>
   );
 }
