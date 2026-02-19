@@ -6,10 +6,21 @@ import {
   Bold, Italic, AlignLeft, AlignCenter, AlignRight,
   Palette, Save, Loader2, GripVertical, FileText,
   Maximize2, Minimize2, ChevronUp, ChevronDown,
-  Sparkles,
+  Sparkles, MessageSquare, Check, X,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
+import { Badge } from "../components/ui/badge";
+import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../lib/utils";
+
+interface SlideComment {
+  id: string;
+  elementId: string | null;
+  content: string;
+  status: "pending" | "accepted" | "rejected";
+  proposedText: string | null;
+  aiReply: string | null;
+}
 
 interface SlideElement {
   id: string;
@@ -105,6 +116,11 @@ export default function SlideEditor() {
   const [generating, setGenerating] = useState(false);
   const [genStatus, setGenStatus] = useState("");
   const [documents, setDocuments] = useState<any[]>([]);
+  const [showComments, setShowComments] = useState(false);
+  const [slideComments, setSlideComments] = useState<Record<number, SlideComment[]>>({});
+  const [commentText, setCommentText] = useState("");
+  const [actionAllLoading, setActionAllLoading] = useState(false);
+  const [actionAllProgress, setActionAllProgress] = useState<{ current: number; total: number } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ elId: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
   const resizeRef = useRef<{ elId: string; startX: number; startY: number; origW: number; origH: number } | null>(null);
@@ -118,6 +134,13 @@ export default function SlideEditor() {
           elements: s.elements || [],
         }));
         setPres({ ...data, slides: slidesWithElements });
+        const loadedComments: Record<number, SlideComment[]> = {};
+        for (const s of slidesWithElements) {
+          if (s.bodyJson?.comments) {
+            loadedComments[s.id] = s.bodyJson.comments;
+          }
+        }
+        setSlideComments(loadedComments);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -400,6 +423,166 @@ export default function SlideEditor() {
     });
   }, [pres, activeSlideIndex]);
 
+  const activeSlideComments = activeSlide ? (slideComments[activeSlide.id] || []) : [];
+  const pendingSlideComments = activeSlideComments.filter(c => c.status === "pending" && !c.aiReply);
+
+  const saveSlideComments = useCallback(async (slideId: number, comments: SlideComment[]) => {
+    setSlideComments(prev => ({ ...prev, [slideId]: comments }));
+    try {
+      const slide = pres?.slides.find(s => s.id === slideId);
+      if (slide) {
+        await fetch(`/api/slides/${slideId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bodyJson: { ...(slide.bodyJson || {}), comments },
+          }),
+        });
+      }
+    } catch {}
+  }, [pres]);
+
+  const handleAddSlideComment = useCallback(() => {
+    if (!activeSlide || !commentText.trim()) return;
+    const newComment: SlideComment = {
+      id: generateId(),
+      elementId: selectedElement,
+      content: commentText.trim(),
+      status: "pending",
+      proposedText: null,
+      aiReply: null,
+    };
+    const updated = [...activeSlideComments, newComment];
+    saveSlideComments(activeSlide.id, updated);
+    setCommentText("");
+  }, [activeSlide, commentText, selectedElement, activeSlideComments, saveSlideComments]);
+
+  const handleDeleteSlideComment = useCallback((commentId: string) => {
+    if (!activeSlide) return;
+    const updated = activeSlideComments.filter(c => c.id !== commentId);
+    saveSlideComments(activeSlide.id, updated);
+  }, [activeSlide, activeSlideComments, saveSlideComments]);
+
+  const handleAcceptSlideComment = useCallback((comment: SlideComment) => {
+    if (!activeSlide || !comment.proposedText || !comment.elementId) return;
+    updateElement(comment.elementId, { content: comment.proposedText });
+    const updated = activeSlideComments.map(c =>
+      c.id === comment.id ? { ...c, status: "accepted" as const } : c
+    );
+    saveSlideComments(activeSlide.id, updated);
+  }, [activeSlide, activeSlideComments, updateElement, saveSlideComments]);
+
+  const handleRejectSlideComment = useCallback((commentId: string) => {
+    if (!activeSlide) return;
+    const updated = activeSlideComments.map(c =>
+      c.id === commentId ? { ...c, status: "rejected" as const } : c
+    );
+    saveSlideComments(activeSlide.id, updated);
+  }, [activeSlide, activeSlideComments, saveSlideComments]);
+
+  const handleActionAllSlideComments = useCallback(async () => {
+    if (!activeSlide || !pres || pendingSlideComments.length === 0) return;
+    setActionAllLoading(true);
+    setActionAllProgress({ current: 0, total: pendingSlideComments.length });
+
+    const slideContent = (activeSlide.elements || [])
+      .filter(e => e.type === "text")
+      .map(e => `[Element "${e.id}"]: ${e.content}`)
+      .join("\n\n");
+
+    const commentsPayload = pendingSlideComments.map((c, i) => ({
+      index: i,
+      elementId: c.elementId,
+      elementContent: c.elementId
+        ? (activeSlide.elements.find(e => e.id === c.elementId)?.content || "")
+        : "",
+      comment: c.content,
+    }));
+
+    try {
+      const res = await fetch("/api/slides/action-all-comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slideContent,
+          comments: commentsPayload,
+        }),
+      });
+
+      if (!res.ok) {
+        setActionAllLoading(false);
+        setActionAllProgress(null);
+        return;
+      }
+
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("text/event-stream")) {
+        const reader = res.body?.getReader();
+        if (!reader) {
+          setActionAllLoading(false);
+          setActionAllProgress(null);
+          return;
+        }
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const event = JSON.parse(line.slice(6));
+                if (event.type === "progress") {
+                  setActionAllProgress({ current: event.index + 1, total: event.total });
+                  setSlideComments(prev => {
+                    const slideId = activeSlide.id;
+                    const existing = prev[slideId] || [];
+                    return {
+                      ...prev,
+                      [slideId]: existing.map(c => {
+                        const match = pendingSlideComments[event.index];
+                        if (match && c.id === match.id) {
+                          return { ...c, aiReply: event.aiReply, proposedText: event.proposedText };
+                        }
+                        return c;
+                      }),
+                    };
+                  });
+                }
+              } catch {}
+            }
+          }
+        }
+      } else {
+        const data = await res.json();
+        if (data.results) {
+          setSlideComments(prev => {
+            const slideId = activeSlide.id;
+            const existing = prev[slideId] || [];
+            return {
+              ...prev,
+              [slideId]: existing.map(c => {
+                const match = data.results.find((r: any) => {
+                  const pendingIdx = pendingSlideComments.findIndex(pc => pc.id === c.id);
+                  return pendingIdx >= 0 && r.index === pendingIdx;
+                });
+                if (match) {
+                  return { ...c, aiReply: match.aiReply, proposedText: match.proposedText };
+                }
+                return c;
+              }),
+            };
+          });
+        }
+      }
+    } catch {}
+    setActionAllLoading(false);
+    setActionAllProgress(null);
+  }, [activeSlide, pres, pendingSlideComments]);
+
   const selectedEl = activeSlide?.elements.find(e => e.id === selectedElement) || null;
 
   if (loading) {
@@ -523,6 +706,19 @@ export default function SlideEditor() {
           <Button variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={loadDocs} disabled={generating}>
             <Sparkles size={14} />
             From Document
+          </Button>
+          <Button
+            variant={showComments ? "secondary" : "ghost"}
+            size="icon"
+            className="h-8 w-8 relative"
+            onClick={() => setShowComments(!showComments)}
+          >
+            <MessageSquare size={14} />
+            {activeSlideComments.length > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 bg-primary text-primary-foreground text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center">
+                {activeSlideComments.length}
+              </span>
+            )}
           </Button>
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleSave} disabled={saving}>
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
@@ -665,7 +861,7 @@ export default function SlideEditor() {
         </div>
 
         {/* Main Canvas */}
-        <div className="flex-1 flex items-center justify-center bg-muted/20 overflow-auto p-8">
+        <div className="flex-1 flex items-center justify-center bg-muted/20 overflow-auto p-8 min-w-0">
           {activeSlide ? (
             <div
               ref={canvasRef}
@@ -755,6 +951,148 @@ export default function SlideEditor() {
             <div className="text-muted-foreground text-sm">No slides yet. Click "Add Slide" to get started.</div>
           )}
         </div>
+
+        {showComments && (
+          <div className="w-72 border-l flex flex-col bg-background/50 shrink-0">
+            <div className="px-3 py-2.5 border-b flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold">Slide Comments</h3>
+                <Badge variant="secondary" className="text-[10px]">{activeSlideComments.length}</Badge>
+              </div>
+              {pendingSlideComments.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs w-full"
+                  onClick={handleActionAllSlideComments}
+                  disabled={actionAllLoading}
+                >
+                  {actionAllLoading ? (
+                    <>
+                      <Loader2 size={12} className="animate-spin mr-1" />
+                      {actionAllProgress
+                        ? `Processing ${actionAllProgress.current}/${actionAllProgress.total}...`
+                        : "Starting..."}
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={12} className="mr-1" />
+                      Action All ({pendingSlideComments.length})
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
+            <ScrollArea className="flex-1">
+              <div className="p-2 space-y-2">
+                {activeSlideComments.length === 0 && (
+                  <div className="text-center py-6 text-muted-foreground">
+                    <MessageSquare size={24} strokeWidth={1.5} className="mx-auto mb-1.5 opacity-50" />
+                    <p className="text-[11px]">No comments on this slide</p>
+                    <p className="text-[11px] mt-0.5">Add a comment below</p>
+                  </div>
+                )}
+                {activeSlideComments.map((comment) => {
+                  const targetEl = comment.elementId
+                    ? activeSlide?.elements.find(e => e.id === comment.elementId)
+                    : null;
+                  return (
+                    <div
+                      key={comment.id}
+                      className="p-2.5 rounded-lg border bg-card text-card-foreground text-xs space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <MessageSquare size={11} className="text-muted-foreground" />
+                          <span className="font-medium text-muted-foreground text-[10px]">You</span>
+                          {targetEl && (
+                            <span className="text-[10px] text-muted-foreground/70 truncate max-w-[80px]">
+                              on "{targetEl.content.slice(0, 15)}..."
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Badge
+                            variant={comment.status === "accepted" ? "default" : comment.status === "rejected" ? "destructive" : "secondary"}
+                            className="text-[9px] px-1 py-0"
+                          >
+                            {comment.status}
+                          </Badge>
+                          <button
+                            className="p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                            onClick={() => handleDeleteSlideComment(comment.id)}
+                          >
+                            <Trash2 size={10} />
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-xs">{comment.content}</p>
+                      {comment.proposedText && comment.status === "pending" && (
+                        <div className="space-y-1.5">
+                          <div className="text-[10px] bg-muted rounded px-2 py-1 border">
+                            <span className="font-medium text-[9px] uppercase tracking-wider text-muted-foreground">Proposed:</span>
+                            <p className="mt-0.5 text-foreground">{comment.proposedText}</p>
+                          </div>
+                          <div className="flex gap-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-6 text-[10px] flex-1"
+                              onClick={() => handleAcceptSlideComment(comment)}
+                              disabled={!comment.elementId}
+                            >
+                              <Check size={10} />
+                              Accept
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-6 text-[10px] flex-1 text-destructive"
+                              onClick={() => handleRejectSlideComment(comment.id)}
+                            >
+                              <X size={10} />
+                              Reject
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      {comment.aiReply && !comment.proposedText && (
+                        <div className="text-[10px] bg-muted rounded px-2 py-1 border">
+                          <span className="font-medium text-[9px] uppercase tracking-wider text-muted-foreground">AI:</span>
+                          <p className="mt-0.5 text-foreground">{comment.aiReply}</p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </ScrollArea>
+            <div className="border-t p-2">
+              <div className="flex gap-1.5">
+                <input
+                  className="flex-1 h-7 text-xs bg-muted rounded px-2 border border-border outline-none focus:ring-1 focus:ring-primary"
+                  placeholder={selectedElement ? "Comment on selected element..." : "Comment on this slide..."}
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && commentText.trim()) handleAddSlideComment(); }}
+                />
+                <Button
+                  size="sm"
+                  className="h-7 px-2"
+                  disabled={!commentText.trim()}
+                  onClick={handleAddSlideComment}
+                >
+                  Add
+                </Button>
+              </div>
+              {selectedElement && (
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Attached to selected element
+                </p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
       {pres && (
         <EditorChatPanel

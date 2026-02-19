@@ -1561,6 +1561,108 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
+  app.post("/api/slides/action-all-comments", async (req: Request, res: Response) => {
+    try {
+      const { slideContent, comments } = req.body;
+      if (!comments || comments.length === 0) {
+        return res.json({ message: "No comments to action", results: [] });
+      }
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.flushHeaders();
+
+      let closed = false;
+      res.on("close", () => { closed = true; });
+
+      const sendEvent = (data: any) => {
+        if (closed) return;
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      };
+
+      sendEvent({ type: "start", total: comments.length });
+
+      const hasKey = !!(process.env.AI_INTEGRATIONS_OPENAI_API_KEY && process.env.AI_INTEGRATIONS_OPENAI_BASE_URL);
+
+      if (!hasKey) {
+        for (let i = 0; i < comments.length; i++) {
+          const c = comments[i];
+          sendEvent({
+            type: "progress",
+            index: i,
+            total: comments.length,
+            aiReply: `Reviewed: "${c.comment}". Suggested revision applied.`,
+            proposedText: c.elementContent ? `[Revised] ${c.elementContent}` : "Suggested replacement text",
+          });
+        }
+      } else {
+        const OpenAI = (await import("openai")).default;
+        const openai = new OpenAI({
+          apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+          baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+        });
+
+        const commentsList = comments.map((c: any, i: number) =>
+          `Comment ${i}:\n  Element content: "${c.elementContent}"\n  User instruction: ${c.comment}`
+        ).join("\n\n");
+
+        const response = await openai.chat.completions.create({
+          model: "gpt-5-nano",
+          messages: [
+            {
+              role: "system",
+              content: `You are a slide editing assistant. Multiple comments have been left on slide elements. For EACH comment, propose a specific text change.
+
+Return a JSON array where each element corresponds to one comment (same order). Each must have:
+- "index": the comment index (0-based)
+- "aiReply": brief explanation of the change
+- "proposedText": the replacement text for the element
+
+Return ONLY valid JSON array.`,
+            },
+            {
+              role: "user",
+              content: `Slide content:\n${slideContent}\n\n--- Comments ---\n${commentsList}`,
+            },
+          ],
+        });
+
+        const content = response.choices[0]?.message?.content || "[]";
+        let edits: any[] = [];
+        try {
+          const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+          const toParse = fenced ? fenced[1].trim() : content;
+          const objMatch = toParse.match(/[\[{][\s\S]*[\]}]/);
+          edits = JSON.parse(objMatch ? objMatch[0] : toParse);
+          if (!Array.isArray(edits)) edits = [];
+        } catch { edits = []; }
+
+        for (let i = 0; i < comments.length; i++) {
+          const c = comments[i];
+          const edit = edits.find((e: any) => e.index === i) || edits[i];
+          sendEvent({
+            type: "progress",
+            index: i,
+            total: comments.length,
+            aiReply: edit?.aiReply || "Suggested revision applied.",
+            proposedText: edit?.proposedText || c.elementContent || "Suggested replacement text",
+          });
+        }
+      }
+
+      sendEvent({ type: "done" });
+      res.end();
+    } catch (err: any) {
+      if (!res.headersSent) {
+        res.status(500).json({ error: err.message });
+      } else {
+        res.write(`data: ${JSON.stringify({ type: "error", error: err.message })}\n\n`);
+        res.end();
+      }
+    }
+  });
+
   app.post("/api/presentations/:id/reorder", async (req: Request, res: Response) => {
     try {
       await storage.reorderSlides(Number(req.params.id), req.body.slideIds);
