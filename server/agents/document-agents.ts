@@ -1018,3 +1018,96 @@ export async function actionComment(doc: Document, comment: DocumentComment): Pr
     return comment;
   }
 }
+
+export async function actionAllComments(
+  doc: Document,
+  pendingComments: DocumentComment[],
+  onProgress: (data: { commentId: number; aiReply: string; proposedText: string; index: number; total: number }) => void,
+): Promise<DocumentComment[]> {
+  if (pendingComments.length === 0) return [];
+
+  const { plainText, map } = buildPositionMap(doc.content || "");
+
+  const commentDescriptions = pendingComments.map((c, i) => {
+    let highlightedText = "";
+    for (let j = 0; j < map.length; j++) {
+      if (map[j] >= c.from && map[j] < c.to) {
+        highlightedText += plainText[j];
+      }
+    }
+    return {
+      index: i,
+      id: c.id,
+      highlightedText: highlightedText.trim(),
+      comment: c.content,
+    };
+  });
+
+  if (!hasApiKey()) {
+    const results: DocumentComment[] = [];
+    for (let i = 0; i < pendingComments.length; i++) {
+      const c = pendingComments[i];
+      const desc = commentDescriptions[i];
+      const aiReply = `Reviewed: "${c.content}". Suggested revision applied.`;
+      const proposedText = desc.highlightedText ? `[Revised] ${desc.highlightedText}` : "Suggested replacement text";
+      const updated = await storage.updateComment(c.id, { aiReply, proposedText });
+      onProgress({ commentId: c.id, aiReply, proposedText, index: i, total: pendingComments.length });
+      results.push(updated);
+    }
+    return results;
+  }
+
+  const llm = createLLM()!;
+  const fullPlainText = getPlainText(doc.content || "");
+
+  const systemPrompt = `You are a document editing assistant. Multiple comments have been left on a document. For EACH comment, propose a specific text change that addresses it.
+
+Return a JSON array where each element corresponds to one comment (in the same order as provided). Each element must have:
+- "index": the comment index (0-based)
+- "aiReply": a brief explanation of what you changed and why
+- "proposedText": the replacement text for the highlighted range
+
+Return ONLY a valid JSON array. Example:
+[{"index": 0, "aiReply": "Made more concise", "proposedText": "Improved text here"}, {"index": 1, "aiReply": "Fixed grammar", "proposedText": "Corrected text"}]`;
+
+  const commentsList = commentDescriptions.map((d, i) =>
+    `Comment ${i}:\n  Highlighted text: "${d.highlightedText}"\n  User instruction: ${d.comment}`
+  ).join("\n\n");
+
+  try {
+    const response = await llm.invoke([
+      new SystemMessage(systemPrompt),
+      new HumanMessage(`Document content:\n${fullPlainText}\n\n--- Comments to action ---\n${commentsList}`),
+    ]);
+
+    const content = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+    const parsed = extractJson(content);
+    const edits = Array.isArray(parsed) ? parsed : parsed.edits || parsed.comments || [];
+
+    const results: DocumentComment[] = [];
+    for (let i = 0; i < pendingComments.length; i++) {
+      const c = pendingComments[i];
+      const desc = commentDescriptions[i];
+      const edit = edits.find((e: any) => e.index === i) || edits[i];
+      const aiReply = edit?.aiReply || "Suggested revision applied.";
+      const proposedText = edit?.proposedText || desc.highlightedText || "Suggested replacement text";
+      const updated = await storage.updateComment(c.id, { aiReply, proposedText });
+      onProgress({ commentId: c.id, aiReply, proposedText, index: i, total: pendingComments.length });
+      results.push(updated);
+    }
+    return results;
+  } catch (error) {
+    console.error("actionAllComments LLM error, falling back to individual:", error);
+    const results: DocumentComment[] = [];
+    for (let i = 0; i < pendingComments.length; i++) {
+      const c = pendingComments[i];
+      const desc = commentDescriptions[i];
+      const aiReply = `Reviewed: "${c.content}". Suggested revision.`;
+      const proposedText = desc.highlightedText ? `[Revised] ${desc.highlightedText}` : "Suggested replacement text";
+      const updated = await storage.updateComment(c.id, { aiReply, proposedText });
+      onProgress({ commentId: c.id, aiReply, proposedText, index: i, total: pendingComments.length });
+      results.push(updated);
+    }
+    return results;
+  }
+}

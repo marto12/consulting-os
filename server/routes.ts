@@ -11,7 +11,7 @@ import {
   type ProgressCallback,
 } from "./agents";
 import { runWorkflowStep, refineWithLangGraph, refineWithLangGraphStreaming } from "./agents/workflow-graph";
-import { reviewDocument, actionComment, executiveReviewDocument, spotFactCheckCandidates, runFactCheck, narrativeReviewDocument } from "./agents/document-agents";
+import { reviewDocument, actionComment, actionAllComments, executiveReviewDocument, spotFactCheckCandidates, runFactCheck, narrativeReviewDocument } from "./agents/document-agents";
 import { processVaultFile, retrieveRelevantContext, formatRAGContext } from "./vault-rag";
 import { generateChartSpec } from "./agents/chart-agent";
 import { db } from "./db";
@@ -1178,6 +1178,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const result = await actionComment(doc, comment);
       res.json(result);
     } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post("/api/documents/:id/action-all-comments", async (req: Request, res: Response) => {
+    try {
+      const doc = await storage.getDocument(Number(req.params.id));
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+
+      const allComments = await storage.listComments(doc.id);
+      const pendingUserComments = allComments.filter(
+        (c) => c.type === "user" && c.status === "pending" && !c.aiReply
+      );
+
+      if (pendingUserComments.length === 0) {
+        return res.json({ message: "No pending user comments to action", results: [] });
+      }
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.flushHeaders();
+
+      let closed = false;
+      res.on("close", () => { closed = true; });
+
+      const sendEvent = (data: any) => {
+        if (closed) return;
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      };
+
+      sendEvent({ type: "start", total: pendingUserComments.length });
+
+      await actionAllComments(doc, pendingUserComments, (progress) => {
+        sendEvent({
+          type: "progress",
+          commentId: progress.commentId,
+          aiReply: progress.aiReply,
+          proposedText: progress.proposedText,
+          index: progress.index,
+          total: progress.total,
+        });
+      });
+
+      sendEvent({ type: "done" });
+      res.end();
+    } catch (err: any) {
+      if (!res.headersSent) {
+        res.status(500).json({ error: err.message });
+      } else {
+        res.write(`data: ${JSON.stringify({ type: "error", error: err.message })}\n\n`);
+        res.end();
+      }
+    }
   });
 
   app.post("/api/documents/:id/factcheck-candidates", async (req: Request, res: Response) => {

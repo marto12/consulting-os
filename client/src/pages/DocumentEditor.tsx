@@ -102,6 +102,8 @@ export default function DocumentEditor() {
   const [factCandidateLoading, setFactCandidateLoading] = useState(false);
   const [factCheckLoading, setFactCheckLoading] = useState(false);
   const [narrativeLoading, setNarrativeLoading] = useState(false);
+  const [actionAllLoading, setActionAllLoading] = useState(false);
+  const [actionAllProgress, setActionAllProgress] = useState<{ current: number; total: number } | null>(null);
   const [commentDialogOpen, setCommentDialogOpen] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [selectionRange, setSelectionRange] = useState<{ from: number; to: number } | null>(null);
@@ -316,6 +318,68 @@ export default function DocumentEditor() {
     setNarrativeLoading(false);
   }, [fetchComments]);
 
+  const handleActionAllComments = useCallback(async () => {
+    if (!docIdRef.current) return;
+    const pendingUserComments = comments.filter(
+      (c) => c.type === "user" && c.status === "pending" && !c.aiReply
+    );
+    if (pendingUserComments.length === 0) return;
+
+    setActionAllLoading(true);
+    setActionAllProgress({ current: 0, total: pendingUserComments.length });
+    try {
+      const res = await fetch(`/api/documents/${docIdRef.current}/action-all-comments`, {
+        method: "POST",
+      });
+
+      if (!res.ok) {
+        setActionAllLoading(false);
+        setActionAllProgress(null);
+        return;
+      }
+
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("text/event-stream")) {
+        const reader = res.body?.getReader();
+        if (!reader) {
+          setActionAllLoading(false);
+          setActionAllProgress(null);
+          return;
+        }
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const event = JSON.parse(line.slice(6));
+                if (event.type === "progress") {
+                  setActionAllProgress({ current: event.index + 1, total: event.total });
+                  setComments((prev) =>
+                    prev.map((c) =>
+                      c.id === event.commentId
+                        ? { ...c, aiReply: event.aiReply, proposedText: event.proposedText }
+                        : c
+                    )
+                  );
+                }
+              } catch {}
+            }
+          }
+        }
+      } else {
+        await fetchComments(docIdRef.current);
+      }
+    } catch {}
+    setActionAllLoading(false);
+    setActionAllProgress(null);
+  }, [comments, fetchComments]);
+
   const handleAddComment = useCallback(async () => {
     if (!docIdRef.current || !selectionRange || !commentText.trim()) return;
     try {
@@ -445,6 +509,7 @@ export default function DocumentEditor() {
 
   const hasSelection = editor ? editor.state.selection.from !== editor.state.selection.to : false;
   const hasAcceptedFactCandidates = comments.some(c => c.type === "factcheck" && c.status === "accepted");
+  const pendingUserCommentCount = comments.filter(c => c.type === "user" && c.status === "pending" && !c.aiReply).length;
   const hasPendingFactCandidates = comments.some(c => c.type === "factcheck" && c.status === "pending");
 
   const agentOptions = useMemo(() => [
@@ -753,6 +818,29 @@ export default function DocumentEditor() {
               {mobileCommentsOpen && (
                 <ScrollArea className="h-[40vh] border-t">
                   <div className="p-3 space-y-3">
+                    {pendingUserCommentCount > 0 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs w-full"
+                        onClick={handleActionAllComments}
+                        disabled={actionAllLoading}
+                      >
+                        {actionAllLoading ? (
+                          <>
+                            <Loader2 size={12} className="animate-spin mr-1" />
+                            {actionAllProgress
+                              ? `Processing ${actionAllProgress.current}/${actionAllProgress.total}...`
+                              : "Starting..."}
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={12} className="mr-1" />
+                            Action All ({pendingUserCommentCount})
+                          </>
+                        )}
+                      </Button>
+                    )}
                     {comments.length === 0 && (
                       <div className="text-center py-6 text-muted-foreground">
                         <MessageSquare size={28} strokeWidth={1.5} className="mx-auto mb-2 opacity-50" />
@@ -788,9 +876,34 @@ export default function DocumentEditor() {
             </div>
 
             <div className="w-80 border-l flex flex-col bg-background/50">
-              <div className="px-4 py-3 border-b flex items-center justify-between">
-                <h3 className="text-sm font-semibold">Comments</h3>
-                <Badge variant="secondary">{comments.length}</Badge>
+              <div className="px-4 py-3 border-b flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold">Comments</h3>
+                  <Badge variant="secondary">{comments.length}</Badge>
+                </div>
+                {pendingUserCommentCount > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs w-full"
+                    onClick={handleActionAllComments}
+                    disabled={actionAllLoading}
+                  >
+                    {actionAllLoading ? (
+                      <>
+                        <Loader2 size={12} className="animate-spin mr-1" />
+                        {actionAllProgress
+                          ? `Processing ${actionAllProgress.current}/${actionAllProgress.total}...`
+                          : "Starting..."}
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={12} className="mr-1" />
+                        Action All Comments ({pendingUserCommentCount})
+                      </>
+                    )}
+                  </Button>
+                )}
               </div>
               <ScrollArea className="flex-1">
                 <div className="p-3 space-y-3">
