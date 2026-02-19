@@ -1,5 +1,5 @@
-import { useRef, useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { useRef, useEffect, useState, useMemo } from "react";
+import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation, useNavigate, Link, useParams } from "react-router-dom";
 import {
   MessageSquare,
   Bot,
@@ -8,6 +8,7 @@ import {
   GitBranch,
   Settings,
   ChevronDown,
+  ChevronRight,
   FolderOpen,
   Plus,
   Search,
@@ -80,39 +81,24 @@ const NAV_SECTIONS = [
     ],
   },
   {
-    label: "Workflows",
+    label: "Workspace",
     items: [
-      { to: "/workflows", icon: GitBranch, label: "Templates" },
+      { to: "/documents", icon: FileText, label: "Documents" },
+      { to: "/presentations", icon: Presentation, label: "Slides" },
     ],
   },
   {
-    label: "Agents",
+    label: "Artefacts",
     items: [
-      { to: "/agents", icon: Bot, label: "All Agents" },
-    ],
-  },
-  {
-    label: "Documents",
-    items: [
-      { to: "/documents", icon: FileText, label: "Word Processor" },
-    ],
-  },
-  {
-    label: "Presentations",
-    items: [
-      { to: "/presentations", icon: Presentation, label: "Slide Decks" },
-    ],
-  },
-  {
-    label: "Charts",
-    items: [
-      { to: "/charts", icon: BarChart3, label: "All Charts" },
-    ],
-  },
-  {
-    label: "Data & Models",
-    items: [
+      { to: "/charts", icon: BarChart3, label: "Charts" },
       { to: "/data", icon: Database, label: "Datasets & Models" },
+    ],
+  },
+  {
+    label: "Tools",
+    items: [
+      { to: "/workflows", icon: GitBranch, label: "Workflows" },
+      { to: "/agents", icon: Bot, label: "Agents" },
     ],
   },
 ];
@@ -323,23 +309,99 @@ function AppSidebar() {
   );
 }
 
+function Breadcrumbs() {
+  const location = useLocation();
+  const { activeProject } = useProjectContext();
+
+  const crumbs = useMemo(() => {
+    const path = location.pathname;
+    const parts: { label: string; to?: string }[] = [];
+
+    if (path === "/projects" || path.startsWith("/project/")) {
+      parts.push({ label: "Projects", to: "/projects" });
+      if (path.startsWith("/project/")) {
+        const projectName = activeProject?.name || "Project";
+        parts.push({ label: projectName });
+        if (path.includes("/workflow/")) parts.push({ label: "Workflow Step" });
+      }
+    } else if (path === "/chat") {
+      parts.push({ label: "Chat" });
+    } else if (path === "/documents" || path.startsWith("/editor")) {
+      parts.push({ label: "Workspace" });
+      parts.push({ label: "Documents", to: "/documents" });
+      if (path.startsWith("/editor")) parts.push({ label: "Editor" });
+    } else if (path === "/presentations" || path.startsWith("/slides")) {
+      parts.push({ label: "Workspace" });
+      parts.push({ label: "Slides", to: "/presentations" });
+      if (path.startsWith("/slides")) parts.push({ label: "Editor" });
+    } else if (path === "/charts" || path.startsWith("/charts/")) {
+      parts.push({ label: "Artefacts" });
+      parts.push({ label: "Charts", to: "/charts" });
+      if (path.startsWith("/charts/") && path !== "/charts") parts.push({ label: "Detail" });
+    } else if (path === "/data") {
+      parts.push({ label: "Artefacts" });
+      parts.push({ label: "Datasets & Models" });
+    } else if (path === "/workflows" || path.startsWith("/workflow/")) {
+      parts.push({ label: "Tools" });
+      parts.push({ label: "Workflows", to: "/workflows" });
+      if (path.startsWith("/workflow/")) parts.push({ label: "Editor" });
+    } else if (path === "/agents" || path.startsWith("/agent/")) {
+      parts.push({ label: "Tools" });
+      parts.push({ label: "Agents", to: "/agents" });
+      if (path.startsWith("/agent/")) parts.push({ label: "Detail" });
+    } else if (path === "/settings") {
+      parts.push({ label: "Settings" });
+    }
+
+    return parts;
+  }, [location.pathname, activeProject]);
+
+  if (crumbs.length === 0) return null;
+
+  return (
+    <nav className="flex items-center gap-1 text-sm min-w-0 overflow-hidden">
+      {crumbs.map((crumb, i) => (
+        <span key={i} className="flex items-center gap-1 min-w-0">
+          {i > 0 && <ChevronRight size={12} className="text-muted-foreground/50 shrink-0" />}
+          {crumb.to && i < crumbs.length - 1 ? (
+            <Link to={crumb.to} className="text-muted-foreground hover:text-foreground transition-colors truncate">
+              {crumb.label}
+            </Link>
+          ) : (
+            <span className={cn("truncate", i === crumbs.length - 1 ? "text-foreground font-medium" : "text-muted-foreground")}>
+              {crumb.label}
+            </span>
+          )}
+        </span>
+      ))}
+    </nav>
+  );
+}
+
+function TopBar() {
+  return (
+    <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4 bg-background sticky top-0 z-20">
+      <SidebarTrigger className="-ml-1" />
+      <Separator orientation="vertical" className="mr-2 h-4" />
+      <Breadcrumbs />
+      <div className="flex-1" />
+      <button
+        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground px-2 py-1 border rounded-md transition-colors"
+        onClick={() => document.dispatchEvent(new CustomEvent("open-command-palette"))}
+      >
+        <Command size={12} />
+        <span>K</span>
+      </button>
+    </header>
+  );
+}
+
 function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset>
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-2 h-4" />
-          <div className="flex-1" />
-          <button
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground px-2 py-1 border rounded-md transition-colors"
-            onClick={() => document.dispatchEvent(new CustomEvent("open-command-palette"))}
-          >
-            <Command size={12} />
-            <span>K</span>
-          </button>
-        </header>
+        <TopBar />
         <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8">
           <div className="w-full max-w-full min-w-0">
             {children}
@@ -355,7 +417,8 @@ function FullWidthLayout({ children }: { children: React.ReactNode }) {
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset>
-        <div className="flex-1 overflow-hidden flex flex-col">
+        <TopBar />
+        <div className="flex-1 overflow-hidden flex flex-col min-h-0">
           {children}
         </div>
       </SidebarInset>
