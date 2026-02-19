@@ -256,7 +256,9 @@ export default function EditorChatPanel({
       <button
         onClick={() => setOpen(true)}
         className={cn(
-          "fixed right-4 bottom-4 z-40 flex items-center gap-2 px-4 py-2.5 rounded-full bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 transition-all",
+          "fixed z-40 flex items-center gap-2 shadow-lg hover:bg-primary/90 transition-all bg-primary text-primary-foreground",
+          "right-4 bottom-4 px-4 py-2.5 rounded-full",
+          "md:right-4 md:bottom-4 md:px-4 md:py-2.5 md:rounded-full",
           className
         )}
       >
@@ -270,20 +272,28 @@ export default function EditorChatPanel({
     <>
       <style>{typingDotsStyle}</style>
       <div
+        className="fixed inset-0 bg-black/20 z-30 md:hidden"
+        onClick={() => setOpen(false)}
+      />
+      <div
         className={cn(
-          "fixed right-0 top-0 bottom-0 z-40 w-[380px] bg-background border-l border-border flex flex-col shadow-2xl",
+          "fixed z-40 bg-background border-border flex flex-col shadow-2xl",
+          "inset-x-0 bottom-0 h-[60vh] border-t rounded-t-xl",
+          "md:inset-x-auto md:right-0 md:top-0 md:bottom-0 md:h-auto md:w-[380px] md:border-l md:border-t-0 md:rounded-none",
           className
         )}
       >
         {/* Header */}
-        <div className="h-12 border-b flex items-center gap-2 px-3 shrink-0 bg-muted/30">
+        <div className="h-12 border-b flex items-center gap-2 px-3 shrink-0 bg-muted/30 md:rounded-none rounded-t-xl">
+          <div className="w-10 h-1 rounded-full bg-muted-foreground/30 absolute top-2 left-1/2 -translate-x-1/2 md:hidden" />
           <Button
             variant="ghost"
             size="icon"
             className="h-8 w-8"
             onClick={() => setOpen(false)}
           >
-            <ChevronRight size={16} />
+            <ChevronRight size={16} className="hidden md:block" />
+            <ChevronDown size={16} className="md:hidden" />
           </Button>
           <div className="relative flex-1" ref={dropdownRef}>
             <button
