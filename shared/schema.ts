@@ -214,17 +214,28 @@ export const runLogs = pgTable("run_logs", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+export const presentations = pgTable("presentations", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").references(() => projects.id, { onDelete: "set null" }),
+  title: text("title").notNull().default("Untitled Presentation"),
+  theme: jsonb("theme").default(sql`'{"bgColor":"#ffffff","textColor":"#1a1a2e","accentColor":"#3b82f6","fontFamily":"Inter"}'::jsonb`),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const slides = pgTable("slides", {
   id: serial("id").primaryKey(),
   projectId: integer("project_id")
     .notNull()
     .references(() => projects.id, { onDelete: "cascade" }),
+  presentationId: integer("presentation_id").references(() => presentations.id, { onDelete: "cascade" }),
   slideIndex: integer("slide_index").notNull(),
   layout: text("layout").notNull().default("title_body"),
   title: text("title").notNull(),
   subtitle: text("subtitle"),
   bodyJson: jsonb("body_json").notNull(),
   notesText: text("notes_text"),
+  elements: jsonb("elements").default(sql`'[]'::jsonb`),
   version: integer("version").notNull().default(1),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
@@ -360,6 +371,7 @@ export type AnalysisPlan = typeof analysisPlan.$inferSelect;
 export type ModelRun = typeof modelRuns.$inferSelect;
 export type Narrative = typeof narratives.$inferSelect;
 export type RunLog = typeof runLogs.$inferSelect;
+export type Presentation = typeof presentations.$inferSelect;
 export type Slide = typeof slides.$inferSelect;
 export type AgentConfig = typeof agentConfigs.$inferSelect;
 export type PipelineConfig = typeof pipelineConfigs.$inferSelect;

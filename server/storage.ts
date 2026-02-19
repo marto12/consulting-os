@@ -9,6 +9,7 @@ import {
   narratives,
   runLogs,
   slides,
+  presentations,
   agentConfigs,
   pipelineConfigs,
   workflowTemplates,
@@ -37,6 +38,7 @@ import {
   type ModelRun,
   type Narrative,
   type RunLog,
+  type Presentation,
   type Slide,
   type AgentConfig,
   type PipelineConfig,
@@ -681,6 +683,95 @@ export const storage = {
       .from(slides)
       .where(eq(slides.projectId, projectId))
       .orderBy(desc(slides.version), slides.slideIndex);
+  },
+
+  async listPresentations(): Promise<Presentation[]> {
+    return db.select().from(presentations).orderBy(desc(presentations.updatedAt));
+  },
+
+  async getPresentation(id: number): Promise<Presentation | undefined> {
+    const [p] = await db.select().from(presentations).where(eq(presentations.id, id));
+    return p;
+  },
+
+  async createPresentation(data: { title?: string; projectId?: number; theme?: any }): Promise<Presentation> {
+    const [p] = await db.insert(presentations).values({
+      title: data.title || "Untitled Presentation",
+      projectId: data.projectId || null,
+      theme: data.theme || { bgColor: "#ffffff", textColor: "#1a1a2e", accentColor: "#3b82f6", fontFamily: "Inter" },
+    }).returning();
+    return p;
+  },
+
+  async updatePresentation(id: number, data: { title?: string; theme?: any }): Promise<Presentation> {
+    const [p] = await db.update(presentations)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(presentations.id, id))
+      .returning();
+    return p;
+  },
+
+  async deletePresentation(id: number): Promise<void> {
+    await db.delete(presentations).where(eq(presentations.id, id));
+  },
+
+  async getPresentationSlides(presentationId: number): Promise<Slide[]> {
+    return db.select().from(slides)
+      .where(eq(slides.presentationId, presentationId))
+      .orderBy(asc(slides.slideIndex));
+  },
+
+  async createSlide(data: {
+    presentationId: number;
+    projectId: number;
+    slideIndex: number;
+    layout?: string;
+    title: string;
+    subtitle?: string;
+    bodyJson?: any;
+    elements?: any;
+    notesText?: string;
+  }): Promise<Slide> {
+    const [s] = await db.insert(slides).values({
+      presentationId: data.presentationId,
+      projectId: data.projectId,
+      slideIndex: data.slideIndex,
+      layout: data.layout || "title_body",
+      title: data.title,
+      subtitle: data.subtitle || null,
+      bodyJson: data.bodyJson || {},
+      elements: data.elements || [],
+      notesText: data.notesText || null,
+    }).returning();
+    return s;
+  },
+
+  async updateSlide(id: number, data: {
+    title?: string;
+    subtitle?: string;
+    layout?: string;
+    bodyJson?: any;
+    elements?: any;
+    notesText?: string;
+    slideIndex?: number;
+  }): Promise<Slide> {
+    const [s] = await db.update(slides)
+      .set(data)
+      .where(eq(slides.id, id))
+      .returning();
+    return s;
+  },
+
+  async deleteSlide(id: number): Promise<void> {
+    await db.delete(slides).where(eq(slides.id, id));
+  },
+
+  async reorderSlides(presentationId: number, slideIds: number[]): Promise<void> {
+    for (let i = 0; i < slideIds.length; i++) {
+      await db.update(slides)
+        .set({ slideIndex: i })
+        .where(and(eq(slides.id, slideIds[i]), eq(slides.presentationId, presentationId)));
+    }
   },
 
   async getAllAgentConfigs(): Promise<AgentConfig[]> {
