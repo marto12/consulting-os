@@ -69,7 +69,7 @@ export function registerChatRoutes(app: Express): void {
       res.flushHeaders();
 
       let closed = false;
-      req.on("close", () => { closed = true; });
+      res.on("close", () => { closed = true; });
 
       function sendEvent(data: Record<string, any>) {
         if (closed) return;

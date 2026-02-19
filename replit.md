@@ -33,6 +33,8 @@ The system follows a four-layer architecture: Projects → Workflows → Agents 
 - **Server**: Express 5 on port 5000.
 - **API Endpoints**: Provides CRUD operations for projects, workflows, agents, datasets, and models. Handles workflow execution, step approval, and data management.
 - **Vite Integration**: Uses Vite middleware for HMR in development; serves static files in production.
+- **SSE Pattern**: For POST endpoints returning Server-Sent Events, use `res.on("close")` (not `req.on("close")`) to detect client disconnection. Using `req.on("close")` fires prematurely after POST body is consumed, causing events after async operations to be silently dropped.
+- **Editor Chat**: `/api/editor-chat` endpoint supports three modes: general (context-aware Q&A), single agent (specific agent + editor content), and workflow (sequential multi-agent pipeline). Uses OpenAI streaming via `openai` package imported at top level.
 
 ### Workflow Engine
 - Projects instantiate workflow templates into frozen `workflow_instance` with `workflow_instance_steps`.

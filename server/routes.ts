@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import multer from "multer";
+import OpenAI from "openai";
 import { storage } from "./storage";
 import { registerChatRoutes } from "./replit_integrations/chat/routes";
 import {
@@ -1681,15 +1682,17 @@ Return ONLY the JSON array, no other text.`
       res.flushHeaders();
 
       let closed = false;
-      req.on("close", () => { closed = true; });
+      res.on("close", () => { closed = true; });
 
       function sendEvent(data: Record<string, any>) {
         if (closed) return;
         res.write(`data: ${JSON.stringify(data)}\n\n`);
       }
 
-      const openai = new (await import("openai")).default({
-        apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      sendEvent({ status: "thinking", message: "Preparing..." });
+
+      const openai = new OpenAI({
+        apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
         baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
       });
 
@@ -1710,13 +1713,13 @@ Return ONLY the JSON array, no other text.`
           sendEvent({ status: "running", message: `Running ${step.name}...`, agentName: step.name });
 
           const agentConfig = await storage.getAgentConfig(step.agentKey);
-          const systemPrompt = agentConfig?.systemPrompt || DEFAULT_PROMPTS[step.agentKey] || `You are a ${step.name} agent.`;
+          const sysPrompt = agentConfig?.systemPrompt || DEFAULT_PROMPTS[step.agentKey] || `You are a ${step.name} agent.`;
 
           try {
             const stream = await openai.chat.completions.create({
               model: agentConfig?.model || "gpt-5-nano",
               messages: [
-                { role: "system", content: `${systemPrompt}\n\nYou are operating within a workflow pipeline. Analyze the input and produce output that flows to the next step. Be concise and structured.` },
+                { role: "system", content: `${sysPrompt}\n\nYou are operating within a workflow pipeline. Analyze the input and produce output that flows to the next step. Be concise and structured.` },
                 { role: "user", content: accumulatedContext },
               ],
               stream: true,
@@ -1734,6 +1737,7 @@ Return ONLY the JSON array, no other text.`
 
             accumulatedContext = `Previous step (${step.name}) output:\n${stepOutput}\n\nOriginal ${contentLabel} content:\n${contentSnippet}\n\nOriginal user request: ${message}`;
           } catch (err: any) {
+            console.error(`Workflow step ${step.name} error:`, err);
             sendEvent({ content: `\n\n[${step.name} encountered an error: ${err.message}]\n` });
           }
         }
@@ -1758,6 +1762,7 @@ Return ONLY the JSON array, no other text.`
         agentName = agentRecord?.name || mode;
       }
 
+      console.log("[editor-chat] Sending connecting event for:", agentName);
       sendEvent({ status: "connecting", message: `${agentName} is thinking...`, agentName });
 
       const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
@@ -1773,18 +1778,23 @@ Return ONLY the JSON array, no other text.`
 
       sendEvent({ status: "streaming", message: "Generating response..." });
 
-      const stream = await openai.chat.completions.create({
-        model: "gpt-5-nano",
-        messages: chatMessages,
-        stream: true,
-        max_completion_tokens: 4096,
-      });
+      try {
+        const stream = await openai.chat.completions.create({
+          model: "gpt-5.1",
+          messages: chatMessages,
+          stream: true,
+          max_completion_tokens: 4096,
+        });
 
-      for await (const chunk of stream) {
-        const token = chunk.choices[0]?.delta?.content || "";
-        if (token) {
-          sendEvent({ content: token });
+        for await (const chunk of stream) {
+          const token = chunk.choices[0]?.delta?.content || "";
+          if (token) {
+            sendEvent({ content: token });
+          }
         }
+      } catch (aiErr: any) {
+        console.error("[editor-chat] OpenAI error:", aiErr.message);
+        sendEvent({ error: `AI error: ${aiErr.message}` });
       }
 
       sendEvent({ done: true });
