@@ -319,7 +319,7 @@ export default function WorkflowStepWorkspace() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [streamMessages, chatHistory]);
+  }, [streamMessages, chatHistory, chatStreamTokens]);
 
   const startStreaming = useCallback(() => {
     setIsStreaming(true);
@@ -415,16 +415,93 @@ export default function WorkflowStepWorkspace() {
     }
   }, [searchParams, autorunTriggered, isStreaming, stepData, startStreaming, setSearchParams]);
 
-  const sendChatMutation = useMutation({
-    mutationFn: async (message: string) => {
-      const res = await apiRequest("POST", `/api/projects/${projectId}/workflow/steps/${stepIdNum}/chat`, { message });
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum, "chat"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum] });
-    },
-  });
+  const [chatStreaming, setChatStreaming] = useState(false);
+  const [chatStreamTokens, setChatStreamTokens] = useState("");
+
+  const sendChatStreaming = useCallback(async (message: string) => {
+    setChatStreaming(true);
+    setChatStreamTokens("");
+
+    setStreamMessages((prev) => [
+      ...prev,
+      { role: "user", content: message, messageType: "message" },
+    ]);
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/workflow/steps/${stepIdNum}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        setChatStreaming(false);
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let tokenBuffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const text = decoder.decode(value);
+        const lines = text.split("\n");
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+
+            if (data.type === "connected") {
+              setStreamMessages((prev) => [
+                ...prev,
+                { role: "assistant", content: "Processing your feedback...", messageType: "status", isStreaming: true },
+              ]);
+            } else if (data.type === "progress" || data.type === "llm" || data.type === "critic") {
+              setStreamMessages((prev) => [
+                ...prev,
+                { role: "assistant", content: data.content, messageType: "progress", isStreaming: true },
+              ]);
+            } else if (data.type === "token") {
+              tokenBuffer += data.content;
+              setChatStreamTokens(tokenBuffer);
+            } else if (data.type === "complete") {
+              setChatStreamTokens("");
+              setChatStreaming(false);
+              setStreamMessages((prev) => [
+                ...prev,
+                { role: "assistant", content: "Refinement complete.", messageType: "complete" },
+              ]);
+              queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum, "chat"] });
+              queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum] });
+            } else if (data.type === "error") {
+              setChatStreamTokens("");
+              setChatStreaming(false);
+              setStreamMessages((prev) => [
+                ...prev,
+                { role: "assistant", content: `Error: ${data.content}`, messageType: "error" },
+              ]);
+            }
+          } catch {}
+        }
+      }
+    } catch (err) {
+      console.error("Chat stream error:", err);
+      setChatStreaming(false);
+      setChatStreamTokens("");
+      setStreamMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Connection error. Please try again.", messageType: "error" },
+      ]);
+    }
+
+    setChatStreaming(false);
+    queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum, "chat"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum] });
+  }, [projectId, stepIdNum]);
 
   const approveStepMutation = useMutation({
     mutationFn: async () => {
@@ -451,9 +528,9 @@ export default function WorkflowStepWorkspace() {
 
   const handleSend = () => {
     const msg = chatInput.trim();
-    if (!msg || sendChatMutation.isPending) return;
+    if (!msg || chatStreaming || isStreaming) return;
     setChatInput("");
-    sendChatMutation.mutate(msg);
+    sendChatStreaming(msg);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -711,7 +788,24 @@ export default function WorkflowStepWorkspace() {
                   </div>
                 )}
 
-                {sendChatMutation.isPending && (
+                {chatStreaming && chatStreamTokens && (
+                  <div className="flex gap-2 sm:gap-3 items-start">
+                    <div
+                      className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: agentColor + "20" }}
+                    >
+                      <RefreshCw size={14} className="animate-spin" style={{ color: agentColor }} />
+                    </div>
+                    <div className="flex-1 min-w-0 pt-0.5">
+                      <pre className="text-xs bg-muted/50 p-3 rounded-lg overflow-x-auto whitespace-pre-wrap font-mono text-muted-foreground max-h-[200px] overflow-y-auto">
+                        {chatStreamTokens}
+                        <span className="inline-block w-2 h-4 bg-foreground/50 animate-pulse ml-0.5" />
+                      </pre>
+                    </div>
+                  </div>
+                )}
+
+                {chatStreaming && !chatStreamTokens && (
                   <div className="flex gap-3 items-start">
                     <div
                       className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
@@ -725,7 +819,7 @@ export default function WorkflowStepWorkspace() {
                   </div>
                 )}
 
-                {!isStreaming && !sendChatMutation.isPending && canApprove && (
+                {!isStreaming && !chatStreaming && canApprove && (
                   <div className="flex justify-center pt-2">
                     <Button onClick={() => approveStepMutation.mutate()} disabled={approveStepMutation.isPending} size="sm">
                       {approveStepMutation.isPending ? (
@@ -758,7 +852,7 @@ export default function WorkflowStepWorkspace() {
                 placeholder={
                   isStreaming
                     ? "Agent is running..."
-                    : sendChatMutation.isPending
+                    : chatStreaming
                     ? "Refining output..."
                     : step.status === "not_started"
                     ? "Run the agent first, then ask follow-up questions here"
@@ -768,14 +862,14 @@ export default function WorkflowStepWorkspace() {
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 rows={1}
-                disabled={isStreaming || sendChatMutation.isPending || step.status === "not_started"}
+                disabled={isStreaming || chatStreaming || step.status === "not_started"}
               />
               <Button
                 size="icon"
                 onClick={handleSend}
-                disabled={!chatInput.trim() || sendChatMutation.isPending || isStreaming || step.status === "not_started"}
+                disabled={!chatInput.trim() || chatStreaming || isStreaming || step.status === "not_started"}
               >
-                {sendChatMutation.isPending ? (
+                {chatStreaming ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <Send size={18} />
