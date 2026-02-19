@@ -415,7 +415,7 @@ export default function WorkflowEditor() {
         </div>
         <div className="flex items-center gap-2">
           {hasChanges && (
-            <Badge variant="outline" className="text-amber-500 border-amber-500/30">
+            <Badge variant="outline" className="text-muted-foreground border-border">
               Unsaved changes
             </Badge>
           )}

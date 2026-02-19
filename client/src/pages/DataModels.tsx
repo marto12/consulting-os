@@ -203,16 +203,16 @@ export default function DataModels() {
 
   const sourceIcon = (type: string) => {
     switch (type) {
-      case "csv": return <FileSpreadsheet size={14} className="text-emerald-400" />;
-      case "api": return <Globe size={14} className="text-blue-400" />;
+      case "csv": return <FileSpreadsheet size={14} className="text-muted-foreground" />;
+      case "api": return <Globe size={14} className="text-muted-foreground" />;
       default: return <Database size={14} className="text-muted-foreground" />;
     }
   };
 
   const sourceBadge = (type: string) => {
     switch (type) {
-      case "csv": return <Badge className="bg-emerald-500/15 text-emerald-400 border-0 text-xs">CSV</Badge>;
-      case "api": return <Badge className="bg-blue-500/15 text-blue-400 border-0 text-xs">API</Badge>;
+      case "csv": return <Badge className="bg-muted text-muted-foreground border-0 text-xs">CSV</Badge>;
+      case "api": return <Badge className="bg-muted text-muted-foreground border-0 text-xs">API</Badge>;
       default: return <Badge variant="outline" className="text-xs">Manual</Badge>;
     }
   };
@@ -430,7 +430,7 @@ export default function DataModels() {
               )}
             </div>
             {uploadResult && (
-              <div className={`text-sm p-3 rounded-lg ${uploadResult.startsWith("Error") ? "bg-destructive/10 text-destructive" : "bg-emerald-500/10 text-emerald-400"}`}>
+              <div className={`text-sm p-3 rounded-lg ${uploadResult.startsWith("Error") ? "bg-destructive/10 text-destructive" : "bg-muted text-foreground"}`}>
                 {uploadResult}
               </div>
             )}

@@ -215,7 +215,7 @@ export default function Chat() {
                   className={cn(
                     "w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0",
                     msg.role === "user"
-                      ? "bg-blue-500 text-white"
+                      ? "bg-primary text-primary-foreground"
                       : "bg-muted text-muted-foreground"
                   )}
                 >
@@ -225,7 +225,7 @@ export default function Chat() {
                   className={cn(
                     "rounded-xl px-4 py-2.5 text-sm max-w-[80%] whitespace-pre-wrap",
                     msg.role === "user"
-                      ? "bg-blue-500 text-white"
+                      ? "bg-primary text-primary-foreground"
                       : "bg-muted text-foreground"
                   )}
                 >

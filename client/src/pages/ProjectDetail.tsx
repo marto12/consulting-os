@@ -52,13 +52,13 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 const AGENT_COLORS: Record<string, string> = {
-  project_definition: "#F59E0B",
-  issues_tree: "#3B82F6",
-  mece_critic: "#8B5CF6",
-  hypothesis: "#0891B2",
-  execution: "#059669",
-  summary: "#D97706",
-  presentation: "#E11D48",
+  project_definition: "#6B7280",
+  issues_tree: "#6B7280",
+  mece_critic: "#9CA3AF",
+  hypothesis: "#6B7280",
+  execution: "#6B7280",
+  summary: "#9CA3AF",
+  presentation: "#6B7280",
 };
 
 interface WorkflowStep {
@@ -134,11 +134,11 @@ function getStatusBadge(status: string) {
 
 function getFileIcon(mimeType: string) {
   if (mimeType.startsWith("text/") || mimeType.includes("pdf") || mimeType.includes("document"))
-    return <FileText size={20} className="text-blue-400" />;
+    return <FileText size={20} className="text-muted-foreground" />;
   if (mimeType.includes("spreadsheet") || mimeType.includes("csv") || mimeType.includes("excel"))
-    return <FileText size={20} className="text-green-400" />;
+    return <FileText size={20} className="text-muted-foreground" />;
   if (mimeType.includes("presentation") || mimeType.includes("powerpoint"))
-    return <FileText size={20} className="text-orange-400" />;
+    return <FileText size={20} className="text-muted-foreground" />;
   return <File size={20} className="text-muted-foreground" />;
 }
 
@@ -247,13 +247,13 @@ export default function ProjectDetail() {
 
   function getStepStatusInfo(step: WorkflowStep) {
     if (step.status === "completed" || step.status === "approved") {
-      return { icon: <CheckCircle size={16} />, color: "text-green-500", label: step.status === "approved" ? "Approved" : "Completed" };
+      return { icon: <CheckCircle size={16} />, color: "text-foreground", label: step.status === "approved" ? "Approved" : "Completed" };
     }
     if (step.status === "running") {
-      return { icon: <Loader2 size={16} className="animate-spin" />, color: "text-blue-500", label: "Running" };
+      return { icon: <Loader2 size={16} className="animate-spin" />, color: "text-muted-foreground", label: "Running" };
     }
     if (step.status === "failed") {
-      return { icon: <Circle size={16} />, color: "text-red-500", label: "Failed" };
+      return { icon: <Circle size={16} />, color: "text-destructive", label: "Failed" };
     }
     return { icon: <Circle size={16} />, color: "text-muted-foreground", label: "Not Started" };
   }
@@ -561,7 +561,7 @@ export default function ProjectDetail() {
             </div>
 
             {uploadMutation.isError && (
-              <div className="text-sm text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+              <div className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg p-3">
                 Upload failed: {(uploadMutation.error as Error).message}
               </div>
             )}
@@ -629,7 +629,7 @@ export default function ProjectDetail() {
             {(vaultFiles || []).length > 0 && (
               <Card className="p-3 bg-muted/30 border-dashed">
                 <div className="flex items-start gap-2">
-                  <CheckCircle2 size={16} className="text-green-500 mt-0.5 shrink-0" />
+                  <CheckCircle2 size={16} className="text-foreground mt-0.5 shrink-0" />
                   <div className="text-xs text-muted-foreground">
                     <p className="font-medium text-foreground">RAG-enabled context</p>
                     <p>Files with "Ready" status are automatically used by AI agents when running workflow steps. The agents will retrieve relevant sections from your uploaded documents to ground their analysis in your data.</p>
@@ -653,7 +653,7 @@ export default function ProjectDetail() {
                   <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                     <div className={cn(
                       "w-2 h-2 rounded-full shrink-0",
-                      log.status === "success" ? "bg-green-500" : log.status === "failed" ? "bg-red-500" : "bg-yellow-500"
+                      log.status === "success" ? "bg-foreground" : log.status === "failed" ? "bg-destructive" : "bg-muted-foreground"
                     )} />
                     <div className="flex-1 min-w-0">
                       <span className="text-sm font-medium">{log.stage}</span>

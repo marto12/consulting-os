@@ -448,10 +448,10 @@ export default function DocumentEditor() {
   const hasPendingFactCandidates = comments.some(c => c.type === "factcheck" && c.status === "pending");
 
   const agentOptions = useMemo(() => [
-    { key: "spot-claims", label: "Spot Claims", icon: Search, color: "text-orange-400", handler: handleFactCheckCandidates, loading: factCandidateLoading },
-    { key: "fact-check", label: "Fact Check", icon: ShieldCheck, color: "text-emerald-400", handler: handleRunFactCheck, loading: factCheckLoading, disabled: !hasAcceptedFactCandidates },
-    { key: "narrative", label: "Narrative", icon: Lightbulb, color: "text-teal-400", handler: handleNarrativeReview, loading: narrativeLoading },
-    { key: "executive", label: "Executive", icon: BriefcaseBusiness, color: "text-purple-400", handler: handleExecutiveReview, loading: execReviewLoading },
+    { key: "spot-claims", label: "Spot Claims", icon: Search, color: "text-muted-foreground", handler: handleFactCheckCandidates, loading: factCandidateLoading },
+    { key: "fact-check", label: "Fact Check", icon: ShieldCheck, color: "text-muted-foreground", handler: handleRunFactCheck, loading: factCheckLoading, disabled: !hasAcceptedFactCandidates },
+    { key: "narrative", label: "Narrative", icon: Lightbulb, color: "text-muted-foreground", handler: handleNarrativeReview, loading: narrativeLoading },
+    { key: "executive", label: "Executive", icon: BriefcaseBusiness, color: "text-muted-foreground", handler: handleExecutiveReview, loading: execReviewLoading },
     { key: "ai-review", label: "AI Review", icon: Sparkles, color: "text-primary", handler: handleAIReview, loading: reviewLoading },
   ], [handleFactCheckCandidates, handleRunFactCheck, handleNarrativeReview, handleExecutiveReview, handleAIReview, factCandidateLoading, factCheckLoading, narrativeLoading, execReviewLoading, reviewLoading, hasAcceptedFactCandidates]);
 
@@ -508,10 +508,10 @@ export default function DocumentEditor() {
           )}
 
           <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
-            {saveStatus === "saved" && <Cloud size={14} className="text-green-500" />}
+            {saveStatus === "saved" && <Cloud size={14} className="text-muted-foreground" />}
             {saveStatus === "saving" && <Loader2 size={14} className="animate-spin" />}
-            {saveStatus === "unsaved" && <CloudOff size={14} className="text-amber-500" />}
-            {saveStatus === "error" && <CloudOff size={14} className="text-red-500" />}
+            {saveStatus === "unsaved" && <CloudOff size={14} className="text-muted-foreground" />}
+            {saveStatus === "error" && <CloudOff size={14} className="text-destructive" />}
             <span className="hidden md:inline">
               {saveStatus === "saved" ? "Saved" : saveStatus === "saving" ? "Saving..." : saveStatus === "unsaved" ? "Unsaved" : "Error"}
             </span>
@@ -548,7 +548,7 @@ export default function DocumentEditor() {
               <button
                 onClick={handleFactCheckCandidates}
                 disabled={factCandidateLoading}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-orange-400 hover:bg-orange-500/10 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
               >
                 {factCandidateLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
                 Spot Claims
@@ -556,7 +556,7 @@ export default function DocumentEditor() {
               <button
                 onClick={handleRunFactCheck}
                 disabled={factCheckLoading || !hasAcceptedFactCandidates}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
                 title={!hasAcceptedFactCandidates ? "Accept some fact-check candidates first" : "Run fact check on accepted candidates"}
               >
                 {factCheckLoading ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
@@ -565,7 +565,7 @@ export default function DocumentEditor() {
               <button
                 onClick={handleNarrativeReview}
                 disabled={narrativeLoading}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-teal-400 hover:bg-teal-500/10 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
               >
                 {narrativeLoading ? <Loader2 size={13} className="animate-spin" /> : <Lightbulb size={13} />}
                 Narrative
@@ -573,7 +573,7 @@ export default function DocumentEditor() {
               <button
                 onClick={handleExecutiveReview}
                 disabled={execReviewLoading}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-purple-400 hover:bg-purple-500/10 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
               >
                 {execReviewLoading ? <Loader2 size={13} className="animate-spin" /> : <BriefcaseBusiness size={13} />}
                 Executive
@@ -1048,24 +1048,24 @@ function CommentCard({
         : "secondary";
 
   const borderColor = isNarrative
-    ? "border-l-teal-500"
+    ? "border-l-foreground/30"
     : isFactCheck
-      ? "border-l-orange-500"
+      ? "border-l-foreground/30"
       : isExecutive
-        ? "border-l-purple-500"
+        ? "border-l-foreground/30"
         : isAI
-          ? "border-l-amber-500"
-          : "border-l-blue-500";
+          ? "border-l-foreground/20"
+          : "border-l-foreground/20";
 
   const iconColor = isNarrative
-    ? "text-teal-500"
+    ? "text-muted-foreground"
     : isFactCheck
-      ? "text-orange-500"
+      ? "text-muted-foreground"
       : isExecutive
-        ? "text-purple-500"
+        ? "text-muted-foreground"
         : isAI
-          ? "text-amber-500"
-          : "text-blue-500";
+          ? "text-muted-foreground"
+          : "text-muted-foreground";
 
   const label = isNarrative ? "Narrative" : isFactCheck ? "Fact Check" : isExecutive ? "Executive" : isAI ? "AI" : "You";
 
@@ -1122,8 +1122,8 @@ function CommentCard({
 
       {isFactCheck && comment.status === "pending" && !comment.aiReply && (
         <div className="space-y-2">
-          <div className="text-xs bg-orange-950/30 border border-orange-800/30 rounded px-2 py-1.5">
-            <span className="text-orange-400 font-medium text-[10px] uppercase tracking-wider">
+          <div className="text-xs bg-muted border border-border rounded px-2 py-1.5">
+            <span className="text-muted-foreground font-medium text-[10px] uppercase tracking-wider">
               Approve this claim for fact-checking?
             </span>
           </div>
@@ -1131,7 +1131,7 @@ function CommentCard({
             <Button
               size="sm"
               variant="outline"
-              className="h-7 text-xs flex-1 text-orange-400 border-orange-800 hover:bg-orange-950/50"
+              className="h-7 text-xs flex-1"
               onClick={(e) => {
                 e.stopPropagation();
                 onAccept(comment);
@@ -1148,7 +1148,7 @@ function CommentCard({
             <Button
               size="sm"
               variant="outline"
-              className="h-7 text-xs flex-1 text-red-400 border-red-800 hover:bg-red-950/50"
+              className="h-7 text-xs flex-1 text-destructive"
               onClick={(e) => {
                 e.stopPropagation();
                 onReject(comment.id);
@@ -1163,8 +1163,8 @@ function CommentCard({
       )}
 
       {isFactCheck && comment.status === "accepted" && !comment.aiReply && (
-        <div className="text-xs bg-orange-950/20 border border-orange-800/20 rounded px-2 py-1.5 mt-1">
-          <span className="text-orange-300 font-medium text-[10px] uppercase tracking-wider">
+        <div className="text-xs bg-muted/50 border border-border rounded px-2 py-1.5 mt-1">
+          <span className="text-muted-foreground font-medium text-[10px] uppercase tracking-wider">
             Queued for fact check
           </span>
         </div>
@@ -1172,27 +1172,17 @@ function CommentCard({
 
       {!isFactCheck && comment.proposedText && comment.status === "pending" && (
         <div className="space-y-2">
-          <div className={cn(
-            "text-xs rounded px-2 py-1.5",
-            isNarrative
-              ? "bg-teal-950/30 border border-teal-800/30"
-              : isExecutive
-                ? "bg-purple-950/30 border border-purple-800/30"
-                : "bg-green-950/30 border border-green-800/30"
-          )}>
-            <span className={cn(
-              "font-medium text-[10px] uppercase tracking-wider",
-              isNarrative ? "text-teal-400" : isExecutive ? "text-purple-400" : "text-green-400"
-            )}>
+          <div className="text-xs rounded px-2 py-1.5 bg-muted border border-border">
+            <span className="font-medium text-[10px] uppercase tracking-wider text-muted-foreground">
               {isNarrative ? "Executive Key Point:" : "Proposed:"}
             </span>
-            <p className={cn("mt-0.5", isNarrative ? "text-teal-300" : isExecutive ? "text-purple-300" : "text-green-300")}>{comment.proposedText}</p>
+            <p className="mt-0.5 text-foreground">{comment.proposedText}</p>
           </div>
           <div className="flex gap-1.5">
             <Button
               size="sm"
               variant="outline"
-              className="h-7 text-xs flex-1 text-green-400 border-green-800 hover:bg-green-950/50"
+              className="h-7 text-xs flex-1"
               onClick={(e) => {
                 e.stopPropagation();
                 onAccept(comment);
@@ -1209,7 +1199,7 @@ function CommentCard({
             <Button
               size="sm"
               variant="outline"
-              className="h-7 text-xs flex-1 text-red-400 border-red-800 hover:bg-red-950/50"
+              className="h-7 text-xs flex-1 text-destructive"
               onClick={(e) => {
                 e.stopPropagation();
                 onReject(comment.id);
@@ -1224,19 +1214,11 @@ function CommentCard({
       )}
 
       {comment.aiReply && (
-        <div className={cn(
-          "text-xs rounded px-2 py-1.5 mt-1",
-          isFactCheck
-            ? "bg-emerald-950/30 border border-emerald-800/30"
-            : "bg-amber-950/30 border border-amber-800/30"
-        )}>
-          <span className={cn(
-            "font-medium text-[10px] uppercase tracking-wider",
-            isFactCheck ? "text-emerald-400" : "text-amber-400"
-          )}>
+        <div className="text-xs rounded px-2 py-1.5 mt-1 bg-muted border border-border">
+          <span className="font-medium text-[10px] uppercase tracking-wider text-muted-foreground">
             {isFactCheck ? "Fact Check Result:" : "AI Response:"}
           </span>
-          <p className={cn("mt-0.5", isFactCheck ? "text-emerald-200" : "text-amber-200")}>{comment.aiReply}</p>
+          <p className="mt-0.5 text-foreground">{comment.aiReply}</p>
         </div>
       )}
 

@@ -320,7 +320,7 @@ export default function EditorChatPanel({
                       setDropdownOpen(false);
                     }}
                   >
-                    <Bot size={14} className="shrink-0 text-blue-400" />
+                    <Bot size={14} className="shrink-0 text-muted-foreground" />
                     <div className="min-w-0">
                       <div className="font-medium">General Assistant</div>
                       <div className="text-xs text-muted-foreground truncate">
@@ -350,7 +350,7 @@ export default function EditorChatPanel({
                         >
                           <Sparkles
                             size={14}
-                            className="shrink-0 text-amber-400"
+                            className="shrink-0 text-muted-foreground"
                           />
                           <div className="min-w-0">
                             <div className="font-medium">{agent.name}</div>
@@ -384,7 +384,7 @@ export default function EditorChatPanel({
                         >
                           <Sparkles
                             size={14}
-                            className="shrink-0 text-purple-400"
+                            className="shrink-0 text-muted-foreground"
                           />
                           <div className="min-w-0">
                             <div className="font-medium">{agent.name}</div>
@@ -418,7 +418,7 @@ export default function EditorChatPanel({
                         >
                           <Workflow
                             size={14}
-                            className="shrink-0 text-green-400"
+                            className="shrink-0 text-muted-foreground"
                           />
                           <div className="min-w-0">
                             <div className="font-medium">{wf.name}</div>
@@ -483,7 +483,7 @@ export default function EditorChatPanel({
                   className={cn(
                     "w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-semibold shrink-0",
                     msg.role === "user"
-                      ? "bg-blue-500 text-white"
+                      ? "bg-primary text-primary-foreground"
                       : "bg-muted text-muted-foreground"
                   )}
                 >
@@ -499,7 +499,7 @@ export default function EditorChatPanel({
                     className={cn(
                       "rounded-xl px-3 py-2 text-sm whitespace-pre-wrap",
                       msg.role === "user"
-                        ? "bg-blue-500 text-white"
+                        ? "bg-primary text-primary-foreground"
                         : "bg-muted text-foreground"
                     )}
                   >

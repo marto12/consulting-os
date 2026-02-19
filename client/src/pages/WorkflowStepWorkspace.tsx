@@ -33,13 +33,13 @@ import { cn } from "../lib/utils";
 import DeliverablePreview from "../components/DeliverablePreview";
 
 const AGENT_COLORS: Record<string, string> = {
-  project_definition: "#F59E0B",
-  issues_tree: "#3B82F6",
-  mece_critic: "#8B5CF6",
-  hypothesis: "#0891B2",
-  execution: "#059669",
-  summary: "#D97706",
-  presentation: "#E11D48",
+  project_definition: "#6B7280",
+  issues_tree: "#6B7280",
+  mece_critic: "#9CA3AF",
+  hypothesis: "#6B7280",
+  execution: "#6B7280",
+  summary: "#9CA3AF",
+  presentation: "#6B7280",
 };
 
 function formatDeliverableText(agentKey: string, content: any): string {
@@ -647,7 +647,7 @@ export default function WorkflowStepWorkspace() {
         className={cn(
           "text-sm leading-relaxed break-words",
           isProgress && "text-muted-foreground",
-          isComplete && "text-green-400 font-medium",
+          isComplete && "text-foreground font-medium",
           isError && "text-destructive font-medium",
           msg.role === "user" && "text-foreground"
         )}
@@ -747,8 +747,8 @@ export default function WorkflowStepWorkspace() {
 
             {!hasHistory && step.status === "failed" && (
               <div className="flex flex-col items-center justify-center h-full gap-3">
-                <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
-                  <AlertCircle size={24} className="text-red-500" />
+                <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+                  <AlertCircle size={24} className="text-destructive" />
                 </div>
                 <h2 className="text-lg font-semibold text-foreground">Step Failed</h2>
                 <p className="text-sm text-muted-foreground">The agent encountered an error. You can retry.</p>
@@ -834,7 +834,7 @@ export default function WorkflowStepWorkspace() {
 
             {!hasHistory && (step.status === "completed" || step.status === "approved") && deliverables.length === 0 && (
               <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
-                <CheckCircle size={48} className="text-green-500" />
+                <CheckCircle size={48} className="text-foreground" />
                 <h2 className="text-lg font-semibold text-foreground">Step Complete</h2>
                 <p className="text-sm">This step finished but no deliverables were recorded.</p>
               </div>

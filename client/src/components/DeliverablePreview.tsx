@@ -32,22 +32,22 @@ interface DeliverablePreviewProps {
 }
 
 const AGENT_COLORS: Record<string, string> = {
-  project_definition: "#F59E0B",
-  issues_tree: "#3B82F6",
-  mece_critic: "#8B5CF6",
-  hypothesis: "#0891B2",
-  execution: "#059669",
-  summary: "#D97706",
-  presentation: "#E11D48",
+  project_definition: "#6B7280",
+  issues_tree: "#6B7280",
+  mece_critic: "#9CA3AF",
+  hypothesis: "#6B7280",
+  execution: "#6B7280",
+  summary: "#9CA3AF",
+  presentation: "#6B7280",
 };
 
 function ProjectDefinitionPreview({ content }: { content: any }) {
   return (
     <div className="space-y-4 overflow-y-auto max-h-[70vh] pr-2">
       {content.decision_statement && (
-        <Card className="p-4 border-l-4 border-l-amber-500">
+        <Card className="p-4 border-l-4 border-l-border">
           <div className="flex items-center gap-2 mb-2">
-            <Target size={16} className="text-amber-500" />
+            <Target size={16} className="text-muted-foreground" />
             <h3 className="font-semibold text-sm">Decision Statement</h3>
           </div>
           <p className="text-sm text-foreground leading-relaxed">{content.decision_statement}</p>
@@ -55,9 +55,9 @@ function ProjectDefinitionPreview({ content }: { content: any }) {
       )}
 
       {content.governing_question && (
-        <Card className="p-4 border-l-4 border-l-blue-500">
+        <Card className="p-4 border-l-4 border-l-border">
           <div className="flex items-center gap-2 mb-2">
-            <HelpCircle size={16} className="text-blue-500" />
+            <HelpCircle size={16} className="text-muted-foreground" />
             <h3 className="font-semibold text-sm">Governing Question</h3>
           </div>
           <p className="text-sm text-foreground leading-relaxed">{content.governing_question}</p>
@@ -82,7 +82,7 @@ function ProjectDefinitionPreview({ content }: { content: any }) {
       {content.success_metrics?.length > 0 && (
         <Card className="p-4">
           <div className="flex items-center gap-2 mb-3">
-            <BarChart3 size={16} className="text-green-500" />
+            <BarChart3 size={16} className="text-muted-foreground" />
             <h3 className="font-semibold text-sm">Success Metrics</h3>
           </div>
           <div className="space-y-2">
@@ -92,7 +92,7 @@ function ProjectDefinitionPreview({ content }: { content: any }) {
                 <div className="min-w-0">
                   <p className="text-sm font-medium">{m.metric_name}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">{m.definition}</p>
-                  <p className="text-xs text-green-500 font-medium mt-0.5">Target: {m.threshold_or_target}</p>
+                  <p className="text-xs text-muted-foreground font-medium mt-0.5">Target: {m.threshold_or_target}</p>
                 </div>
               </div>
             ))}
@@ -103,7 +103,7 @@ function ProjectDefinitionPreview({ content }: { content: any }) {
       {content.constraints && (
         <Card className="p-4">
           <div className="flex items-center gap-2 mb-3">
-            <Shield size={16} className="text-red-500" />
+            <Shield size={16} className="text-muted-foreground" />
             <h3 className="font-semibold text-sm">Constraints</h3>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -120,9 +120,9 @@ function ProjectDefinitionPreview({ content }: { content: any }) {
       )}
 
       {content.initial_hypothesis && (
-        <Card className="p-4 border-l-4 border-l-purple-500">
+        <Card className="p-4 border-l-4 border-l-border">
           <div className="flex items-center gap-2 mb-2">
-            <Lightbulb size={16} className="text-purple-500" />
+            <Lightbulb size={16} className="text-muted-foreground" />
             <h3 className="font-semibold text-sm">Initial Hypothesis</h3>
           </div>
           <p className="text-sm text-foreground leading-relaxed">{content.initial_hypothesis}</p>
@@ -132,13 +132,13 @@ function ProjectDefinitionPreview({ content }: { content: any }) {
       {content.key_uncertainties?.length > 0 && (
         <Card className="p-4">
           <div className="flex items-center gap-2 mb-3">
-            <AlertTriangle size={16} className="text-orange-500" />
+            <AlertTriangle size={16} className="text-muted-foreground" />
             <h3 className="font-semibold text-sm">Key Uncertainties</h3>
           </div>
           <ul className="space-y-1.5">
             {content.key_uncertainties.map((u: string, i: number) => (
               <li key={i} className="flex items-start gap-2 text-sm">
-                <span className="text-orange-500 mt-1 shrink-0">-</span>
+                <span className="text-muted-foreground mt-1 shrink-0">-</span>
                 <span>{u}</span>
               </li>
             ))}
@@ -197,7 +197,7 @@ function HypothesisPreview({ content }: { content: any }) {
       {hypotheses.length > 0 && (
         <div>
           <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
-            <Lightbulb size={16} className="text-cyan-500" />
+            <Lightbulb size={16} className="text-muted-foreground" />
             Hypotheses ({hypotheses.length})
           </h3>
           <div className="space-y-3">
@@ -258,26 +258,26 @@ function ExecutionPreview({ content }: { content: any }) {
         {results.map((r: any, i: number) => (
           <Card key={i} className="p-4">
             <div className="flex items-center gap-2 mb-3">
-              <TrendingUp size={16} className="text-emerald-500" />
+              <TrendingUp size={16} className="text-muted-foreground" />
               <h3 className="font-semibold text-sm">Scenario {i + 1}</h3>
             </div>
             {r.outputs?.summary && (
               <div className="space-y-2">
                 <div className="flex justify-between items-center p-2 rounded-lg bg-muted/50">
                   <span className="text-xs text-muted-foreground">Expected NPV</span>
-                  <span className="text-sm font-bold text-emerald-500">
+                  <span className="text-sm font-bold text-foreground">
                     ${r.outputs.summary.expectedValue?.toLocaleString() || "N/A"}
                   </span>
                 </div>
                 <div className="flex justify-between items-center p-2 rounded-lg bg-muted/50">
                   <span className="text-xs text-muted-foreground">Best Case</span>
-                  <span className="text-sm font-medium text-green-400">
+                  <span className="text-sm font-medium text-foreground">
                     ${r.outputs.summary.optimisticNpv?.toLocaleString() || "N/A"}
                   </span>
                 </div>
                 <div className="flex justify-between items-center p-2 rounded-lg bg-muted/50">
                   <span className="text-xs text-muted-foreground">Worst Case</span>
-                  <span className="text-sm font-medium text-red-400">
+                  <span className="text-sm font-medium text-muted-foreground">
                     ${r.outputs.summary.pessimisticNpv?.toLocaleString() || "N/A"}
                   </span>
                 </div>
@@ -314,7 +314,7 @@ function SummaryPreview({ content }: { content: any }) {
     <div className="overflow-y-auto max-h-[70vh] pr-2">
       <Card className="p-6">
         <div className="flex items-center gap-2 mb-4">
-          <FileText size={16} className="text-amber-600" />
+          <FileText size={16} className="text-muted-foreground" />
           <h3 className="font-semibold">Executive Summary</h3>
         </div>
         <div className="prose prose-sm prose-invert max-w-none">
@@ -340,9 +340,9 @@ function PresentationPreview({ content }: { content: any }) {
   const LAYOUT_STYLES: Record<string, string> = {
     title_only: "from-slate-900 to-slate-800",
     title_body: "from-slate-900 to-slate-800",
-    title_subtitle: "from-indigo-950 to-slate-900",
+    title_subtitle: "from-slate-900 to-slate-800",
     two_column: "from-slate-900 to-slate-800",
-    metrics: "from-emerald-950 to-slate-900",
+    metrics: "from-slate-900 to-slate-800",
   };
 
   return (
@@ -373,7 +373,7 @@ function PresentationPreview({ content }: { content: any }) {
               <div key={i} className="bg-white/10 rounded-lg p-3">
                 <p className="text-xs text-white/60">{m.label}</p>
                 <p className="text-lg font-bold text-white">{m.value}</p>
-                {m.change && <p className="text-xs text-emerald-400">{m.change}</p>}
+                {m.change && <p className="text-xs text-white/70">{m.change}</p>}
               </div>
             ))}
           </div>
