@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "../lib/query-client";
-import { Send, Plus, Trash2, MessageSquare, Loader2 } from "lucide-react";
+import { Send, Plus, Trash2, MessageSquare, Loader2, Sparkles } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { Textarea } from "../components/ui/textarea";
@@ -32,6 +32,7 @@ export default function Chat() {
   const [activeConvo, setActiveConvo] = useState<number | null>(null);
   const [input, setInput] = useState("");
   const [streamingContent, setStreamingContent] = useState("");
+  const [statusMessage, setStatusMessage] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -74,7 +75,7 @@ export default function Chat() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, streamingContent, scrollToBottom]);
+  }, [messages, streamingContent, statusMessage, scrollToBottom]);
 
   const sendMessage = useCallback(async () => {
     if (!input.trim() || isStreaming) return;
@@ -94,6 +95,7 @@ export default function Chat() {
     setInput("");
     setIsStreaming(true);
     setStreamingContent("");
+    setStatusMessage("");
 
     queryClient.invalidateQueries({ queryKey: ["/api/conversations", convoId] });
 
@@ -121,12 +123,21 @@ export default function Chat() {
           if (line.startsWith("data: ")) {
             try {
               const data = JSON.parse(line.slice(6));
+              if (data.status) {
+                setStatusMessage(data.message || data.status);
+              }
               if (data.content) {
+                setStatusMessage("");
                 accumulated += data.content;
                 setStreamingContent(accumulated);
               }
+              if (data.error) {
+                setStatusMessage("");
+                setStreamingContent(accumulated || "An error occurred. Please try again.");
+              }
               if (data.done) {
                 setStreamingContent("");
+                setStatusMessage("");
                 setIsStreaming(false);
                 queryClient.invalidateQueries({ queryKey: ["/api/conversations", convoId] });
                 queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
@@ -139,6 +150,7 @@ export default function Chat() {
       console.error("Stream error:", error);
       setIsStreaming(false);
       setStreamingContent("");
+      setStatusMessage("");
     }
   }, [input, isStreaming, activeConvo]);
 
@@ -221,6 +233,17 @@ export default function Chat() {
                 </div>
               </div>
             ))}
+            {isStreaming && statusMessage && !streamingContent && (
+              <div className="flex gap-3 mb-4 max-w-3xl mr-auto">
+                <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 bg-muted text-muted-foreground">
+                  <Sparkles size={14} className="animate-pulse" />
+                </div>
+                <div className="rounded-xl px-4 py-2.5 text-sm bg-muted/50 text-muted-foreground flex items-center gap-2">
+                  <Loader2 size={14} className="animate-spin" />
+                  {statusMessage}
+                </div>
+              </div>
+            )}
             {streamingContent && (
               <div className="flex gap-3 mb-4 max-w-3xl mr-auto">
                 <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 bg-muted text-muted-foreground">
@@ -228,10 +251,11 @@ export default function Chat() {
                 </div>
                 <div className="rounded-xl px-4 py-2.5 text-sm max-w-[80%] whitespace-pre-wrap bg-muted text-foreground">
                   {streamingContent}
+                  <span className="inline-block w-2 h-4 bg-foreground/40 animate-pulse ml-0.5 align-text-bottom" />
                 </div>
               </div>
             )}
-            {isStreaming && !streamingContent && (
+            {isStreaming && !streamingContent && !statusMessage && (
               <div className="flex gap-3 mb-4 max-w-3xl mr-auto">
                 <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 bg-muted text-muted-foreground">
                   AI
@@ -264,7 +288,11 @@ export default function Chat() {
               onClick={sendMessage}
               disabled={!input.trim() || isStreaming}
             >
-              <Send size={18} />
+              {isStreaming ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send size={18} />
+              )}
             </Button>
           </div>
         </div>

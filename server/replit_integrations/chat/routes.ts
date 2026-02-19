@@ -61,22 +61,31 @@ export function registerChatRoutes(app: Express): void {
       const conversationId = parseInt(req.params.id as string);
       const { content } = req.body;
 
-      // Save user message
       await chatStorage.createMessage(conversationId, "user", content);
 
-      // Get conversation history for context
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.flushHeaders();
+
+      let closed = false;
+      req.on("close", () => { closed = true; });
+
+      function sendEvent(data: Record<string, any>) {
+        if (closed) return;
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      }
+
+      sendEvent({ status: "thinking", message: "Preparing response..." });
+
       const messages = await chatStorage.getMessagesByConversation(conversationId);
       const chatMessages = messages.map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.content,
       }));
 
-      // Set up SSE
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
+      sendEvent({ status: "connecting", message: `Loading ${messages.length} messages for context...` });
 
-      // Stream response from OpenAI
       const stream = await openai.chat.completions.create({
         model: "gpt-5.1",
         messages: chatMessages,
@@ -84,24 +93,24 @@ export function registerChatRoutes(app: Express): void {
         max_completion_tokens: 8192,
       });
 
+      sendEvent({ status: "streaming", message: "Generating response..." });
+
       let fullResponse = "";
 
       for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content || "";
-        if (content) {
-          fullResponse += content;
-          res.write(`data: ${JSON.stringify({ content })}\n\n`);
+        const tokenContent = chunk.choices[0]?.delta?.content || "";
+        if (tokenContent) {
+          fullResponse += tokenContent;
+          sendEvent({ content: tokenContent });
         }
       }
 
-      // Save assistant message
       await chatStorage.createMessage(conversationId, "assistant", fullResponse);
 
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-      res.end();
+      sendEvent({ done: true });
+      if (!closed) res.end();
     } catch (error) {
       console.error("Error sending message:", error);
-      // Check if headers already sent (SSE streaming started)
       if (res.headersSent) {
         res.write(`data: ${JSON.stringify({ error: "Failed to send message" })}\n\n`);
         res.end();

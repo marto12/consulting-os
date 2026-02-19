@@ -295,6 +295,8 @@ export default function WorkflowStepWorkspace() {
   const [autorunTriggered, setAutorunTriggered] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewData, setPreviewData] = useState<{ agentKey: string; content: any; title: string } | null>(null);
+  const [chatStreaming, setChatStreaming] = useState(false);
+  const [chatStreamTokens, setChatStreamTokens] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -414,9 +416,6 @@ export default function WorkflowStepWorkspace() {
       }
     }
   }, [searchParams, autorunTriggered, isStreaming, stepData, startStreaming, setSearchParams]);
-
-  const [chatStreaming, setChatStreaming] = useState(false);
-  const [chatStreamTokens, setChatStreamTokens] = useState("");
 
   const sendChatStreaming = useCallback(async (message: string) => {
     setChatStreaming(true);
