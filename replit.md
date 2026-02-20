@@ -70,6 +70,7 @@ The system follows a four-layer architecture: Projects → Workflows → Agents 
 - **Context Chaining**: Later agents receive outputs from earlier steps as context (e.g., Centrist Summariser reads all 3 prior documents).
 - **Editable Template**: The final summary follows an editable HTML template stored in `pipeline_configs` (name: `exec_summary_template`). Editable at `/exec-summary-template`.
 - **Template Format**: ~500 words, short headings (3-6 words each), two sentences per section (argument + evidence).
+- **Position Confirmation Gate**: After Topic Clarifier runs, the step enters `awaiting_confirmation` status. The UI shows a card with editable Side A/Side B text fields (pre-filled from LLM output). User reviews/edits, then clicks "Confirm Positions" to proceed. Confirmed positions are stored in the step's `configJson` and used by Strongman Pro/Con agents. API: `POST /api/projects/:id/workflow/steps/:stepId/confirm-positions` with `{ sideA, sideB }`.
 
 ### Database (PostgreSQL + Drizzle ORM)
 - **ORM**: Drizzle ORM with PostgreSQL dialect.
