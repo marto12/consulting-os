@@ -976,6 +976,9 @@ export default function DocumentEditor() {
           editorType="document"
           editorId={Number(id)}
           getContentFn={() => editor.getHTML()}
+          onInsertContent={(text: string) => {
+            editor.commands.insertContent(text);
+          }}
         />
       )}
     </TooltipProvider>

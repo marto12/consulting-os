@@ -42,6 +42,7 @@ interface EditorChatPanelProps {
   editorType: "document" | "slides";
   editorId: number;
   getContentFn: () => string;
+  onInsertContent?: (text: string) => void;
   className?: string;
 }
 
@@ -56,6 +57,7 @@ export default function EditorChatPanel({
   editorType,
   editorId,
   getContentFn,
+  onInsertContent,
   className,
 }: EditorChatPanelProps) {
   const [open, setOpen] = useState(false);
@@ -115,6 +117,8 @@ export default function EditorChatPanel({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  const writeToDoc = editorType === "document" && !!onInsertContent;
 
   const sendMessage = useCallback(async () => {
     if (!input.trim() || isStreaming) return;
@@ -177,15 +181,26 @@ export default function EditorChatPanel({
               }
               if (data.workflowStep) {
                 if (accumulated.trim()) {
-                  setMessages((prev) => [
-                    ...prev,
-                    {
-                      id: Date.now().toString() + "_step",
-                      role: "assistant",
-                      content: accumulated.trim(),
-                      agentName: currentAgentName,
-                    },
-                  ]);
+                  if (writeToDoc) {
+                    setMessages((prev) => [
+                      ...prev,
+                      {
+                        id: Date.now().toString() + "_step_note",
+                        role: "status",
+                        content: `${currentAgentName || "Agent"} wrote to document`,
+                      },
+                    ]);
+                  } else {
+                    setMessages((prev) => [
+                      ...prev,
+                      {
+                        id: Date.now().toString() + "_step",
+                        role: "assistant",
+                        content: accumulated.trim(),
+                        agentName: currentAgentName,
+                      },
+                    ]);
+                  }
                   accumulated = "";
                   setStreamingContent("");
                 }
@@ -200,8 +215,14 @@ export default function EditorChatPanel({
               }
               if (data.content) {
                 setStatusMessage("");
-                accumulated += data.content;
-                setStreamingContent(accumulated);
+                if (writeToDoc) {
+                  onInsertContent!(data.content);
+                  accumulated += data.content;
+                  setStatusMessage(`Writing to document...`);
+                } else {
+                  accumulated += data.content;
+                  setStreamingContent(accumulated);
+                }
               }
               if (data.error) {
                 setStatusMessage("");
@@ -209,7 +230,16 @@ export default function EditorChatPanel({
                 setStreamingContent(accumulated);
               }
               if (data.done) {
-                if (accumulated.trim()) {
+                if (writeToDoc) {
+                  setMessages((prev) => [
+                    ...prev,
+                    {
+                      id: Date.now().toString() + "_done",
+                      role: "status",
+                      content: `${currentAgentName || "AI"} finished writing to document`,
+                    },
+                  ]);
+                } else if (accumulated.trim()) {
                   setMessages((prev) => [
                     ...prev,
                     {
@@ -242,7 +272,7 @@ export default function EditorChatPanel({
       setStreamingContent("");
       setStatusMessage("");
     }
-  }, [input, isStreaming, selectedMode, editorType, editorId, getContentFn, messages]);
+  }, [input, isStreaming, selectedMode, editorType, editorId, getContentFn, messages, writeToDoc, onInsertContent]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -465,7 +495,9 @@ export default function EditorChatPanel({
                 {editorType === "document" ? "document" : "slides"}
               </p>
               <p className="text-xs text-center opacity-60">
-                The AI has access to your current content
+                {writeToDoc
+                  ? "AI responses will be written directly into your document"
+                  : "The AI has access to your current content"}
               </p>
             </div>
           )}
