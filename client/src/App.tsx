@@ -62,6 +62,7 @@ import Agents from "./pages/Agents";
 import AgentDetail from "./pages/AgentDetail";
 import DataModels from "./pages/DataModels";
 import SettingsPage from "./pages/Settings";
+import ExecSummaryTemplate from "./pages/ExecSummaryTemplate";
 import DocumentEditor from "./pages/DocumentEditor";
 import Documents from "./pages/Documents";
 import WorkflowEditor from "./pages/WorkflowEditor";
@@ -99,6 +100,7 @@ const NAV_SECTIONS = [
     items: [
       { to: "/workflows", icon: GitBranch, label: "Workflows" },
       { to: "/agents", icon: Bot, label: "Agents" },
+      { to: "/exec-summary-template", icon: FileText, label: "Exec Summary Template" },
     ],
   },
 ];
@@ -445,6 +447,7 @@ export default function App() {
           <Route path="/charts" element={<AppLayout><Charts /></AppLayout>} />
           <Route path="/charts/:id" element={<FullWidthLayout><ChartDetail /></FullWidthLayout>} />
           <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
+          <Route path="/exec-summary-template" element={<AppLayout><ExecSummaryTemplate /></AppLayout>} />
           <Route path="/documents" element={<AppLayout><Documents /></AppLayout>} />
           <Route path="/editor" element={<FullWidthLayout><DocumentEditor /></FullWidthLayout>} />
           <Route path="/editor/:id" element={<FullWidthLayout><DocumentEditor /></FullWidthLayout>} />

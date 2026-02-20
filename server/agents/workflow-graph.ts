@@ -592,11 +592,94 @@ export function getConsultingWorkflow() {
   return _workflow;
 }
 
+const DES_AGENT_KEYS = ["des_topic_clarifier", "des_key_issues", "des_strongman_pro", "des_strongman_con", "des_centrist_summary"];
+
+const DES_DOC_TITLES: Record<string, string> = {
+  des_topic_clarifier: "Topic Clarification",
+  des_key_issues: "Key Issues Review",
+  des_strongman_pro: "Strongman Pro Argument",
+  des_strongman_con: "Strongman Con Argument",
+  des_centrist_summary: "Executive Summary",
+};
+
+async function runDESStep(
+  projectId: number,
+  agentKey: string,
+  onProgress: ProgressCallback
+): Promise<{ deliverableContent: any; deliverableTitle: string }> {
+  const project = await storage.getProject(projectId);
+  if (!project) throw new Error("Project not found");
+
+  const config = await getAgentConfig(agentKey);
+  onProgress(`Running ${DES_DOC_TITLES[agentKey] || agentKey}...`, "status");
+
+  const priorDocs = await storage.listDocuments(projectId);
+  const findDoc = (prefix: string) => priorDocs.find((d) => d.title?.startsWith(prefix));
+
+  let userPrompt = "";
+
+  if (agentKey === "des_topic_clarifier") {
+    userPrompt = `Topic: ${project.objective}\n\nAdditional context/constraints: ${project.constraints || "None provided"}`;
+  } else if (agentKey === "des_key_issues") {
+    const topicDoc = findDoc("Topic Clarification");
+    const topicContent = topicDoc?.content || "";
+    userPrompt = `Topic: ${project.objective}\n\nTopic Clarification:\n${topicContent}\n\nConstraints: ${project.constraints || "None"}`;
+  } else if (agentKey === "des_strongman_pro") {
+    const topicDoc = findDoc("Topic Clarification");
+    const issuesDoc = findDoc("Key Issues Review");
+    const sideA = topicDoc?.content?.match(/Side A[^:]*:\s*(.*?)(?:\n|$)/i)?.[1] || "the affirmative position";
+    userPrompt = `Topic: ${project.objective}\n\nYou are arguing FOR: ${sideA}\n\nTopic Clarification:\n${topicDoc?.content || ""}\n\nKey Issues Review:\n${issuesDoc?.content || ""}`;
+  } else if (agentKey === "des_strongman_con") {
+    const topicDoc = findDoc("Topic Clarification");
+    const issuesDoc = findDoc("Key Issues Review");
+    const sideB = topicDoc?.content?.match(/Side B[^:]*:\s*(.*?)(?:\n|$)/i)?.[1] || "the opposing position";
+    userPrompt = `Topic: ${project.objective}\n\nYou are arguing AGAINST / FOR the opposing view: ${sideB}\n\nTopic Clarification:\n${topicDoc?.content || ""}\n\nKey Issues Review:\n${issuesDoc?.content || ""}`;
+  } else if (agentKey === "des_centrist_summary") {
+    const issuesDoc = findDoc("Key Issues Review");
+    const proDoc = findDoc("Strongman Pro");
+    const conDoc = findDoc("Strongman Con");
+
+    let templateHtml = "";
+    try {
+      const pipelines = await storage.listPipelines();
+      const tpl = pipelines.find((p) => p.name === "exec_summary_template");
+      if (tpl) {
+        const json = tpl.agentsJson as any;
+        templateHtml = json.template || "";
+      }
+    } catch {}
+
+    userPrompt = `Topic: ${project.objective}\n\n--- KEY ISSUES REVIEW ---\n${issuesDoc?.content || ""}\n\n--- STRONGMAN PRO ARGUMENT ---\n${proDoc?.content || ""}\n\n--- STRONGMAN CON ARGUMENT ---\n${conDoc?.content || ""}\n\n--- EXECUTIVE SUMMARY TEMPLATE ---\nFollow this template structure exactly. Replace bracketed placeholders with real content:\n\n${templateHtml}`;
+  }
+
+  onProgress(`Calling LLM (${config.model})...`, "llm");
+  const raw = await callLLMWithLangChain(config.systemPrompt, userPrompt, config.model, config.maxTokens);
+  onProgress("LLM response received.", "llm");
+
+  const docTitle = `${DES_DOC_TITLES[agentKey]} — ${project.name}`;
+
+  const doc = await storage.createDocument({
+    projectId,
+    title: docTitle,
+    content: raw,
+  });
+  onProgress(`Saved document: "${docTitle}" (ID: ${doc.id})`, "status");
+
+  return {
+    deliverableContent: { documentId: doc.id, title: docTitle, content: raw },
+    deliverableTitle: docTitle,
+  };
+}
+
 export async function runWorkflowStep(
   projectId: number,
   agentKey: string,
   onProgress: ProgressCallback = () => {}
 ): Promise<{ deliverableContent: any; deliverableTitle: string }> {
+  if (DES_AGENT_KEYS.includes(agentKey)) {
+    return runDESStep(projectId, agentKey, onProgress);
+  }
+
   const project = await storage.getProject(projectId);
   if (!project) throw new Error("Project not found");
 
