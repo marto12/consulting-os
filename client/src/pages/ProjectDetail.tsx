@@ -290,13 +290,13 @@ export default function ProjectDetail() {
       </div>
 
       <Tabs defaultValue="overview">
-        <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
-          <TabsList className="w-max sm:w-auto">
-            <TabsTrigger value="overview"><Layers size={14} className="mr-1.5" />Overview</TabsTrigger>
-            <TabsTrigger value="workflow"><GitBranch size={14} className="mr-1.5" />Workflow</TabsTrigger>
-            <TabsTrigger value="deliverables"><FileText size={14} className="mr-1.5" />Deliverables</TabsTrigger>
-            <TabsTrigger value="vault"><Archive size={14} className="mr-1.5" />Vault</TabsTrigger>
-            <TabsTrigger value="activity"><Activity size={14} className="mr-1.5" />Activity</TabsTrigger>
+        <div className="overflow-x-auto scrollbar-none pb-1" style={{ WebkitOverflowScrolling: 'touch' }}>
+          <TabsList className="w-max">
+            <TabsTrigger value="overview" className="text-xs sm:text-sm px-2.5 sm:px-3"><Layers size={14} className="mr-1 sm:mr-1.5" />Overview</TabsTrigger>
+            <TabsTrigger value="workflow" className="text-xs sm:text-sm px-2.5 sm:px-3"><GitBranch size={14} className="mr-1 sm:mr-1.5" />Workflow</TabsTrigger>
+            <TabsTrigger value="deliverables" className="text-xs sm:text-sm px-2.5 sm:px-3"><FileText size={14} className="mr-1 sm:mr-1.5" />Deliverables</TabsTrigger>
+            <TabsTrigger value="vault" className="text-xs sm:text-sm px-2.5 sm:px-3"><Archive size={14} className="mr-1 sm:mr-1.5" />Vault</TabsTrigger>
+            <TabsTrigger value="activity" className="text-xs sm:text-sm px-2.5 sm:px-3"><Activity size={14} className="mr-1 sm:mr-1.5" />Activity</TabsTrigger>
           </TabsList>
         </div>
 

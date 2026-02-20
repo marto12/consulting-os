@@ -76,3 +76,11 @@ a {
   border-color: rgba(255,255,255,0.3);
   border-top-color: #fff;
 }
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
