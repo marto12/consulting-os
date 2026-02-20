@@ -419,8 +419,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     );
 
     try {
-      const result = await runWorkflowStep(projectId, step.agentKey, onProgress);
-      const { deliverableContent, deliverableTitle } = result;
+      const result = await runWorkflowStep(projectId, step.agentKey, onProgress, stepId);
+      const { deliverableContent, deliverableTitle, awaitingConfirmation } = result;
 
       await persistAgentResults(projectId, step.agentKey, deliverableContent);
 
@@ -435,8 +435,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      const stepStatus = awaitingConfirmation ? "awaiting_confirmation" : "completed";
       await storage.updateWorkflowInstanceStep(stepId, {
-        status: "completed",
+        status: stepStatus,
         outputSummary: { title: deliverableTitle },
       });
       await storage.updateRunLog(runLog.id, deliverableContent, "success");
@@ -684,6 +685,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const updatedProject = await storage.getProject(projectId);
       res.json(updatedProject);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/projects/:id/workflow/steps/:stepId/confirm-positions", async (req: Request, res: Response) => {
+    try {
+      const stepId = Number(req.params.stepId);
+      const { sideA, sideB } = req.body;
+
+      if (!sideA || !sideB) {
+        return res.status(400).json({ error: "Both sideA and sideB are required" });
+      }
+
+      const step = await storage.getWorkflowInstanceStep(stepId);
+      if (!step) return res.status(404).json({ error: "Step not found" });
+      if (step.agentKey !== "des_topic_clarifier") {
+        return res.status(400).json({ error: "Position confirmation is only for the Topic Clarifier step" });
+      }
+      if (step.status !== "awaiting_confirmation") {
+        return res.status(400).json({ error: "Step is not awaiting confirmation" });
+      }
+
+      const existingConfig = (step.configJson as any) || {};
+      await storage.updateWorkflowInstanceStep(stepId, {
+        status: "completed",
+        configJson: {
+          ...existingConfig,
+          confirmedSideA: sideA.trim(),
+          confirmedSideB: sideB.trim(),
+        },
+      });
+
+      await storage.insertStepChatMessage({
+        stepId,
+        role: "assistant",
+        content: `Positions confirmed.\n**Side A (Pro):** ${sideA.trim()}\n**Side B (Con):** ${sideB.trim()}`,
+        messageType: "status",
+      });
+
+      const updatedStep = await storage.getWorkflowInstanceStep(stepId);
+      res.json({ step: updatedStep });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

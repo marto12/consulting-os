@@ -381,7 +381,7 @@ export const storage = {
     return step;
   },
 
-  async updateWorkflowInstanceStep(stepId: number, data: { status?: string; outputSummary?: any }): Promise<WorkflowInstanceStep> {
+  async updateWorkflowInstanceStep(stepId: number, data: { status?: string; outputSummary?: any; configJson?: any }): Promise<WorkflowInstanceStep> {
     const [step] = await db
       .update(workflowInstanceSteps)
       .set({ ...data, updatedAt: new Date() })

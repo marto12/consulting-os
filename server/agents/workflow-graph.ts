@@ -605,8 +605,9 @@ const DES_DOC_TITLES: Record<string, string> = {
 async function runDESStep(
   projectId: number,
   agentKey: string,
-  onProgress: ProgressCallback
-): Promise<{ deliverableContent: any; deliverableTitle: string }> {
+  onProgress: ProgressCallback,
+  stepId?: number
+): Promise<{ deliverableContent: any; deliverableTitle: string; awaitingConfirmation?: boolean }> {
   const project = await storage.getProject(projectId);
   if (!project) throw new Error("Project not found");
 
@@ -615,6 +616,33 @@ async function runDESStep(
 
   const priorDocs = await storage.listDocuments(projectId);
   const findDoc = (prefix: string) => priorDocs.find((d) => d.title?.startsWith(prefix));
+
+  async function getConfirmedPositions(): Promise<{ sideA: string; sideB: string }> {
+    if (!stepId) {
+      const topicDoc = findDoc("Topic Clarification");
+      return {
+        sideA: topicDoc?.content?.match(/Side A[^:]*:\s*(.*?)(?:\n|$)/i)?.[1] || "the affirmative position",
+        sideB: topicDoc?.content?.match(/Side B[^:]*:\s*(.*?)(?:\n|$)/i)?.[1] || "the opposing position",
+      };
+    }
+    const currentStep = await storage.getWorkflowInstanceStep(stepId);
+    const instanceId = currentStep?.workflowInstanceId;
+    if (instanceId) {
+      const allSteps = await storage.getWorkflowInstanceSteps(instanceId);
+      const topicStep = allSteps.find((s) => s.agentKey === "des_topic_clarifier");
+      if (topicStep?.configJson) {
+        const cfg = topicStep.configJson as any;
+        if (cfg.confirmedSideA && cfg.confirmedSideB) {
+          return { sideA: cfg.confirmedSideA, sideB: cfg.confirmedSideB };
+        }
+      }
+    }
+    const topicDoc = findDoc("Topic Clarification");
+    return {
+      sideA: topicDoc?.content?.match(/Side A[^:]*:\s*(.*?)(?:\n|$)/i)?.[1] || "the affirmative position",
+      sideB: topicDoc?.content?.match(/Side B[^:]*:\s*(.*?)(?:\n|$)/i)?.[1] || "the opposing position",
+    };
+  }
 
   let userPrompt = "";
 
@@ -627,12 +655,12 @@ async function runDESStep(
   } else if (agentKey === "des_strongman_pro") {
     const topicDoc = findDoc("Topic Clarification");
     const issuesDoc = findDoc("Key Issues Review");
-    const sideA = topicDoc?.content?.match(/Side A[^:]*:\s*(.*?)(?:\n|$)/i)?.[1] || "the affirmative position";
+    const { sideA } = await getConfirmedPositions();
     userPrompt = `Topic: ${project.objective}\n\nYou are arguing FOR: ${sideA}\n\nTopic Clarification:\n${topicDoc?.content || ""}\n\nKey Issues Review:\n${issuesDoc?.content || ""}`;
   } else if (agentKey === "des_strongman_con") {
     const topicDoc = findDoc("Topic Clarification");
     const issuesDoc = findDoc("Key Issues Review");
-    const sideB = topicDoc?.content?.match(/Side B[^:]*:\s*(.*?)(?:\n|$)/i)?.[1] || "the opposing position";
+    const { sideB } = await getConfirmedPositions();
     userPrompt = `Topic: ${project.objective}\n\nYou are arguing AGAINST / FOR the opposing view: ${sideB}\n\nTopic Clarification:\n${topicDoc?.content || ""}\n\nKey Issues Review:\n${issuesDoc?.content || ""}`;
   } else if (agentKey === "des_centrist_summary") {
     const issuesDoc = findDoc("Key Issues Review");
@@ -665,6 +693,23 @@ async function runDESStep(
   });
   onProgress(`Saved document: "${docTitle}" (ID: ${doc.id})`, "status");
 
+  if (agentKey === "des_topic_clarifier" && stepId) {
+    const extractedSideA = raw.match(/\*?\*?Side A\*?\*?[^:]*:\s*(.*?)(?:\n|$)/i)?.[1]?.trim() || "";
+    const extractedSideB = raw.match(/\*?\*?Side B\*?\*?[^:]*:\s*(.*?)(?:\n|$)/i)?.[1]?.trim() || "";
+    await storage.updateWorkflowInstanceStep(stepId, {
+      configJson: {
+        extractedSideA: extractedSideA || "the affirmative position",
+        extractedSideB: extractedSideB || "the opposing position",
+      },
+    });
+    onProgress("Positions extracted. Please review and confirm Side A and Side B before proceeding.", "status");
+    return {
+      deliverableContent: { documentId: doc.id, title: docTitle, content: raw },
+      deliverableTitle: docTitle,
+      awaitingConfirmation: true,
+    };
+  }
+
   return {
     deliverableContent: { documentId: doc.id, title: docTitle, content: raw },
     deliverableTitle: docTitle,
@@ -674,10 +719,11 @@ async function runDESStep(
 export async function runWorkflowStep(
   projectId: number,
   agentKey: string,
-  onProgress: ProgressCallback = () => {}
-): Promise<{ deliverableContent: any; deliverableTitle: string }> {
+  onProgress: ProgressCallback = () => {},
+  stepId?: number
+): Promise<{ deliverableContent: any; deliverableTitle: string; awaitingConfirmation?: boolean }> {
   if (DES_AGENT_KEYS.includes(agentKey)) {
-    return runDESStep(projectId, agentKey, onProgress);
+    return runDESStep(projectId, agentKey, onProgress, stepId);
   }
 
   const project = await storage.getProject(projectId);
