@@ -1873,7 +1873,7 @@ Return ONLY the JSON array, no other text.`
             const stream = await openai.chat.completions.create({
               model: agentConfig?.model || "gpt-5-nano",
               messages: [
-                { role: "system", content: `${sysPrompt}\n\nYou are operating within a workflow pipeline. Analyze the input and produce output that flows to the next step. Be concise and structured.` },
+                { role: "system", content: `${sysPrompt}\n\nYou are operating within a workflow pipeline. Analyze the input and produce output that flows to the next step. Be concise and structured.${editorType === "document" ? " IMPORTANT: Format all output as HTML (use <h1>, <h2>, <strong>, <em>, <ul>/<ol>/<li>, <p>, <hr> tags). Never use markdown syntax." : ""}` },
                 { role: "user", content: accumulatedContext },
               ],
               stream: true,
@@ -1904,13 +1904,17 @@ Return ONLY the JSON array, no other text.`
       let systemPrompt: string;
       let agentName = "";
 
+      const htmlFormatInstructions = editorType === "document"
+        ? `\n\nIMPORTANT: Your output will be inserted directly into a rich text editor (HTML). You MUST format your response as HTML, NOT markdown. Use <h1>, <h2>, <h3> for headings, <strong> for bold, <em> for italics, <ul>/<ol> with <li> for lists, <p> for paragraphs, <hr> for dividers. Never use markdown syntax like **, ##, ---, or - for lists.`
+        : "";
+
       if (mode === "general") {
-        systemPrompt = `You are a helpful AI assistant embedded in a ${editorType === "document" ? "word processor" : "slide editor"}. You have access to the user's current ${contentLabel.toLowerCase()} content. Help them with writing, editing, analysis, brainstorming, and any other questions. Be concise and actionable.\n\n${contentLabel} content:\n${contentSnippet}`;
+        systemPrompt = `You are a helpful AI assistant embedded in a ${editorType === "document" ? "word processor" : "slide editor"}. You have access to the user's current ${contentLabel.toLowerCase()} content. Help them with writing, editing, analysis, brainstorming, and any other questions. Be concise and actionable.${htmlFormatInstructions}\n\n${contentLabel} content:\n${contentSnippet}`;
         agentName = "General Assistant";
       } else {
         const agentConfig = await storage.getAgentConfig(mode);
         systemPrompt = agentConfig?.systemPrompt || DEFAULT_PROMPTS[mode] || `You are a ${mode} agent. Help the user with their ${contentLabel.toLowerCase()}.`;
-        systemPrompt = `${systemPrompt}\n\nYou are operating inside an editor chat. The user is asking you to apply your expertise to their current ${contentLabel.toLowerCase()}. Provide actionable feedback and suggestions.\n\n${contentLabel} content:\n${contentSnippet}`;
+        systemPrompt = `${systemPrompt}\n\nYou are operating inside an editor chat. The user is asking you to apply your expertise to their current ${contentLabel.toLowerCase()}. Provide actionable feedback and suggestions.${htmlFormatInstructions}\n\n${contentLabel} content:\n${contentSnippet}`;
 
         const agentRecord = await storage.getAgentByKey(mode);
         agentName = agentRecord?.name || mode;

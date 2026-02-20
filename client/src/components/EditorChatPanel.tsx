@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { marked } from "marked";
 import {
   MessageSquare,
   Send,
@@ -16,6 +17,13 @@ import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
 import { ScrollArea } from "./ui/scroll-area";
 import { cn } from "../lib/utils";
+
+function markdownToHtml(text: string): string {
+  const hasMarkdown = /(\*\*|__|##|^- |\n\d+\. |^#{1,6} |```|---)/m.test(text);
+  if (!hasMarkdown) return text;
+  const result = marked.parse(text, { async: false }) as string;
+  return result;
+}
 
 interface Agent {
   id: number;
@@ -182,6 +190,8 @@ export default function EditorChatPanel({
               if (data.workflowStep) {
                 if (accumulated.trim()) {
                   if (writeToDoc) {
+                    const html = markdownToHtml(accumulated.trim());
+                    onInsertContent!(html);
                     setMessages((prev) => [
                       ...prev,
                       {
@@ -216,7 +226,6 @@ export default function EditorChatPanel({
               if (data.content) {
                 setStatusMessage("");
                 if (writeToDoc) {
-                  onInsertContent!(data.content);
                   accumulated += data.content;
                   setStatusMessage(`Writing to document...`);
                 } else {
@@ -230,7 +239,9 @@ export default function EditorChatPanel({
                 setStreamingContent(accumulated);
               }
               if (data.done) {
-                if (writeToDoc) {
+                if (writeToDoc && accumulated.trim()) {
+                  const html = markdownToHtml(accumulated.trim());
+                  onInsertContent!(html);
                   setMessages((prev) => [
                     ...prev,
                     {
