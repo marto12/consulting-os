@@ -21,7 +21,12 @@ import { cn } from "../lib/utils";
 function markdownToHtml(text: string): string {
   const hasMarkdown = /(\*\*|__|##|^- |\n\d+\. |^#{1,6} |```|---)/m.test(text);
   if (!hasMarkdown) return text;
-  const result = marked.parse(text, { async: false }) as string;
+  let result = marked.parse(text, { async: false }) as string;
+  result = result
+    .replace(/\n{2,}/g, "\n")
+    .replace(/>\s*\n\s*</g, "><")
+    .replace(/<p>\s*<\/p>/g, "")
+    .trim();
   return result;
 }
 
