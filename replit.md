@@ -43,7 +43,7 @@ The system follows a four-layer architecture: Projects → Workflows → Agents 
 - Default 7-step consulting pipeline: Project Definition → Issues Tree → MECE Critic → Hypothesis → Execution → Summary → Presentation.
 
 ### AI Agents (`server/agents/`)
-- **Architecture**: Seven sequential agents designed for specific consulting tasks.
+- **Architecture**: Sequential agents designed for specific consulting tasks.
 - **LLM Integration**: Uses OpenAI SDK via Replit AI Integrations (e.g., `gpt-5-nano`).
 - **Functionality**:
     - **Project Definition Agent**: Translates briefs into structured problem definitions.
@@ -55,7 +55,21 @@ The system follows a four-layer architecture: Projects → Workflows → Agents 
     - **Presentation Agent**: Prepares presentation materials.
     - **Key Narrative Agent**: Extracts executive-level key points from technical prose and suggests rewrites.
     - **Executive Review Agent**: Flags document sections lacking strategic framing or "so what" factor.
+    - **Desktop Executive Summary (DES) Agents** (5 agents, `des_*` keys):
+        - **Topic Clarifier** (`des_topic_clarifier`): Probes for scope, stakeholders, and opposing sides.
+        - **Key Issues Reviewer** (`des_key_issues`): Identifies 5-8 key issues with categorisation and ranking.
+        - **Strongman Pro** (`des_strongman_pro`): Builds strongest case FOR the position.
+        - **Strongman Con** (`des_strongman_con`): Builds strongest case AGAINST the position.
+        - **Centrist Summariser** (`des_centrist_summary`): Synthesises both sides into balanced executive summary using editable template.
 - **Mock Mode**: Supports deterministic stub outputs for development without API keys.
+
+### Desktop Executive Summary Workflow
+- **Template**: "Desktop Executive Summary" workflow with 5 sequential steps.
+- **Execution Flow**: Topic Clarification → Key Issues Review → Strongman Pro → Strongman Con → Centrist Executive Summary.
+- **Document Output**: Each DES step saves its output as a reviewable document in the project's documents list.
+- **Context Chaining**: Later agents receive outputs from earlier steps as context (e.g., Centrist Summariser reads all 3 prior documents).
+- **Editable Template**: The final summary follows an editable HTML template stored in `pipeline_configs` (name: `exec_summary_template`). Editable at `/exec-summary-template`.
+- **Template Format**: ~500 words, short headings (3-6 words each), two sentences per section (argument + evidence).
 
 ### Database (PostgreSQL + Drizzle ORM)
 - **ORM**: Drizzle ORM with PostgreSQL dialect.
