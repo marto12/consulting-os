@@ -108,6 +108,11 @@ const DEFAULT_AGENTS = [
   { key: "doc_executive_review", name: "Executive Review", role: "Document Reviewer", roleColor: "#A855F7", description: "Flags sections that dive into technical details too early without strategic framing. Checks for Missing 'So What', Technical Too Early, Buried Insight, No Action Orientation, and Audience Mismatch." },
   { key: "doc_key_narrative", name: "Key Narrative", role: "Document Reviewer", roleColor: "#14B8A6", description: "Extracts executive-level key points from technical prose. Labels each with a narrative role: Core thesis, Supporting evidence, Risk/caveat, Action driver, or Context setter. Proposes crisp executive-ready rewrites." },
   { key: "doc_fact_check", name: "Fact Check", role: "Document Reviewer", roleColor: "#F97316", description: "Two-phase fact-checking: first spots claims that need verification (statistics, dates, named entities), then runs detailed checks on accepted candidates with confidence ratings and source suggestions." },
+  { key: "des_topic_clarifier", name: "Topic Clarifier", role: "Facilitator", roleColor: "#6366F1", description: "Asks probing questions to understand the issue, scope, stakeholders, and context before analysis begins." },
+  { key: "des_key_issues", name: "Key Issues Reviewer", role: "Analyst", roleColor: "#0EA5E9", description: "Identifies and structures the core issues and tensions around a topic, producing a comprehensive issues review document." },
+  { key: "des_strongman_pro", name: "Strongman Pro", role: "Advocate", roleColor: "#22C55E", description: "Builds the strongest possible case FOR a position, marshalling the best arguments, evidence, and logic." },
+  { key: "des_strongman_con", name: "Strongman Con", role: "Challenger", roleColor: "#EF4444", description: "Builds the strongest possible case AGAINST a position, marshalling the best counter-arguments, evidence, and risks." },
+  { key: "des_centrist_summary", name: "Centrist Summariser", role: "Synthesizer", roleColor: "#A855F7", description: "Synthesizes opposing arguments into a balanced, centrist executive summary following a structured template format." },
 ];
 
 const DEFAULT_WORKFLOW_STEPS = [
@@ -118,6 +123,37 @@ const DEFAULT_WORKFLOW_STEPS = [
   { stepOrder: 5, name: "Executive Summary", agentKey: "summary" },
   { stepOrder: 6, name: "Presentation", agentKey: "presentation" },
 ];
+
+const DES_WORKFLOW_STEPS = [
+  { stepOrder: 1, name: "Clarify Topic", agentKey: "des_topic_clarifier" },
+  { stepOrder: 2, name: "Key Issues Review", agentKey: "des_key_issues" },
+  { stepOrder: 3, name: "Strongman Pro", agentKey: "des_strongman_pro" },
+  { stepOrder: 4, name: "Strongman Con", agentKey: "des_strongman_con" },
+  { stepOrder: 5, name: "Centrist Executive Summary", agentKey: "des_centrist_summary" },
+];
+
+const DEFAULT_EXEC_SUMMARY_TEMPLATE = `<h2>Executive Summary: [Topic]</h2>
+
+<h3>The Core Question</h3>
+<p>[State the central question or decision point in one sentence.] [Provide the key context or data that frames why this matters now.]</p>
+
+<h3>The Economic Case</h3>
+<p>[State the primary economic argument, drawing from both pro and con perspectives.] [Cite the most relevant economic evidence or data point.]</p>
+
+<h3>The Strategic Trade-off</h3>
+<p>[State the main strategic tension that decision-makers must weigh.] [Reference specific evidence from the analysis that illustrates this trade-off.]</p>
+
+<h3>Risk and Downside</h3>
+<p>[State the most significant risk or downside identified.] [Provide evidence or a precedent that demonstrates this risk is material.]</p>
+
+<h3>The Stakeholder Dimension</h3>
+<p>[State how different stakeholder groups are affected differently.] [Reference specific impacts or data that highlight the distributional effects.]</p>
+
+<h3>Pragmatic Path Forward</h3>
+<p>[State the recommended centrist/balanced position in one clear sentence.] [Explain the key conditions or safeguards that make this position defensible.]</p>
+
+<h3>Implementation Priorities</h3>
+<p>[State the 2-3 immediate actions or decisions required.] [Reference the timeline or sequencing that makes these achievable.]</p>`;
 
 async function ensureDefaults() {
   for (const a of DEFAULT_AGENTS) {
@@ -152,6 +188,29 @@ async function ensureDefaults() {
         });
       }
     }
+  }
+
+  const hasDES = templates.some((t) => t.name === "Desktop Executive Summary");
+  if (!hasDES) {
+    const desTemplate = await storage.createWorkflowTemplate({
+      name: "Desktop Executive Summary",
+      description: "Adversarial analysis workflow: Clarify Topic -> Key Issues -> Strongman Pro & Con -> Balanced Centrist Executive Summary",
+    });
+    for (const step of DES_WORKFLOW_STEPS) {
+      await storage.addWorkflowTemplateStep({
+        workflowTemplateId: desTemplate.id,
+        ...step,
+      });
+    }
+  }
+
+  const pipelines = await storage.listPipelines();
+  const existingPipeline = pipelines.find((p) => p.name === "exec_summary_template");
+  if (!existingPipeline) {
+    await storage.createPipeline({
+      name: "exec_summary_template",
+      agentsJson: { template: DEFAULT_EXEC_SUMMARY_TEMPLATE },
+    });
   }
 }
 
@@ -1068,6 +1127,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   app.delete("/api/pipelines/:id", async (req: Request, res: Response) => {
     try { await storage.deletePipeline(Number(req.params.id)); res.json({ success: true }); } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get("/api/exec-summary-template", async (_req: Request, res: Response) => {
+    try {
+      const pipelines = await storage.listPipelines();
+      const templatePipeline = pipelines.find((p) => p.name === "exec_summary_template");
+      if (!templatePipeline) {
+        return res.json({ template: DEFAULT_EXEC_SUMMARY_TEMPLATE });
+      }
+      const agentsJson = templatePipeline.agentsJson as any;
+      res.json({ id: templatePipeline.id, template: agentsJson.template || DEFAULT_EXEC_SUMMARY_TEMPLATE });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.put("/api/exec-summary-template", async (req: Request, res: Response) => {
+    try {
+      const { template } = req.body;
+      if (!template) return res.status(400).json({ error: "template is required" });
+      const pipelines = await storage.listPipelines();
+      const existing = pipelines.find((p) => p.name === "exec_summary_template");
+      if (existing) {
+        const updated = await storage.updatePipeline(existing.id, { agentsJson: { template } });
+        res.json({ id: updated.id, template });
+      } else {
+        const created = await storage.createPipeline({ name: "exec_summary_template", agentsJson: { template } });
+        res.json({ id: created.id, template });
+      }
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
   app.get("/api/documents", async (req: Request, res: Response) => {
