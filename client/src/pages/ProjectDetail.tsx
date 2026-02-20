@@ -249,6 +249,9 @@ export default function ProjectDetail() {
     if (step.status === "completed" || step.status === "approved") {
       return { icon: <CheckCircle size={16} />, color: "text-foreground", label: step.status === "approved" ? "Approved" : "Completed" };
     }
+    if (step.status === "awaiting_confirmation") {
+      return { icon: <Circle size={16} />, color: "text-amber-500", label: "Needs Confirmation" };
+    }
     if (step.status === "running") {
       return { icon: <Loader2 size={16} className="animate-spin" />, color: "text-muted-foreground", label: "Running" };
     }
@@ -261,6 +264,7 @@ export default function ProjectDetail() {
   function canRunStep(step: WorkflowStep, idx: number): boolean {
     if (step.status === "running") return false;
     if (step.status === "approved") return false;
+    if (step.status === "awaiting_confirmation") return false;
     if (idx === 0) return step.status === "not_started" || step.status === "failed";
     const prevStep = steps[idx - 1];
     return (prevStep.status === "completed" || prevStep.status === "approved") &&

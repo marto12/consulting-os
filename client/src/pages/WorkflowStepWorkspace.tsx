@@ -204,6 +204,7 @@ interface StepData {
     agentKey: string;
     status: string;
     outputSummary: any;
+    configJson?: any;
   };
   deliverables: {
     id: number;
@@ -297,6 +298,9 @@ export default function WorkflowStepWorkspace() {
   const [previewData, setPreviewData] = useState<{ agentKey: string; content: any; title: string } | null>(null);
   const [chatStreaming, setChatStreaming] = useState(false);
   const [chatStreamTokens, setChatStreamTokens] = useState("");
+  const [confirmSideA, setConfirmSideA] = useState("");
+  const [confirmSideB, setConfirmSideB] = useState("");
+  const [confirmInitialized, setConfirmInitialized] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -525,6 +529,27 @@ export default function WorkflowStepWorkspace() {
     },
   });
 
+  const confirmPositionsMutation = useMutation({
+    mutationFn: async ({ sideA, sideB }: { sideA: string; sideB: string }) => {
+      const res = await apiRequest("POST", `/api/projects/${projectId}/workflow/steps/${stepIdNum}/confirm-positions`, { sideA, sideB });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum, "chat"] });
+    },
+  });
+
+  useEffect(() => {
+    if (stepData?.step?.status === "awaiting_confirmation" && stepData.step.configJson && !confirmInitialized) {
+      const cfg = stepData.step.configJson as any;
+      setConfirmSideA(cfg.extractedSideA || "");
+      setConfirmSideB(cfg.extractedSideB || "");
+      setConfirmInitialized(true);
+    }
+  }, [stepData, confirmInitialized]);
+
   const handleSend = () => {
     const msg = chatInput.trim();
     if (!msg || chatStreaming || isStreaming) return;
@@ -552,6 +577,7 @@ export default function WorkflowStepWorkspace() {
   const canRun = step.status === "not_started" || step.status === "failed";
   const canApprove = step.status === "completed";
   const isApproved = step.status === "approved";
+  const isAwaitingConfirmation = step.status === "awaiting_confirmation";
   const hasHistory = (chatHistory && chatHistory.length > 0) || streamMessages.length > 0;
 
   const allMessages: ChatMessage[] = [
@@ -688,11 +714,12 @@ export default function WorkflowStepWorkspace() {
               step.status === "approved" ? "success" :
               step.status === "completed" ? "success" :
               step.status === "running" ? "default" :
+              step.status === "awaiting_confirmation" ? "outline" :
               step.status === "failed" ? "destructive" : "default"
             }
             className="text-[10px] sm:text-xs shrink-0"
           >
-            {isStreaming ? "running" : step.status}
+            {isStreaming ? "running" : step.status === "awaiting_confirmation" ? "needs confirmation" : step.status}
           </Badge>
         </div>
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
@@ -815,6 +842,52 @@ export default function WorkflowStepWorkspace() {
                     <div className="text-sm text-muted-foreground pt-0.5">
                       Refining output with your feedback<span className="animate-pulse">...</span>
                     </div>
+                  </div>
+                )}
+
+                {!isStreaming && !chatStreaming && isAwaitingConfirmation && (
+                  <div className="max-w-lg mx-auto pt-4">
+                    <Card className="p-5 border-l-4 border-l-amber-500">
+                      <div className="flex items-center gap-2 mb-3">
+                        <AlertCircle size={18} className="text-amber-500" />
+                        <h3 className="font-semibold text-sm">Confirm Positions Before Proceeding</h3>
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-4">
+                        Review the two sides identified by the Topic Clarifier. Edit if needed, then confirm to proceed to the Strongman arguments.
+                      </p>
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground mb-1 block">Side A (Pro)</label>
+                          <Textarea
+                            value={confirmSideA}
+                            onChange={(e) => setConfirmSideA(e.target.value)}
+                            className="resize-none min-h-[36px] text-sm"
+                            rows={1}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground mb-1 block">Side B (Con)</label>
+                          <Textarea
+                            value={confirmSideB}
+                            onChange={(e) => setConfirmSideB(e.target.value)}
+                            className="resize-none min-h-[36px] text-sm"
+                            rows={1}
+                          />
+                        </div>
+                        <Button
+                          onClick={() => confirmPositionsMutation.mutate({ sideA: confirmSideA, sideB: confirmSideB })}
+                          disabled={confirmPositionsMutation.isPending || !confirmSideA.trim() || !confirmSideB.trim()}
+                          size="sm"
+                          className="w-full"
+                        >
+                          {confirmPositionsMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <><Check size={14} /> Confirm Positions</>
+                          )}
+                        </Button>
+                      </div>
+                    </Card>
                   </div>
                 )}
 
