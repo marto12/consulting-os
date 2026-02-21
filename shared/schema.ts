@@ -53,8 +53,19 @@ export const agents = pgTable("agents", {
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  role: text("role").notNull().default("member"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const datasets = pgTable("datasets", {
   id: serial("id").primaryKey(),
+  projectId: integer("project_id").references(() => projects.id, { onDelete: "set null" }),
+  lastEditedByUserId: integer("last_edited_by_user_id").references(() => users.id, { onDelete: "set null" }),
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   owner: text("owner").notNull().default("system"),
@@ -77,6 +88,8 @@ export const datasetRows = pgTable("dataset_rows", {
 
 export const models = pgTable("models", {
   id: serial("id").primaryKey(),
+  projectId: integer("project_id").references(() => projects.id, { onDelete: "set null" }),
+  lastEditedByUserId: integer("last_edited_by_user_id").references(() => users.id, { onDelete: "set null" }),
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   inputSchema: jsonb("input_schema"),
@@ -107,6 +120,56 @@ export const workflowInstances = pgTable("workflow_instances", {
     .notNull(),
   currentStepOrder: integer("current_step_order").notNull().default(0),
   status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const projectPhases = pgTable("project_phases", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  status: text("status").notNull().default("not_started"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const projectTasks = pgTable("project_tasks", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  phaseId: integer("phase_id")
+    .references(() => projectPhases.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  ownerType: text("owner_type").notNull().default("human"),
+  assigneeUserId: integer("assignee_user_id").references(() => users.id, { onDelete: "set null" }),
+  workflowStepId: integer("workflow_step_id").references(() => workflowInstanceSteps.id, { onDelete: "set null" }),
+  status: text("status").notNull().default("not_started"),
+  dueDate: timestamp("due_date"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const projectCheckpoints = pgTable("project_checkpoints", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  phaseId: integer("phase_id")
+    .references(() => projectPhases.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  status: text("status").notNull().default("pending"),
+  linkedDeliverableId: integer("linked_deliverable_id")
+    .references(() => deliverables.id, { onDelete: "set null" }),
+  dueDate: timestamp("due_date"),
+  sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
@@ -217,6 +280,7 @@ export const runLogs = pgTable("run_logs", {
 export const presentations = pgTable("presentations", {
   id: serial("id").primaryKey(),
   projectId: integer("project_id").references(() => projects.id, { onDelete: "set null" }),
+  lastEditedByUserId: integer("last_edited_by_user_id").references(() => users.id, { onDelete: "set null" }),
   title: text("title").notNull().default("Untitled Presentation"),
   theme: jsonb("theme").default(sql`'{"bgColor":"#ffffff","textColor":"#1a1a2e","accentColor":"#3b82f6","fontFamily":"Inter"}'::jsonb`),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
@@ -228,6 +292,7 @@ export const slides = pgTable("slides", {
   projectId: integer("project_id")
     .references(() => projects.id, { onDelete: "cascade" }),
   presentationId: integer("presentation_id").references(() => presentations.id, { onDelete: "cascade" }),
+  lastEditedByUserId: integer("last_edited_by_user_id").references(() => users.id, { onDelete: "set null" }),
   slideIndex: integer("slide_index").notNull(),
   layout: text("layout").notNull().default("title_body"),
   title: text("title").notNull(),
@@ -288,6 +353,7 @@ export const pipelineConfigs = pgTable("pipeline_configs", {
 export const documents = pgTable("documents", {
   id: serial("id").primaryKey(),
   projectId: integer("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  lastEditedByUserId: integer("last_edited_by_user_id").references(() => users.id, { onDelete: "set null" }),
   title: text("title").notNull().default("Untitled Document"),
   content: text("content").notNull().default(""),
   contentJson: jsonb("content_json"),
@@ -347,12 +413,46 @@ export const charts = pgTable("charts", {
   id: serial("id").primaryKey(),
   projectId: integer("project_id").references(() => projects.id, { onDelete: "set null" }),
   datasetId: integer("dataset_id").references(() => datasets.id, { onDelete: "set null" }),
+  lastEditedByUserId: integer("last_edited_by_user_id").references(() => users.id, { onDelete: "set null" }),
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   chartType: text("chart_type").notNull().default("bar"),
   chartConfig: jsonb("chart_config").notNull().default(sql`'{}'::jsonb`),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const projectCharts = pgTable("project_charts", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  chartId: integer("chart_id")
+    .notNull()
+    .references(() => charts.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const projectDatasets = pgTable("project_datasets", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  datasetId: integer("dataset_id")
+    .notNull()
+    .references(() => datasets.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const projectModels = pgTable("project_models", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  modelId: integer("model_id")
+    .notNull()
+    .references(() => models.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
 export const insertProjectSchema = createInsertSchema(projects).omit({
@@ -378,10 +478,14 @@ export type PipelineConfig = typeof pipelineConfigs.$inferSelect;
 export type WorkflowTemplate = typeof workflowTemplates.$inferSelect;
 export type WorkflowTemplateStep = typeof workflowTemplateSteps.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
+export type User = typeof users.$inferSelect;
 export type Dataset = typeof datasets.$inferSelect;
 export type Model = typeof models.$inferSelect;
 export type WorkflowInstance = typeof workflowInstances.$inferSelect;
 export type WorkflowInstanceStep = typeof workflowInstanceSteps.$inferSelect;
+export type ProjectPhase = typeof projectPhases.$inferSelect;
+export type ProjectTask = typeof projectTasks.$inferSelect;
+export type ProjectCheckpoint = typeof projectCheckpoints.$inferSelect;
 export type Deliverable = typeof deliverables.$inferSelect;
 export type StepChatMessage = typeof stepChatMessages.$inferSelect;
 export type Conversation = typeof conversations.$inferSelect;
@@ -391,3 +495,6 @@ export type DocumentComment = typeof documentComments.$inferSelect;
 export type VaultFile = typeof vaultFiles.$inferSelect;
 export type VaultChunk = typeof vaultChunks.$inferSelect;
 export type Chart = typeof charts.$inferSelect;
+export type ProjectChart = typeof projectCharts.$inferSelect;
+export type ProjectDataset = typeof projectDatasets.$inferSelect;
+export type ProjectModel = typeof projectModels.$inferSelect;

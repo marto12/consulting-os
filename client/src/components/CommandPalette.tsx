@@ -7,6 +7,7 @@ import {
   GitBranch,
   Bot,
   Database,
+  Box,
   Settings,
   MessageSquare,
   FileText,
@@ -61,9 +62,10 @@ export default function CommandPalette() {
   const commands: CommandItem[] = [
     { id: "nav-projects", label: "All Projects", category: "Navigation", icon: <Briefcase size={16} />, action: () => navigate("/projects") },
     { id: "nav-chat", label: "Chat", category: "Navigation", icon: <MessageSquare size={16} />, action: () => navigate("/chat") },
-    { id: "nav-workflows", label: "Workflow Templates", category: "Navigation", icon: <GitBranch size={16} />, action: () => navigate("/workflows") },
-    { id: "nav-agents", label: "Agents", category: "Navigation", icon: <Bot size={16} />, action: () => navigate("/agents") },
-    { id: "nav-data", label: "Data & Models", category: "Navigation", icon: <Database size={16} />, action: () => navigate("/data") },
+    { id: "nav-workflows", label: "Workflow Templates", category: "Navigation", icon: <GitBranch size={16} />, action: () => navigate("/global/workflows") },
+    { id: "nav-agents", label: "Agents", category: "Navigation", icon: <Bot size={16} />, action: () => navigate("/global/agents") },
+    { id: "nav-datasets", label: "Datasets", category: "Navigation", icon: <Database size={16} />, action: () => navigate("/datasets") },
+    { id: "nav-models", label: "Models", category: "Navigation", icon: <Box size={16} />, action: () => navigate("/models") },
     { id: "nav-settings", label: "Settings", category: "Navigation", icon: <Settings size={16} />, action: () => navigate("/settings") },
     ...projects.map((p: any) => ({
       id: `project-${p.id}`,
@@ -79,7 +81,7 @@ export default function CommandPalette() {
       description: a.role,
       category: "Agents",
       icon: <Bot size={16} style={{ color: a.roleColor }} />,
-      action: () => navigate(`/agent/${a.key}`),
+      action: () => navigate(`/global/agent/${a.key}`),
     })),
   ];
 

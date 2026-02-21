@@ -8,6 +8,7 @@ import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
+import { Skeleton } from "../components/ui/skeleton";
 import { cn } from "../lib/utils";
 
 const PIPELINE_STEPS = [
@@ -150,8 +151,38 @@ export default function Settings() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[300px]" data-testid="settings-loading">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <div className="space-y-6" data-testid="settings-loading">
+        <Skeleton className="h-4 w-56" />
+        <Card className="mb-6">
+          <CardHeader>
+            <Skeleton className="h-5 w-40 mb-2" />
+            <Skeleton className="h-3 w-full" />
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {Array.from({ length: 4 }).map((_, idx) => (
+                <div key={`pipeline-skeleton-${idx}`} className="flex items-start gap-4">
+                  <Skeleton className="h-9 w-9 rounded-full" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-4 w-32" />
+                    <Skeleton className="h-3 w-5/6" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-5 w-36" />
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }

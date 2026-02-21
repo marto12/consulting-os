@@ -11,7 +11,9 @@ import {
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ScrollArea } from "../components/ui/scroll-area";
+import { Skeleton } from "../components/ui/skeleton";
 import { cn } from "../lib/utils";
+import { useUserContext } from "../lib/user-context";
 
 interface SlideComment {
   id: string;
@@ -53,6 +55,7 @@ interface Slide {
 
 interface Presentation {
   id: number;
+  projectId?: number | null;
   title: string;
   theme: {
     bgColor: string;
@@ -105,6 +108,7 @@ function defaultElementsForLayout(layout: string, theme: Presentation["theme"]):
 export default function SlideEditor() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { activeUser } = useUserContext();
   const [pres, setPres] = useState<Presentation | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
@@ -161,20 +165,21 @@ export default function SlideEditor() {
           bodyJson: slide.bodyJson,
           elements: slide.elements,
           notesText: slide.notesText,
+          lastEditedByUserId: activeUser?.id || null,
         }),
       });
     } catch {}
     setSaving(false);
-  }, []);
+  }, [activeUser]);
 
   const saveTitle = useCallback(async (title: string) => {
     if (!pres) return;
     await fetch(`/api/presentations/${pres.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title, lastEditedByUserId: activeUser?.id || null }),
     });
-  }, [pres]);
+  }, [pres, activeUser]);
 
   const updateSlideLocal = useCallback((slideIndex: number, updates: Partial<Slide>) => {
     setPres(prev => {
@@ -210,13 +215,14 @@ export default function SlideEditor() {
         title: layout === "title_only" ? "Title Slide" : "New Slide",
         bodyJson: {},
         elements,
+        lastEditedByUserId: activeUser?.id || null,
       }),
     });
     const newSlide = await res.json();
     newSlide.elements = newSlide.elements || elements;
     setPres(prev => prev ? { ...prev, slides: [...prev.slides, newSlide] } : prev);
     setActiveSlideIndex(pres.slides.length);
-  }, [pres]);
+  }, [pres, activeUser]);
 
   const deleteSlide = useCallback(async (slideId: number, idx: number) => {
     if (!pres || pres.slides.length <= 1) return;
@@ -353,11 +359,12 @@ export default function SlideEditor() {
   }, [activeSlide?.elements, activeSlide?.title, activeSlide?.subtitle]);
 
   const loadDocs = useCallback(async () => {
-    const res = await fetch("/api/documents");
+    const query = pres?.projectId ? `?projectId=${pres.projectId}` : "";
+    const res = await fetch(`/api/documents${query}`);
     const docs = await res.json();
     setDocuments(docs);
     setShowDocPicker(true);
-  }, []);
+  }, [pres, activeUser]);
 
   const generateFromDocument = useCallback(async (docId: number) => {
     if (!pres) return;
@@ -369,7 +376,7 @@ export default function SlideEditor() {
       const response = await fetch(`/api/presentations/${pres.id}/generate-from-document`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ documentId: docId }),
+        body: JSON.stringify({ documentId: docId, lastEditedByUserId: activeUser?.id || null }),
       });
 
       const reader = response.body?.getReader();
@@ -587,8 +594,33 @@ export default function SlideEditor() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <Loader2 className="animate-spin" size={32} />
+      <div className="flex flex-col h-screen p-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-8 w-24" />
+            <Skeleton className="h-6 w-48" />
+          </div>
+          <Skeleton className="h-8 w-24" />
+        </div>
+        <div className="flex flex-1 gap-6">
+          <div className="w-64 space-y-3">
+            <Skeleton className="h-4 w-28" />
+            <div className="space-y-2">
+              {Array.from({ length: 5 }).map((_, idx) => (
+                <Skeleton key={`slide-skeleton-${idx}`} className="h-16 w-full" />
+              ))}
+            </div>
+          </div>
+          <div className="flex-1 space-y-3">
+            <Skeleton className="h-6 w-40" />
+            <Skeleton className="h-[420px] w-full" />
+          </div>
+          <div className="w-80 space-y-3">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-32 w-full" />
+            <Skeleton className="h-32 w-full" />
+          </div>
+        </div>
       </div>
     );
   }

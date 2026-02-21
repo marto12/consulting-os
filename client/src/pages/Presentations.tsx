@@ -1,11 +1,15 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { Plus, Presentation as PresentationIcon, Trash2, Clock, Layers } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { Plus, Trash2, Clock, Layers } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
+import { Skeleton } from "../components/ui/skeleton";
+import { useProjectContext } from "../lib/project-context";
+import { useUserContext } from "../lib/user-context";
 
 interface Presentation {
   id: number;
+  lastEditedByUserId?: number | null;
   title: string;
   projectId: number | null;
   theme: any;
@@ -15,22 +19,33 @@ interface Presentation {
 
 export default function Presentations() {
   const navigate = useNavigate();
+  const { id } = useParams<{ id: string }>();
+  const { activeProject } = useProjectContext();
+  const { activeUser, users } = useUserContext();
+  const projectId = id ? Number(id) : activeProject?.id;
   const [presentations, setPresentations] = useState<Presentation[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/presentations")
+    if (!projectId) {
+      setPresentations([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    fetch(`/api/presentations?projectId=${projectId}`)
       .then(r => r.json())
       .then(setPresentations)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [projectId]);
 
   async function createNew() {
+    if (!projectId) return;
     const res = await fetch("/api/presentations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: "Untitled Presentation" }),
+      body: JSON.stringify({ title: "Untitled Presentation", projectId, lastEditedByUserId: activeUser?.id || null }),
     });
     const pres = await res.json();
     navigate(`/slides/${pres.id}`);
@@ -50,10 +65,28 @@ export default function Presentations() {
     return `${Math.floor(seconds / 86400)}d ago`;
   }
 
+  const userLookup = useMemo(() => {
+    const map = new Map<number, string>();
+    users.forEach((u) => map.set(u.id, u.name));
+    return map;
+  }, [users]);
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, idx) => (
+          <Card key={`presentation-skeleton-${idx}`} className="p-4">
+            <div className="flex items-start justify-between mb-3">
+              <div className="flex items-center gap-2 flex-1">
+                <Skeleton className="h-7 w-10 rounded" />
+                <Skeleton className="h-4 w-32" />
+              </div>
+              <Skeleton className="h-4 w-4" />
+            </div>
+            <Skeleton className="h-3 w-5/6" />
+            <Skeleton className="h-3 w-2/3 mt-2" />
+          </Card>
+        ))}
       </div>
     );
   }
@@ -110,6 +143,9 @@ export default function Presentations() {
                 <CardDescription className="flex items-center gap-1 text-xs">
                   <Clock size={11} />
                   {timeAgo(pres.updatedAt)}
+                  {pres.lastEditedByUserId && userLookup.get(pres.lastEditedByUserId) && (
+                    <span className="ml-2">• {userLookup.get(pres.lastEditedByUserId)}</span>
+                  )}
                 </CardDescription>
               </CardHeader>
             </Card>

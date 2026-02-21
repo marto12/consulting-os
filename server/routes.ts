@@ -212,10 +212,207 @@ async function ensureDefaults() {
       agentsJson: { template: DEFAULT_EXEC_SUMMARY_TEMPLATE },
     });
   }
+
+  await storage.ensureDefaultUsers();
+}
+
+const MANAGEMENT_PHASE_BLUEPRINT = [
+  {
+    key: "discovery",
+    title: "Discovery & Alignment",
+    description: "Kickoff, scope alignment, and success metrics.",
+  },
+  {
+    key: "structuring",
+    title: "Problem Structuring",
+    description: "Issues tree, framing, and early hypotheses.",
+  },
+  {
+    key: "hypotheses",
+    title: "Hypotheses & Analysis Plan",
+    description: "Refine hypotheses and confirm analysis plan.",
+  },
+  {
+    key: "execution",
+    title: "Execution & Modeling",
+    description: "Run analyses, scenarios, and modeling work.",
+  },
+  {
+    key: "synthesis",
+    title: "Synthesis & Narrative",
+    description: "Translate insights into a clear story.",
+  },
+  {
+    key: "delivery",
+    title: "Client Review & Delivery",
+    description: "Review, finalize, and present outcomes.",
+  },
+];
+
+const MANAGEMENT_TASK_BLUEPRINT = [
+  {
+    phaseKey: "discovery",
+    title: "Kickoff and stakeholder map",
+    description: "Align on decision owners and project context.",
+  },
+  {
+    phaseKey: "discovery",
+    title: "Confirm scope, constraints, and success metrics",
+    description: "Document constraints and measurable outcomes.",
+  },
+  {
+    phaseKey: "structuring",
+    title: "Review and refine issues tree",
+    description: "Ensure MECE coverage and priority focus.",
+  },
+  {
+    phaseKey: "structuring",
+    title: "Align on key uncertainties",
+    description: "Lock the questions that guide analysis.",
+  },
+  {
+    phaseKey: "hypotheses",
+    title: "Prioritize hypotheses for testing",
+    description: "Select the highest-impact hypotheses.",
+  },
+  {
+    phaseKey: "hypotheses",
+    title: "Confirm data sources and owners",
+    description: "Identify data availability and approvals.",
+  },
+  {
+    phaseKey: "execution",
+    title: "Review analysis outputs for accuracy",
+    description: "QA outputs before synthesis.",
+  },
+  {
+    phaseKey: "execution",
+    title: "Resolve data gaps or assumptions",
+    description: "Escalate and close missing inputs.",
+  },
+  {
+    phaseKey: "synthesis",
+    title: "Draft executive narrative",
+    description: "Summarize core insights and implications.",
+  },
+  {
+    phaseKey: "synthesis",
+    title: "Validate insights with stakeholders",
+    description: "Sanity check with internal sponsors.",
+  },
+  {
+    phaseKey: "delivery",
+    title: "Internal review of deck",
+    description: "Finalize slides and talking points.",
+  },
+  {
+    phaseKey: "delivery",
+    title: "Capture client feedback and revisions",
+    description: "Incorporate final edits from review.",
+  },
+];
+
+const MANAGEMENT_CHECKPOINT_BLUEPRINT = [
+  { phaseKey: "discovery", title: "Client kickoff alignment", description: "Confirm goals and success metrics." },
+  { phaseKey: "structuring", title: "Issues tree review", description: "Client confirms problem structure." },
+  { phaseKey: "hypotheses", title: "Hypotheses review", description: "Align on testable hypotheses." },
+  { phaseKey: "execution", title: "Analysis readout", description: "Review findings and sensitivities." },
+  { phaseKey: "synthesis", title: "Executive summary review", description: "Validate narrative and insights." },
+  { phaseKey: "delivery", title: "Final presentation sign-off", description: "Client approves final deck." },
+];
+
+function resolvePhaseKeyForAgent(agentKey: string): string {
+  if (agentKey === "project_definition") return "discovery";
+  if (agentKey === "issues_tree" || agentKey === "mece_critic") return "structuring";
+  if (agentKey === "hypothesis") return "hypotheses";
+  if (agentKey === "execution") return "execution";
+  if (agentKey === "summary") return "synthesis";
+  if (agentKey === "presentation") return "delivery";
+  return "discovery";
+}
+
+async function seedProjectManagement(projectId: number, workflowSteps: Array<{ id: number; name: string; agentKey: string; stepOrder: number }>) {
+  const existingPhases = await storage.listProjectPhases(projectId);
+  if (existingPhases.length > 0) return;
+
+  const phaseIdMap = new Map<string, number>();
+  let phaseOrder = 0;
+  for (const phase of MANAGEMENT_PHASE_BLUEPRINT) {
+    const created = await storage.createProjectPhase({
+      projectId,
+      title: phase.title,
+      description: phase.description,
+      status: phaseOrder === 0 ? "in_progress" : "not_started",
+      sortOrder: phaseOrder,
+    });
+    phaseIdMap.set(phase.key, created.id);
+    phaseOrder += 1;
+  }
+
+  let taskOrder = 0;
+  for (const step of workflowSteps) {
+    const phaseKey = resolvePhaseKeyForAgent(step.agentKey);
+    await storage.createProjectTask({
+      projectId,
+      phaseId: phaseIdMap.get(phaseKey) || null,
+      title: step.name,
+      description: `Agent workflow step: ${step.agentKey}`,
+      ownerType: "agent",
+      workflowStepId: step.id,
+      status: "not_started",
+      sortOrder: taskOrder,
+    });
+    taskOrder += 1;
+  }
+
+  for (const task of MANAGEMENT_TASK_BLUEPRINT) {
+    await storage.createProjectTask({
+      projectId,
+      phaseId: phaseIdMap.get(task.phaseKey) || null,
+      title: task.title,
+      description: task.description,
+      ownerType: "human",
+      status: "not_started",
+      sortOrder: taskOrder,
+    });
+    taskOrder += 1;
+  }
+
+  let checkpointOrder = 0;
+  for (const checkpoint of MANAGEMENT_CHECKPOINT_BLUEPRINT) {
+    await storage.createProjectCheckpoint({
+      projectId,
+      phaseId: phaseIdMap.get(checkpoint.phaseKey) || null,
+      title: checkpoint.title,
+      description: checkpoint.description,
+      status: "pending",
+      sortOrder: checkpointOrder,
+    });
+    checkpointOrder += 1;
+  }
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
   await ensureDefaults();
+
+  app.get("/api/users", async (_req: Request, res: Response) => {
+    try {
+      res.json(await storage.listUsers());
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/users", async (req: Request, res: Response) => {
+    try {
+      const { name, email, role } = req.body;
+      if (!name || !email) return res.status(400).json({ error: "name and email are required" });
+      const user = await storage.createUser({ name, email, role });
+      res.status(201).json(user);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   app.post("/api/projects", async (req: Request, res: Response) => {
     try {
@@ -246,6 +443,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             configJson: s.configJson,
           })),
         });
+
+        const instance = await storage.getWorkflowInstance(project.id);
+        if (instance) {
+          const steps = await storage.getWorkflowInstanceSteps(instance.id);
+          await seedProjectManagement(project.id, steps.map((s) => ({
+            id: s.id,
+            name: s.name,
+            agentKey: s.agentKey,
+            stepOrder: s.stepOrder,
+          })));
+        }
       }
 
       res.status(201).json(project);
@@ -280,6 +488,154 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!instance) return res.json({ instance: null, steps: [] });
       const steps = await storage.getWorkflowInstanceSteps(instance.id);
       res.json({ instance, steps });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/projects/:id/management", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const phases = await storage.listProjectPhases(projectId);
+      const tasks = await storage.listProjectTasks(projectId);
+      const checkpoints = await storage.listProjectCheckpoints(projectId);
+      const instance = await storage.getWorkflowInstance(projectId);
+      const steps = instance ? await storage.getWorkflowInstanceSteps(instance.id) : [];
+      res.json({ phases, tasks, checkpoints, workflowSteps: steps });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/projects/:id/phases", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const { title, description, status, sortOrder } = req.body;
+      if (!title) return res.status(400).json({ error: "title is required" });
+      const created = await storage.createProjectPhase({
+        projectId,
+        title,
+        description,
+        status,
+        sortOrder,
+      });
+      res.status(201).json(created);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/projects/:id/phases/:phaseId", async (req: Request, res: Response) => {
+    try {
+      const phaseId = Number(req.params.phaseId);
+      const updated = await storage.updateProjectPhase(phaseId, req.body || {});
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/projects/:id/phases/:phaseId", async (req: Request, res: Response) => {
+    try {
+      const phaseId = Number(req.params.phaseId);
+      await storage.deleteProjectPhase(phaseId);
+      res.status(204).end();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/projects/:id/tasks", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const { title, description, phaseId, ownerType, assigneeUserId, workflowStepId, status, dueDate, sortOrder } = req.body;
+      if (!title) return res.status(400).json({ error: "title is required" });
+      const created = await storage.createProjectTask({
+        projectId,
+        title,
+        description,
+        phaseId,
+        ownerType,
+        assigneeUserId,
+        workflowStepId,
+        status,
+        dueDate: dueDate ? new Date(dueDate) : null,
+        sortOrder,
+      });
+      res.status(201).json(created);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/projects/:id/tasks/:taskId", async (req: Request, res: Response) => {
+    try {
+      const taskId = Number(req.params.taskId);
+      const currentTasks = await storage.listProjectTasks(Number(req.params.id));
+      const current = currentTasks.find((t) => t.id === taskId);
+      if (!current) return res.status(404).json({ error: "Task not found" });
+
+      const payload = { ...req.body };
+      if (current.ownerType === "agent") {
+        delete payload.status;
+      }
+      if (payload.dueDate) payload.dueDate = new Date(payload.dueDate);
+
+      const updated = await storage.updateProjectTask(taskId, payload);
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/projects/:id/tasks/:taskId", async (req: Request, res: Response) => {
+    try {
+      const taskId = Number(req.params.taskId);
+      await storage.deleteProjectTask(taskId);
+      res.status(204).end();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/projects/:id/checkpoints", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const { title, description, phaseId, status, linkedDeliverableId, dueDate, sortOrder } = req.body;
+      if (!title) return res.status(400).json({ error: "title is required" });
+      const created = await storage.createProjectCheckpoint({
+        projectId,
+        title,
+        description,
+        phaseId,
+        status,
+        linkedDeliverableId,
+        dueDate: dueDate ? new Date(dueDate) : null,
+        sortOrder,
+      });
+      res.status(201).json(created);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/projects/:id/checkpoints/:checkpointId", async (req: Request, res: Response) => {
+    try {
+      const checkpointId = Number(req.params.checkpointId);
+      const payload = { ...req.body };
+      if (payload.dueDate) payload.dueDate = new Date(payload.dueDate);
+      const updated = await storage.updateProjectCheckpoint(checkpointId, payload);
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/projects/:id/checkpoints/:checkpointId", async (req: Request, res: Response) => {
+    try {
+      const checkpointId = Number(req.params.checkpointId);
+      await storage.deleteProjectCheckpoint(checkpointId);
+      res.status(204).end();
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -980,9 +1336,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/data/datasets", async (req: Request, res: Response) => {
     try {
-      const { name, description, owner, accessLevel, sourceType, sourceUrl, schemaJson, metadata } = req.body;
+      const { projectId, lastEditedByUserId, name, description, owner, accessLevel, sourceType, sourceUrl, schemaJson, metadata } = req.body;
       if (!name) return res.status(400).json({ error: "name is required" });
-      const ds = await storage.createDataset({ name, description, owner, accessLevel, sourceType, sourceUrl, schemaJson, metadata });
+      const ds = await storage.createDataset({ projectId, lastEditedByUserId, name, description, owner, accessLevel, sourceType, sourceUrl, schemaJson, metadata });
       res.status(201).json(ds);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1004,8 +1360,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = Number(req.params.id);
       const existing = await storage.getDataset(id);
       if (!existing) return res.status(404).json({ error: "Not found" });
-      const { name, description, sourceType, sourceUrl, schemaJson, metadata, rowCount } = req.body;
-      const ds = await storage.updateDataset(id, { name, description, sourceType, sourceUrl, schemaJson, metadata, rowCount });
+      const { name, description, sourceType, sourceUrl, schemaJson, metadata, rowCount, lastEditedByUserId } = req.body;
+      const ds = await storage.updateDataset(id, { name, description, sourceType, sourceUrl, schemaJson, metadata, rowCount, lastEditedByUserId });
       res.json(ds);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1048,10 +1404,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await storage.insertDatasetRows(id, rows);
       const schemaJson = headers.map((h) => ({ name: h, type: "string" }));
+      const lastEditedByUserId = req.body?.lastEditedByUserId ? Number(req.body.lastEditedByUserId) : undefined;
       const ds = await storage.updateDataset(id, {
         sourceType: "csv",
         schemaJson,
         rowCount: rows.length,
+        lastEditedByUserId,
       });
       res.json({ dataset: ds, rowCount: rows.length, columns: headers });
     } catch (err: any) {
@@ -1084,9 +1442,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/data/models", async (req: Request, res: Response) => {
     try {
-      const { name, description, inputSchema, outputSchema, apiConfig } = req.body;
+      const { projectId, lastEditedByUserId, name, description, inputSchema, outputSchema, apiConfig } = req.body;
       if (!name) return res.status(400).json({ error: "name is required" });
-      const m = await storage.createModel({ name, description, inputSchema, outputSchema, apiConfig });
+      const m = await storage.createModel({ projectId, lastEditedByUserId, name, description, inputSchema, outputSchema, apiConfig });
       res.status(201).json(m);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1098,6 +1456,98 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const m = await storage.getModel(Number(req.params.id));
       if (!m) return res.status(404).json({ error: "Not found" });
       res.json(m);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/projects/:id/datasets", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const items = await storage.listProjectDatasets(projectId);
+      res.json(items);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/projects/:id/datasets/shared", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const items = await storage.listSharedDatasetsForProject(projectId);
+      res.json(items);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/projects/:id/datasets/link", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const { datasetId } = req.body;
+      if (!datasetId) return res.status(400).json({ error: "datasetId is required" });
+      const ds = await storage.getDataset(Number(datasetId));
+      if (!ds) return res.status(404).json({ error: "Dataset not found" });
+      if (ds.projectId) return res.status(400).json({ error: "Dataset is project-owned" });
+      const link = await storage.linkProjectDataset(projectId, Number(datasetId));
+      res.json(link);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/projects/:id/datasets/link/:datasetId", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const datasetId = Number(req.params.datasetId);
+      await storage.unlinkProjectDataset(projectId, datasetId);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/projects/:id/models", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const items = await storage.listProjectModels(projectId);
+      res.json(items);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/projects/:id/models/shared", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const items = await storage.listSharedModelsForProject(projectId);
+      res.json(items);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/projects/:id/models/link", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const { modelId } = req.body;
+      if (!modelId) return res.status(400).json({ error: "modelId is required" });
+      const m = await storage.getModel(Number(modelId));
+      if (!m) return res.status(404).json({ error: "Model not found" });
+      if (m.projectId) return res.status(400).json({ error: "Model is project-owned" });
+      const link = await storage.linkProjectModel(projectId, Number(modelId));
+      res.json(link);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/projects/:id/models/link/:modelId", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const modelId = Number(req.params.modelId);
+      await storage.unlinkProjectModel(projectId, modelId);
+      res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1209,8 +1659,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/documents", async (req: Request, res: Response) => {
     try {
-      const { projectId, title, content, contentJson } = req.body;
-      res.status(201).json(await storage.createDocument({ projectId, title, content, contentJson }));
+      const { projectId, lastEditedByUserId, title, content, contentJson } = req.body;
+      res.status(201).json(await storage.createDocument({ projectId, lastEditedByUserId, title, content, contentJson }));
     } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
@@ -1519,11 +1969,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/charts", async (req: Request, res: Response) => {
     try {
-      const { projectId, datasetId, name, description, chartType, chartConfig } = req.body;
+      const { projectId, datasetId, lastEditedByUserId, name, description, chartType, chartConfig } = req.body;
       if (!name || !chartType) return res.status(400).json({ error: "name and chartType are required" });
       const chart = await storage.createChart({
         projectId: projectId || undefined,
         datasetId: datasetId || undefined,
+        lastEditedByUserId: lastEditedByUserId || undefined,
         name,
         description,
         chartType,
@@ -1576,7 +2027,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/charts/generate", async (req: Request, res: Response) => {
     try {
-      const { datasetId, prompt, projectId } = req.body;
+      const { datasetId, prompt, projectId, lastEditedByUserId } = req.body;
       if (!datasetId || !prompt) return res.status(400).json({ error: "datasetId and prompt are required" });
 
       const dataset = await storage.getDataset(Number(datasetId));
@@ -1597,6 +2048,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const chart = await storage.createChart({
         projectId: projectId || undefined,
         datasetId: dataset.id,
+        lastEditedByUserId: lastEditedByUserId || undefined,
         name: spec.title || "Untitled Chart",
         description: spec.description || "",
         chartType: spec.chartType,
@@ -1611,17 +2063,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/projects/:id/charts", async (req: Request, res: Response) => {
     try {
-      const projectCharts = await storage.getChartsByProject(Number(req.params.id));
+      const projectId = Number(req.params.id);
+      const projectCharts = await storage.listProjectCharts(projectId);
       res.json(projectCharts);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // ── Presentations ──
-  app.get("/api/presentations", async (_req: Request, res: Response) => {
+  app.get("/api/projects/:id/charts/shared", async (req: Request, res: Response) => {
     try {
-      res.json(await storage.listPresentations());
+      const projectId = Number(req.params.id);
+      const sharedCharts = await storage.listSharedChartsForProject(projectId);
+      res.json(sharedCharts);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/projects/:id/charts/link", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const { chartId } = req.body;
+      if (!chartId) return res.status(400).json({ error: "chartId is required" });
+      const chart = await storage.getChart(Number(chartId));
+      if (!chart) return res.status(404).json({ error: "Chart not found" });
+      if (chart.projectId) return res.status(400).json({ error: "Chart is project-owned" });
+      const link = await storage.linkProjectChart(projectId, Number(chartId));
+      res.json(link);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/projects/:id/charts/link/:chartId", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const chartId = Number(req.params.chartId);
+      await storage.unlinkProjectChart(projectId, chartId);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Presentations ──
+  app.get("/api/presentations", async (req: Request, res: Response) => {
+    try {
+      const projectId = req.query.projectId ? Number(req.query.projectId) : undefined;
+      res.json(await storage.listPresentations(projectId));
     } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
@@ -1665,6 +2155,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const slide = await storage.createSlide({
         presentationId: presId,
         projectId: pres.projectId || null,
+        lastEditedByUserId: req.body.lastEditedByUserId || null,
         slideIndex: req.body.slideIndex ?? existing.length,
         layout: req.body.layout || "title_body",
         title: req.body.title || "New Slide",
@@ -1807,7 +2298,7 @@ Return ONLY valid JSON array.`,
       const pres = await storage.getPresentation(presId);
       if (!pres) return res.status(404).json({ error: "Presentation not found" });
 
-      const { documentId, documentContent } = req.body;
+      const { documentId, documentContent, lastEditedByUserId } = req.body;
       let content = documentContent;
 
       if (documentId && !content) {
@@ -1932,6 +2423,7 @@ Return ONLY the JSON array, no other text.`
         const slide = await storage.createSlide({
           presentationId: presId,
           projectId: pres.projectId || null,
+          lastEditedByUserId: lastEditedByUserId || null,
           slideIndex: i,
           layout: s.layout || "title_body",
           title: s.title || `Slide ${i + 1}`,
@@ -1941,6 +2433,10 @@ Return ONLY the JSON array, no other text.`
           notesText: s.notesText,
         });
         created.push(slide);
+      }
+
+      if (lastEditedByUserId) {
+        await storage.updatePresentation(presId, { lastEditedByUserId });
       }
 
       sendEvent({ done: true, slides: created });

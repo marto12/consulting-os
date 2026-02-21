@@ -9,6 +9,7 @@ import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { Label } from "../components/ui/label";
+import { Skeleton } from "../components/ui/skeleton";
 
 interface AgentDetailData {
   id: number;
@@ -64,8 +65,36 @@ export default function AgentDetail() {
 
   if (isLoading || !agent) {
     return (
-      <div className="flex items-center justify-center min-h-[300px]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="space-y-6">
+        <Skeleton className="h-6 w-28" />
+        <div className="flex items-center gap-3 sm:gap-4">
+          <Skeleton className="h-12 w-12 sm:h-14 sm:w-14 rounded-xl" />
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-3 w-28" />
+          </div>
+        </div>
+        <Card className="mb-6">
+          <CardHeader>
+            <Skeleton className="h-4 w-28" />
+          </CardHeader>
+          <CardContent>
+            <Skeleton className="h-3 w-full mb-2" />
+            <Skeleton className="h-3 w-5/6" />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-4 w-32" />
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-24 w-full sm:col-span-2" />
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -73,7 +102,7 @@ export default function AgentDetail() {
   return (
     <div>
       <div className="flex items-center gap-2 mb-6">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/agents")}>
+        <Button variant="ghost" size="sm" onClick={() => navigate("/global/agents")}>
           <ChevronLeft size={16} />
           Agents
         </Button>

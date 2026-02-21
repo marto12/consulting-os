@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1771644552613,
+      "tag": "0000_add_project_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1771661918238,
+      "tag": "0001_add_users_editors",
+      "breakpoints": true
+    }
+  ]
+}

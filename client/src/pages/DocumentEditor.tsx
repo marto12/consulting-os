@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import EditorChatPanel from "../components/EditorChatPanel";
-import { useEditor, EditorContent } from "@tiptap/react";
+import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import Underline from "@tiptap/extension-underline";
@@ -45,6 +45,7 @@ import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { Separator } from "../components/ui/separator";
 import { ScrollArea } from "../components/ui/scroll-area";
+import { Skeleton } from "../components/ui/skeleton";
 import {
   Dialog,
   DialogContent,
@@ -60,6 +61,7 @@ import {
   TooltipTrigger,
 } from "../components/ui/tooltip";
 import { cn } from "../lib/utils";
+import { useUserContext } from "../lib/user-context";
 
 interface Document {
   id: number;
@@ -85,11 +87,47 @@ interface DocumentComment {
   createdAt: string;
 }
 
+interface HeadingItem {
+  id: string;
+  level: number;
+  text: string;
+  pos: number;
+}
+
+function getActiveHeadingId(items: HeadingItem[], selectionPos: number): string | null {
+  if (items.length === 0) return null;
+  let active: HeadingItem | null = null;
+  for (const item of items) {
+    if (item.pos <= selectionPos) active = item;
+    if (item.pos > selectionPos) break;
+  }
+  return active?.id || null;
+}
+
+function extractHeadingsFromEditor(currentEditor: Editor | null): HeadingItem[] {
+  if (!currentEditor) return [];
+  const items: HeadingItem[] = [];
+  currentEditor.state.doc.descendants((node, pos) => {
+    if (node.type.name === "heading") {
+      const level = typeof node.attrs.level === "number" ? node.attrs.level : 1;
+      const text = node.textContent.trim();
+      items.push({
+        id: `${pos}-${level}`,
+        level,
+        text: text || "Untitled heading",
+        pos,
+      });
+    }
+  });
+  return items;
+}
+
 type SaveStatus = "saved" | "saving" | "unsaved" | "error";
 
 export default function DocumentEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { activeUser } = useUserContext();
 
   const [doc, setDoc] = useState<Document | null>(null);
   const [comments, setComments] = useState<DocumentComment[]>([]);
@@ -110,6 +148,8 @@ export default function DocumentEditor() {
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
   const [selectedAgent, setSelectedAgent] = useState("spot-claims");
   const [mobileCommentsOpen, setMobileCommentsOpen] = useState(false);
+  const [headings, setHeadings] = useState<HeadingItem[]>([]);
+  const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const docIdRef = useRef<number | null>(id ? Number(id) : null);
@@ -139,6 +179,9 @@ export default function DocumentEditor() {
     },
     onUpdate: ({ editor }) => {
       setSaveStatus("unsaved");
+      const nextHeadings = extractHeadingsFromEditor(editor);
+      setHeadings(nextHeadings);
+      setActiveHeadingId(getActiveHeadingId(nextHeadings, editor.state.selection.from));
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         saveDocument(editor.getHTML(), editor.getJSON());
@@ -155,7 +198,7 @@ export default function DocumentEditor() {
         const res = await fetch(`/api/documents/${currentId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title, content, contentJson }),
+          body: JSON.stringify({ title, content, contentJson, lastEditedByUserId: activeUser?.id || null }),
         });
         if (res.ok) {
           setSaveStatus("saved");
@@ -227,6 +270,26 @@ export default function DocumentEditor() {
       editor.commands.setContent(doc.content || "");
     }
   }, [editor, doc]);
+
+  useEffect(() => {
+    if (editor) {
+      setHeadings(extractHeadingsFromEditor(editor));
+    }
+  }, [editor]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const updateActive = () => {
+      setActiveHeadingId(
+        getActiveHeadingId(headings, editor.state.selection.from)
+      );
+    };
+    updateActive();
+    editor.on("selectionUpdate", updateActive);
+    return () => {
+      editor.off("selectionUpdate", updateActive);
+    };
+  }, [editor, headings]);
 
   const handleTitleBlur = useCallback(async () => {
     setEditingTitle(false);
@@ -530,7 +593,23 @@ export default function DocumentEditor() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <div className="w-full max-w-3xl px-6 space-y-6">
+          <div className="flex items-center justify-between">
+            <Skeleton className="h-6 w-48" />
+            <Skeleton className="h-4 w-24" />
+          </div>
+          <div className="space-y-3">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-11/12" />
+            <Skeleton className="h-4 w-10/12" />
+            <Skeleton className="h-4 w-9/12" />
+          </div>
+          <div className="space-y-3">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-5/6" />
+            <Skeleton className="h-4 w-4/6" />
+          </div>
+        </div>
       </div>
     );
   }
@@ -702,14 +781,24 @@ export default function DocumentEditor() {
             }
           />
           {!isMobile && (
-            <ToolbarButton
-              icon={<Heading3 size={16} />}
-              tooltip="Heading 3"
-              active={editor?.isActive("heading", { level: 3 })}
-              onClick={() =>
-                editor?.chain().focus().toggleHeading({ level: 3 }).run()
-              }
-            />
+            <>
+              <ToolbarButton
+                icon={<Heading3 size={16} />}
+                tooltip="Heading 3"
+                active={editor?.isActive("heading", { level: 3 })}
+                onClick={() =>
+                  editor?.chain().focus().toggleHeading({ level: 3 }).run()
+                }
+              />
+              <ToolbarButton
+                icon={<span className="text-[11px] font-semibold">H4</span>}
+                tooltip="Heading 4"
+                active={editor?.isActive("heading", { level: 4 })}
+                onClick={() =>
+                  editor?.chain().focus().toggleHeading({ level: 4 }).run()
+                }
+              />
+            </>
           )}
 
           <Separator orientation="vertical" className="mx-1 md:mx-1.5 h-5 md:h-6" />
@@ -868,6 +957,45 @@ export default function DocumentEditor() {
           </div>
         ) : (
           <div className="flex flex-1 overflow-hidden">
+            <div className="w-64 border-r flex flex-col bg-background/50">
+              <div className="px-4 py-3 border-b">
+                <h3 className="text-sm font-semibold">Outline</h3>
+              </div>
+              <ScrollArea className="flex-1">
+                <div className="p-3 space-y-1">
+                  {headings.length === 0 ? (
+                    <div className="text-xs text-muted-foreground py-2">
+                      Add headings to build navigation.
+                    </div>
+                  ) : (
+                    headings.map((heading) => (
+                      <button
+                        key={heading.id}
+                        className={cn(
+                          "w-full text-left text-xs rounded-md px-2 py-1 hover:bg-muted transition-colors",
+                          heading.id === activeHeadingId && "bg-muted font-semibold text-foreground",
+                          heading.level === 1 && "font-semibold",
+                          heading.level === 2 && "pl-4",
+                          heading.level >= 3 && "pl-6 text-muted-foreground"
+                        )}
+                        onClick={() => {
+                          editor
+                            ?.chain()
+                            .focus()
+                            .setTextSelection(heading.pos)
+                            .scrollIntoView()
+                            .run();
+                        }}
+                        title={heading.text}
+                      >
+                        {heading.text}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+
             <div className="flex-1 overflow-y-auto">
               <div className="mx-auto max-w-3xl py-8">
                 <EditorStyles />
@@ -1043,6 +1171,13 @@ function EditorStyles() {
         font-weight: 600;
         margin-top: 1em;
         margin-bottom: 0.5em;
+        line-height: 1.4;
+      }
+      .ProseMirror h4 {
+        font-size: 1.1em;
+        font-weight: 600;
+        margin-top: 0.9em;
+        margin-bottom: 0.4em;
         line-height: 1.4;
       }
       .ProseMirror p {

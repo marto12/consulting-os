@@ -1,12 +1,15 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useMemo } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { Plus, FileText, Trash2, Clock } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
+import { useProjectContext } from "../lib/project-context";
+import { useUserContext } from "../lib/user-context";
 
 interface Document {
   id: number;
   projectId: number | null;
+  lastEditedByUserId?: number | null;
   title: string;
   content: string;
   createdAt: string;
@@ -15,22 +18,33 @@ interface Document {
 
 export default function Documents() {
   const navigate = useNavigate();
+  const { id } = useParams<{ id: string }>();
+  const { activeProject } = useProjectContext();
+  const { activeUser, users } = useUserContext();
+  const projectId = id ? Number(id) : activeProject?.id;
   const [docs, setDocs] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/documents")
+    if (!projectId) {
+      setDocs([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    fetch(`/api/documents?projectId=${projectId}`)
       .then(r => r.json())
       .then(setDocs)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [projectId]);
 
   async function createNew() {
+    if (!projectId) return;
     const res = await fetch("/api/documents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: "Untitled Document" }),
+      body: JSON.stringify({ title: "Untitled Document", projectId, lastEditedByUserId: activeUser?.id || null }),
     });
     const doc = await res.json();
     navigate(`/editor/${doc.id}`);
@@ -56,6 +70,12 @@ export default function Documents() {
     if (hrs < 24) return `${hrs}h ago`;
     return `${Math.floor(hrs / 24)}d ago`;
   }
+
+  const userLookup = useMemo(() => {
+    const map = new Map<number, string>();
+    users.forEach((u) => map.set(u.id, u.name));
+    return map;
+  }, [users]);
 
   return (
     <div>
@@ -113,6 +133,9 @@ export default function Documents() {
                 <div className="flex items-center gap-1 text-[10px] text-muted-foreground mt-2">
                   <Clock className="h-3 w-3" />
                   {timeAgo(doc.updatedAt)}
+                  {doc.lastEditedByUserId && userLookup.get(doc.lastEditedByUserId) && (
+                    <span className="ml-2">• {userLookup.get(doc.lastEditedByUserId)}</span>
+                  )}
                 </div>
               </CardHeader>
             </Card>

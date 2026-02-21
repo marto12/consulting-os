@@ -35,6 +35,7 @@ import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
+import { Skeleton } from "../components/ui/skeleton";
 import { cn } from "../lib/utils";
 
 interface WorkflowStep {
@@ -381,15 +382,39 @@ export default function WorkflowEditor() {
       }
       setHasChanges(false);
       if (isNew && data?.id) {
-        navigate(`/workflow/${data.id}`, { replace: true });
+        navigate(`/global/workflow/${data.id}`, { replace: true });
       }
     },
   });
 
   if (workflowLoading && !isNew) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="flex flex-col h-[calc(100vh-2rem)]">
+        <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-card/50">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-8 w-20" />
+            <Skeleton className="h-6 w-40" />
+          </div>
+          <Skeleton className="h-8 w-24" />
+        </div>
+        <div className="flex flex-1 overflow-hidden">
+          <div className="flex-1 p-6">
+            <Skeleton className="h-5 w-32 mb-4" />
+            <div className="space-y-3">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+            </div>
+          </div>
+          <div className="w-80 border-l p-6">
+            <Skeleton className="h-4 w-32 mb-3" />
+            <div className="space-y-2">
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -398,7 +423,7 @@ export default function WorkflowEditor() {
     <div className="flex flex-col h-[calc(100vh-2rem)]">
       <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-card/50">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => navigate("/workflows")}>
+          <Button variant="ghost" size="sm" onClick={() => navigate("/global/workflows")}>
             <ArrowLeft size={16} className="mr-1" />
             Back
           </Button>

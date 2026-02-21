@@ -1,9 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { GitBranch, ChevronRight, Loader2, Bot, Plus, Pencil, Trash2, Copy } from "lucide-react";
+import { GitBranch, ChevronRight, Bot, Plus, Pencil, Trash2, Copy } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import { Skeleton } from "../components/ui/skeleton";
 
 interface WorkflowTemplate {
   id: number;
@@ -56,9 +57,36 @@ export default function Workflows() {
   });
 
   if (isLoading) {
+    const skeletonCards = Array.from({ length: 4 });
     return (
-      <div className="flex items-center justify-center min-h-[300px]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {skeletonCards.map((_, idx) => (
+          <Card key={`workflow-skeleton-${idx}`} className="p-5">
+            <div className="flex items-start justify-between gap-2 mb-4">
+              <div className="flex items-center gap-3 flex-1">
+                <Skeleton className="h-10 w-10 rounded-lg" />
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-16" />
+                </div>
+              </div>
+              <Skeleton className="h-5 w-14" />
+            </div>
+            <Skeleton className="h-3 w-full mb-4" />
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-6 w-6 rounded-full" />
+                <Skeleton className="h-3 w-32" />
+                <Skeleton className="h-3 w-16 ml-auto" />
+              </div>
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-6 w-6 rounded-full" />
+                <Skeleton className="h-3 w-28" />
+                <Skeleton className="h-3 w-16 ml-auto" />
+              </div>
+            </div>
+          </Card>
+        ))}
       </div>
     );
   }
@@ -70,7 +98,7 @@ export default function Workflows() {
           <h1 className="text-2xl font-bold text-foreground">Workflow Templates</h1>
           <p className="text-sm text-muted-foreground mt-1">Reusable agent pipelines for projects</p>
         </div>
-        <Button onClick={() => navigate("/workflow/new")} size="sm">
+        <Button onClick={() => navigate("/global/workflow/new")} size="sm">
           <Plus size={14} className="mr-1" />
           New Workflow
         </Button>
@@ -81,7 +109,7 @@ export default function Workflows() {
           <GitBranch size={48} strokeWidth={1.5} />
           <h3 className="text-lg font-semibold text-foreground">No workflow templates</h3>
           <p>Create your first workflow template</p>
-          <Button onClick={() => navigate("/workflow/new")} size="sm">
+          <Button onClick={() => navigate("/global/workflow/new")} size="sm">
             <Plus size={14} className="mr-1" />
             Create Workflow
           </Button>
@@ -93,7 +121,7 @@ export default function Workflows() {
               <div className="flex items-start justify-between gap-2 mb-4">
                 <div
                   className="flex items-center gap-3 cursor-pointer flex-1"
-                  onClick={() => navigate(`/workflow/${wf.id}`)}
+                  onClick={() => navigate(`/global/workflow/${wf.id}`)}
                 >
                   <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
                     <GitBranch size={20} className="text-primary" />
@@ -126,7 +154,7 @@ export default function Workflows() {
                   variant="outline"
                   size="sm"
                   className="h-7 text-xs"
-                  onClick={() => navigate(`/workflow/${wf.id}`)}
+                  onClick={() => navigate(`/global/workflow/${wf.id}`)}
                 >
                   <Pencil size={12} className="mr-1" />
                   Edit

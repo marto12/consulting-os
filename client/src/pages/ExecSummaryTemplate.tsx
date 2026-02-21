@@ -4,6 +4,7 @@ import { queryClient, apiRequest } from "../lib/query-client";
 import { Save, RotateCcw, Loader2, FileText, Eye, Code } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card, CardHeader, CardContent } from "../components/ui/card";
+import { Skeleton } from "../components/ui/skeleton";
 import { cn } from "../lib/utils";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -69,8 +70,31 @@ export default function ExecSummaryTemplate() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      <div className="p-6 max-w-4xl mx-auto space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-64" />
+            <Skeleton className="h-3 w-full" />
+          </div>
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-8 w-28" />
+            <Skeleton className="h-8 w-20" />
+            <Skeleton className="h-8 w-20" />
+          </div>
+        </div>
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-4 w-40" />
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-11/12" />
+              <Skeleton className="h-4 w-10/12" />
+              <Skeleton className="h-4 w-9/12" />
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }

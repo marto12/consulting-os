@@ -10,6 +10,7 @@ import express from "express";
 // server/routes.ts
 import { createServer } from "node:http";
 import multer from "multer";
+import OpenAI5 from "openai";
 
 // server/db.ts
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -21,7 +22,9 @@ __export(schema_exports, {
   agentConfigs: () => agentConfigs,
   agents: () => agents,
   analysisPlan: () => analysisPlan,
+  charts: () => charts,
   conversations: () => conversations,
+  datasetRows: () => datasetRows,
   datasets: () => datasets,
   deliverables: () => deliverables,
   documentComments: () => documentComments,
@@ -34,6 +37,10 @@ __export(schema_exports, {
   models: () => models,
   narratives: () => narratives,
   pipelineConfigs: () => pipelineConfigs,
+  presentations: () => presentations,
+  projectCharts: () => projectCharts,
+  projectDatasets: () => projectDatasets,
+  projectModels: () => projectModels,
   projects: () => projects,
   runLogs: () => runLogs,
   slides: () => slides,
@@ -95,17 +102,28 @@ var agents = pgTable("agents", {
 });
 var datasets = pgTable("datasets", {
   id: serial("id").primaryKey(),
+  projectId: integer("project_id").references(() => projects.id, { onDelete: "set null" }),
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   owner: text("owner").notNull().default("system"),
   accessLevel: text("access_level").notNull().default("private"),
+  sourceType: text("source_type").notNull().default("manual"),
+  sourceUrl: text("source_url"),
   schemaJson: jsonb("schema_json"),
   metadata: jsonb("metadata"),
+  rowCount: integer("row_count").notNull().default(0),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
+var datasetRows = pgTable("dataset_rows", {
+  id: serial("id").primaryKey(),
+  datasetId: integer("dataset_id").notNull().references(() => datasets.id, { onDelete: "cascade" }),
+  rowIndex: integer("row_index").notNull(),
+  data: jsonb("data").notNull()
+});
 var models = pgTable("models", {
   id: serial("id").primaryKey(),
+  projectId: integer("project_id").references(() => projects.id, { onDelete: "set null" }),
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   inputSchema: jsonb("input_schema"),
@@ -211,15 +229,25 @@ var runLogs = pgTable("run_logs", {
   errorText: text("error_text"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
+var presentations = pgTable("presentations", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").references(() => projects.id, { onDelete: "set null" }),
+  title: text("title").notNull().default("Untitled Presentation"),
+  theme: jsonb("theme").default(sql`'{"bgColor":"#ffffff","textColor":"#1a1a2e","accentColor":"#3b82f6","fontFamily":"Inter"}'::jsonb`),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
 var slides = pgTable("slides", {
   id: serial("id").primaryKey(),
-  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  projectId: integer("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  presentationId: integer("presentation_id").references(() => presentations.id, { onDelete: "cascade" }),
   slideIndex: integer("slide_index").notNull(),
   layout: text("layout").notNull().default("title_body"),
   title: text("title").notNull(),
   subtitle: text("subtitle"),
   bodyJson: jsonb("body_json").notNull(),
   notesText: text("notes_text"),
+  elements: jsonb("elements").default(sql`'[]'::jsonb`),
   version: integer("version").notNull().default(1),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
@@ -306,6 +334,35 @@ var vaultChunks = pgTable("vault_chunks", {
   tokenCount: integer("token_count").notNull().default(0),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
+var charts = pgTable("charts", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").references(() => projects.id, { onDelete: "set null" }),
+  datasetId: integer("dataset_id").references(() => datasets.id, { onDelete: "set null" }),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  chartType: text("chart_type").notNull().default("bar"),
+  chartConfig: jsonb("chart_config").notNull().default(sql`'{}'::jsonb`),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+var projectCharts = pgTable("project_charts", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  chartId: integer("chart_id").notNull().references(() => charts.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+var projectDatasets = pgTable("project_datasets", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  datasetId: integer("dataset_id").notNull().references(() => datasets.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+var projectModels = pgTable("project_models", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  modelId: integer("model_id").notNull().references(() => models.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
 var insertProjectSchema = createInsertSchema(projects).omit({
   id: true,
   stage: true,
@@ -323,7 +380,7 @@ var pool = new pg.Pool({
 var db = drizzle(pool, { schema: schema_exports });
 
 // server/storage.ts
-import { eq, desc, and, asc, ilike } from "drizzle-orm";
+import { eq, desc, and, asc, ilike, sql as sql2 } from "drizzle-orm";
 var storage = {
   async createProject(data) {
     const [project] = await db.insert(projects).values({ ...data, stage: "created" }).returning();
@@ -449,14 +506,69 @@ var storage = {
   },
   async createDataset(data) {
     const [d] = await db.insert(datasets).values({
+      projectId: data.projectId || null,
       name: data.name,
       description: data.description || "",
       owner: data.owner || "system",
       accessLevel: data.accessLevel || "private",
+      sourceType: data.sourceType || "manual",
+      sourceUrl: data.sourceUrl || null,
       schemaJson: data.schemaJson || null,
-      metadata: data.metadata || null
+      metadata: data.metadata || null,
+      rowCount: data.rowCount || 0
     }).returning();
     return d;
+  },
+  async updateDataset(id, data) {
+    const [d] = await db.update(datasets).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(datasets.id, id)).returning();
+    return d;
+  },
+  async deleteDataset(id) {
+    await db.delete(datasetRows).where(eq(datasetRows.datasetId, id));
+    await db.delete(datasets).where(eq(datasets.id, id));
+  },
+  async listProjectDatasets(projectId) {
+    const owned = await db.select().from(datasets).where(eq(datasets.projectId, projectId)).orderBy(desc(datasets.createdAt));
+    const linked = await db.select({ dataset: datasets }).from(projectDatasets).innerJoin(datasets, eq(projectDatasets.datasetId, datasets.id)).where(and(eq(projectDatasets.projectId, projectId), sql2`${datasets.projectId} is null`)).orderBy(desc(datasets.createdAt));
+    const combined = [...owned, ...linked.map((l) => l.dataset)];
+    const seen = /* @__PURE__ */ new Set();
+    return combined.filter((d) => {
+      if (seen.has(d.id)) return false;
+      seen.add(d.id);
+      return true;
+    });
+  },
+  async listSharedDatasetsForProject(projectId) {
+    const shared = await db.select().from(datasets).where(sql2`${datasets.projectId} is null`).orderBy(desc(datasets.createdAt));
+    const linked = await db.select({ datasetId: projectDatasets.datasetId }).from(projectDatasets).where(eq(projectDatasets.projectId, projectId));
+    const linkedIds = new Set(linked.map((l) => l.datasetId));
+    return shared.filter((d) => !linkedIds.has(d.id));
+  },
+  async linkProjectDataset(projectId, datasetId) {
+    const existing = await db.select().from(projectDatasets).where(and(eq(projectDatasets.projectId, projectId), eq(projectDatasets.datasetId, datasetId)));
+    if (existing.length > 0) return existing[0];
+    const [link] = await db.insert(projectDatasets).values({ projectId, datasetId }).returning();
+    return link;
+  },
+  async unlinkProjectDataset(projectId, datasetId) {
+    await db.delete(projectDatasets).where(and(eq(projectDatasets.projectId, projectId), eq(projectDatasets.datasetId, datasetId)));
+  },
+  async insertDatasetRows(datasetId, rows) {
+    await db.delete(datasetRows).where(eq(datasetRows.datasetId, datasetId));
+    if (rows.length > 0) {
+      const batchSize = 500;
+      for (let i = 0; i < rows.length; i += batchSize) {
+        const batch = rows.slice(i, i + batchSize).map((r) => ({
+          datasetId,
+          rowIndex: r.rowIndex,
+          data: r.data
+        }));
+        await db.insert(datasetRows).values(batch);
+      }
+    }
+  },
+  async getDatasetRows(datasetId, limit = 100, offset = 0) {
+    return db.select().from(datasetRows).where(eq(datasetRows.datasetId, datasetId)).orderBy(asc(datasetRows.rowIndex)).limit(limit).offset(offset);
   },
   async listModels() {
     return db.select().from(models).orderBy(desc(models.createdAt));
@@ -467,6 +579,7 @@ var storage = {
   },
   async createModel(data) {
     const [m] = await db.insert(models).values({
+      projectId: data.projectId || null,
       name: data.name,
       description: data.description || "",
       inputSchema: data.inputSchema || null,
@@ -474,6 +587,32 @@ var storage = {
       apiConfig: data.apiConfig || null
     }).returning();
     return m;
+  },
+  async listProjectModels(projectId) {
+    const owned = await db.select().from(models).where(eq(models.projectId, projectId)).orderBy(desc(models.createdAt));
+    const linked = await db.select({ model: models }).from(projectModels).innerJoin(models, eq(projectModels.modelId, models.id)).where(and(eq(projectModels.projectId, projectId), sql2`${models.projectId} is null`)).orderBy(desc(models.createdAt));
+    const combined = [...owned, ...linked.map((l) => l.model)];
+    const seen = /* @__PURE__ */ new Set();
+    return combined.filter((m) => {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
+  },
+  async listSharedModelsForProject(projectId) {
+    const shared = await db.select().from(models).where(sql2`${models.projectId} is null`).orderBy(desc(models.createdAt));
+    const linked = await db.select({ modelId: projectModels.modelId }).from(projectModels).where(eq(projectModels.projectId, projectId));
+    const linkedIds = new Set(linked.map((l) => l.modelId));
+    return shared.filter((m) => !linkedIds.has(m.id));
+  },
+  async linkProjectModel(projectId, modelId) {
+    const existing = await db.select().from(projectModels).where(and(eq(projectModels.projectId, projectId), eq(projectModels.modelId, modelId)));
+    if (existing.length > 0) return existing[0];
+    const [link] = await db.insert(projectModels).values({ projectId, modelId }).returning();
+    return link;
+  },
+  async unlinkProjectModel(projectId, modelId) {
+    await db.delete(projectModels).where(and(eq(projectModels.projectId, projectId), eq(projectModels.modelId, modelId)));
   },
   async createWorkflowInstance(data) {
     const [instance] = await db.insert(workflowInstances).values({
@@ -643,6 +782,60 @@ var storage = {
   async getSlides(projectId) {
     return db.select().from(slides).where(eq(slides.projectId, projectId)).orderBy(desc(slides.version), slides.slideIndex);
   },
+  async listPresentations(projectId) {
+    if (projectId) {
+      return db.select().from(presentations).where(eq(presentations.projectId, projectId)).orderBy(desc(presentations.updatedAt));
+    }
+    return db.select().from(presentations).orderBy(desc(presentations.updatedAt));
+  },
+  async getPresentation(id) {
+    const [p] = await db.select().from(presentations).where(eq(presentations.id, id));
+    return p;
+  },
+  async createPresentation(data) {
+    const [p] = await db.insert(presentations).values({
+      title: data.title || "Untitled Presentation",
+      projectId: data.projectId || null,
+      theme: data.theme || { bgColor: "#ffffff", textColor: "#1a1a2e", accentColor: "#3b82f6", fontFamily: "Inter" }
+    }).returning();
+    return p;
+  },
+  async updatePresentation(id, data) {
+    const [p] = await db.update(presentations).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(presentations.id, id)).returning();
+    return p;
+  },
+  async deletePresentation(id) {
+    await db.delete(presentations).where(eq(presentations.id, id));
+  },
+  async getPresentationSlides(presentationId) {
+    return db.select().from(slides).where(eq(slides.presentationId, presentationId)).orderBy(asc(slides.slideIndex));
+  },
+  async createSlide(data) {
+    const [s] = await db.insert(slides).values({
+      presentationId: data.presentationId,
+      projectId: data.projectId || null,
+      slideIndex: data.slideIndex,
+      layout: data.layout || "title_body",
+      title: data.title,
+      subtitle: data.subtitle || null,
+      bodyJson: data.bodyJson || {},
+      elements: data.elements || [],
+      notesText: data.notesText || null
+    }).returning();
+    return s;
+  },
+  async updateSlide(id, data) {
+    const [s] = await db.update(slides).set(data).where(eq(slides.id, id)).returning();
+    return s;
+  },
+  async deleteSlide(id) {
+    await db.delete(slides).where(eq(slides.id, id));
+  },
+  async reorderSlides(presentationId, slideIds) {
+    for (let i = 0; i < slideIds.length; i++) {
+      await db.update(slides).set({ slideIndex: i }).where(and(eq(slides.id, slideIds[i]), eq(slides.presentationId, presentationId)));
+    }
+  },
   async getAllAgentConfigs() {
     return db.select().from(agentConfigs);
   },
@@ -791,6 +984,60 @@ var storage = {
   },
   async deleteVaultChunksByFile(fileId) {
     await db.delete(vaultChunks).where(eq(vaultChunks.fileId, fileId));
+  },
+  async createChart(data) {
+    const [chart] = await db.insert(charts).values({
+      projectId: data.projectId || null,
+      datasetId: data.datasetId || null,
+      name: data.name,
+      description: data.description || "",
+      chartType: data.chartType,
+      chartConfig: data.chartConfig
+    }).returning();
+    return chart;
+  },
+  async listCharts() {
+    return db.select().from(charts).orderBy(desc(charts.createdAt));
+  },
+  async listProjectCharts(projectId) {
+    const owned = await db.select().from(charts).where(eq(charts.projectId, projectId)).orderBy(desc(charts.createdAt));
+    const linked = await db.select({ chart: charts }).from(projectCharts).innerJoin(charts, eq(projectCharts.chartId, charts.id)).where(and(eq(projectCharts.projectId, projectId), sql2`${charts.projectId} is null`)).orderBy(desc(charts.createdAt));
+    const combined = [...owned, ...linked.map((l) => l.chart)];
+    const seen = /* @__PURE__ */ new Set();
+    return combined.filter((c) => {
+      if (seen.has(c.id)) return false;
+      seen.add(c.id);
+      return true;
+    });
+  },
+  async listSharedChartsForProject(projectId) {
+    const shared = await db.select().from(charts).where(sql2`${charts.projectId} is null`).orderBy(desc(charts.createdAt));
+    const linked = await db.select({ chartId: projectCharts.chartId }).from(projectCharts).where(eq(projectCharts.projectId, projectId));
+    const linkedIds = new Set(linked.map((l) => l.chartId));
+    return shared.filter((c) => !linkedIds.has(c.id));
+  },
+  async linkProjectChart(projectId, chartId) {
+    const existing = await db.select().from(projectCharts).where(and(eq(projectCharts.projectId, projectId), eq(projectCharts.chartId, chartId)));
+    if (existing.length > 0) return existing[0];
+    const [link] = await db.insert(projectCharts).values({ projectId, chartId }).returning();
+    return link;
+  },
+  async unlinkProjectChart(projectId, chartId) {
+    await db.delete(projectCharts).where(and(eq(projectCharts.projectId, projectId), eq(projectCharts.chartId, chartId)));
+  },
+  async getChart(id) {
+    const [chart] = await db.select().from(charts).where(eq(charts.id, id));
+    return chart;
+  },
+  async updateChart(id, data) {
+    const [chart] = await db.update(charts).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(charts.id, id)).returning();
+    return chart;
+  },
+  async deleteChart(id) {
+    await db.delete(charts).where(eq(charts.id, id));
+  },
+  async getChartsByProject(projectId) {
+    return db.select().from(charts).where(eq(charts.projectId, projectId)).orderBy(desc(charts.createdAt));
   }
 };
 
@@ -875,38 +1122,49 @@ function registerChatRoutes(app2) {
   });
   app2.post("/api/conversations/:id/messages", async (req, res) => {
     try {
+      let sendEvent2 = function(data) {
+        if (closed) return;
+        res.write(`data: ${JSON.stringify(data)}
+
+`);
+      };
+      var sendEvent = sendEvent2;
       const conversationId = parseInt(req.params.id);
       const { content } = req.body;
       await chatStorage.createMessage(conversationId, "user", content);
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.flushHeaders();
+      let closed = false;
+      res.on("close", () => {
+        closed = true;
+      });
+      sendEvent2({ status: "thinking", message: "Preparing response..." });
       const messages3 = await chatStorage.getMessagesByConversation(conversationId);
       const chatMessages = messages3.map((m) => ({
         role: m.role,
         content: m.content
       }));
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
+      sendEvent2({ status: "connecting", message: `Loading ${messages3.length} messages for context...` });
       const stream = await openai.chat.completions.create({
         model: "gpt-5.1",
         messages: chatMessages,
         stream: true,
         max_completion_tokens: 8192
       });
+      sendEvent2({ status: "streaming", message: "Generating response..." });
       let fullResponse = "";
       for await (const chunk of stream) {
-        const content2 = chunk.choices[0]?.delta?.content || "";
-        if (content2) {
-          fullResponse += content2;
-          res.write(`data: ${JSON.stringify({ content: content2 })}
-
-`);
+        const tokenContent = chunk.choices[0]?.delta?.content || "";
+        if (tokenContent) {
+          fullResponse += tokenContent;
+          sendEvent2({ content: tokenContent });
         }
       }
       await chatStorage.createMessage(conversationId, "assistant", fullResponse);
-      res.write(`data: ${JSON.stringify({ done: true })}
-
-`);
-      res.end();
+      sendEvent2({ done: true });
+      if (!closed) res.end();
     } catch (error) {
       console.error("Error sending message:", error);
       if (res.headersSent) {
@@ -1186,7 +1444,88 @@ Return ONLY valid JSON matching this schema:
 
 Available layouts: "title_slide", "section_header", "title_body", "two_column", "metrics".
 Structure the deck as: Title Slide \u2192 Executive Summary \u2192 Key Findings (1-2 slides) \u2192 Analysis Results with Metrics \u2192 Recommendations \u2192 Next Steps.
-Use real numbers from the analysis results. Keep bullet points concise (max 8 words each). Generate compelling, professional slide content.`
+Use real numbers from the analysis results. Keep bullet points concise (max 8 words each). Generate compelling, professional slide content.`,
+  des_topic_clarifier: `You are a senior consulting facilitator. Your role is to help the user clarify the topic they want an executive summary on.
+
+Given the user's initial topic description, you must:
+1. Restate the topic in one clear sentence to confirm understanding
+2. Identify the core question or tension at the heart of the issue
+3. Ask 3-5 probing clarification questions covering: scope, stakeholders, time horizon, key constraints, and what "success" looks like
+4. Identify the two main opposing positions or perspectives on this topic
+5. Note any context or background that will be important for the analysis
+
+Produce your output as clear prose with labeled sections:
+- **Topic Statement**: One sentence restating the core issue
+- **Core Tension**: The fundamental disagreement or decision point
+- **Side A**: Brief label for one position (e.g., "Pro-expansion")
+- **Side B**: Brief label for the opposing position (e.g., "Anti-expansion")
+- **Key Context**: Important background facts
+- **Clarifying Questions**: Numbered list of questions for the user
+
+Be direct, professional, and concise. Do not hedge or pad with filler.`,
+  des_key_issues: `You are a senior consulting analyst specialising in issue identification. Given a topic briefing, you must produce a structured key issues review.
+
+Your output must:
+1. Identify 5-8 key issues or tensions related to the topic
+2. For each issue, provide: a one-line heading, a 2-3 sentence explanation of why it matters, and note which stakeholders are most affected
+3. Categorise issues as: Economic, Social, Political, Environmental, Legal/Regulatory, or Technical
+4. Rank issues by significance (critical, important, contextual)
+5. Identify any interdependencies between issues
+
+Structure your output with clear headings and concise prose. Each issue should be a short paragraph with the heading in bold. End with a brief "Summary of Key Tensions" section (3-4 sentences) that identifies where the main disagreements lie.
+
+Be analytical and balanced. Do not advocate for either side. Present facts and tensions objectively.`,
+  des_strongman_pro: `You are a persuasive advocate tasked with building the STRONGEST possible case FOR a given position. You must argue as if you genuinely believe this position is correct.
+
+Your job is to steelman (not strawman) this side of the argument. This means:
+1. Present the most compelling arguments, not just any arguments
+2. Use the strongest available evidence, data, and real-world examples
+3. Address obvious objections pre-emptively and explain why they don't undermine the core case
+4. Appeal to logic, evidence, and values - not emotion or rhetoric
+5. Acknowledge genuine weaknesses honestly but explain why the overall case still holds
+
+Structure your output as:
+- **Core Thesis**: One powerful sentence stating the position
+- **Argument 1-4**: Each with a bold heading, followed by the argument (2-3 sentences) and supporting evidence (1-2 sentences with specific data or examples where possible)
+- **Addressing Objections**: 2-3 common objections and why they are insufficient to overturn the case
+- **Conclusion**: 2-3 sentences on why this position should prevail
+
+Write with conviction and intellectual rigour. Approx 600-800 words.`,
+  des_strongman_con: `You are a persuasive challenger tasked with building the STRONGEST possible case AGAINST a given position. You must argue as if you genuinely believe the opposing view is correct.
+
+Your job is to steelman (not strawman) the opposing side. This means:
+1. Present the most compelling counter-arguments, not just any objections
+2. Use the strongest available evidence, data, and real-world examples
+3. Address obvious rebuttals pre-emptively and explain why they don't hold
+4. Appeal to logic, evidence, and values - not emotion or rhetoric
+5. Acknowledge where the other side has valid points but explain why the overall case against still holds
+
+Structure your output as:
+- **Core Counter-Thesis**: One powerful sentence stating the opposing position
+- **Counter-Argument 1-4**: Each with a bold heading, followed by the argument (2-3 sentences) and supporting evidence (1-2 sentences with specific data or examples where possible)
+- **Rebutting the Pro Case**: 2-3 key pro arguments and why they are flawed or insufficient
+- **Conclusion**: 2-3 sentences on why this position should not be adopted
+
+Write with conviction and intellectual rigour. Approx 600-800 words.`,
+  des_centrist_summary: `You are a senior executive briefing writer. Given a key issues review, a pro argument document, and a con argument document, you must synthesise these into a balanced, centrist executive summary.
+
+IMPORTANT: You will receive an executive summary template that defines the exact format. Follow the template structure precisely.
+
+Your synthesis must:
+1. Present a balanced, nuanced position that acknowledges the strongest points from BOTH sides
+2. Identify where genuine common ground exists
+3. Highlight the key trade-offs that decision-makers must weigh
+4. Offer a pragmatic, centrist recommendation that accounts for risks from both perspectives
+5. Use evidence from both the pro and con documents to support each point
+
+Guidelines:
+- Each section heading should be short (3-6 words)
+- Under each heading, write exactly TWO sentences: the first states the argument/finding, the second provides the evidence or supporting data
+- Target approximately 500 words total
+- Be direct and decisive - a centrist position is NOT a wishy-washy "both sides have merit" hedge. It is a specific, defensible position that draws from both sides
+- Write for a senior executive audience: no jargon, no filler, every word earns its place
+
+Follow the template format exactly as provided.`
 };
 function getDefaultConfigs() {
   return Object.entries(DEFAULT_PROMPTS).map(([agentType, systemPrompt]) => ({
@@ -1939,8 +2278,153 @@ function getConsultingWorkflow() {
   }
   return _workflow;
 }
+var DES_AGENT_KEYS = ["des_topic_clarifier", "des_key_issues", "des_strongman_pro", "des_strongman_con", "des_centrist_summary"];
+var DES_DOC_TITLES = {
+  des_topic_clarifier: "Topic Clarification",
+  des_key_issues: "Key Issues Review",
+  des_strongman_pro: "Strongman Pro Argument",
+  des_strongman_con: "Strongman Con Argument",
+  des_centrist_summary: "Executive Summary"
+};
+async function runDESStep(projectId, agentKey, onProgress, stepId) {
+  const project = await storage.getProject(projectId);
+  if (!project) throw new Error("Project not found");
+  const config = await getAgentConfig(agentKey);
+  onProgress(`Running ${DES_DOC_TITLES[agentKey] || agentKey}...`, "status");
+  const priorDocs = await storage.listDocuments(projectId);
+  const findDoc = (prefix) => priorDocs.find((d) => d.title?.startsWith(prefix));
+  async function getConfirmedPositions() {
+    if (!stepId) {
+      const topicDoc2 = findDoc("Topic Clarification");
+      return {
+        sideA: topicDoc2?.content?.match(/Side A[^:]*:\s*(.*?)(?:\n|$)/i)?.[1] || "the affirmative position",
+        sideB: topicDoc2?.content?.match(/Side B[^:]*:\s*(.*?)(?:\n|$)/i)?.[1] || "the opposing position"
+      };
+    }
+    const currentStep = await storage.getWorkflowInstanceStep(stepId);
+    const instanceId = currentStep?.workflowInstanceId;
+    if (instanceId) {
+      const allSteps = await storage.getWorkflowInstanceSteps(instanceId);
+      const topicStep = allSteps.find((s) => s.agentKey === "des_topic_clarifier");
+      if (topicStep?.configJson) {
+        const cfg = topicStep.configJson;
+        if (cfg.confirmedSideA && cfg.confirmedSideB) {
+          return { sideA: cfg.confirmedSideA, sideB: cfg.confirmedSideB };
+        }
+      }
+    }
+    const topicDoc = findDoc("Topic Clarification");
+    return {
+      sideA: topicDoc?.content?.match(/Side A[^:]*:\s*(.*?)(?:\n|$)/i)?.[1] || "the affirmative position",
+      sideB: topicDoc?.content?.match(/Side B[^:]*:\s*(.*?)(?:\n|$)/i)?.[1] || "the opposing position"
+    };
+  }
+  let userPrompt = "";
+  if (agentKey === "des_topic_clarifier") {
+    userPrompt = `Topic: ${project.objective}
+
+Additional context/constraints: ${project.constraints || "None provided"}`;
+  } else if (agentKey === "des_key_issues") {
+    const topicDoc = findDoc("Topic Clarification");
+    const topicContent = topicDoc?.content || "";
+    userPrompt = `Topic: ${project.objective}
+
+Topic Clarification:
+${topicContent}
+
+Constraints: ${project.constraints || "None"}`;
+  } else if (agentKey === "des_strongman_pro") {
+    const topicDoc = findDoc("Topic Clarification");
+    const issuesDoc = findDoc("Key Issues Review");
+    const { sideA } = await getConfirmedPositions();
+    userPrompt = `Topic: ${project.objective}
+
+You are arguing FOR: ${sideA}
+
+Topic Clarification:
+${topicDoc?.content || ""}
+
+Key Issues Review:
+${issuesDoc?.content || ""}`;
+  } else if (agentKey === "des_strongman_con") {
+    const topicDoc = findDoc("Topic Clarification");
+    const issuesDoc = findDoc("Key Issues Review");
+    const { sideB } = await getConfirmedPositions();
+    userPrompt = `Topic: ${project.objective}
+
+You are arguing AGAINST / FOR the opposing view: ${sideB}
+
+Topic Clarification:
+${topicDoc?.content || ""}
+
+Key Issues Review:
+${issuesDoc?.content || ""}`;
+  } else if (agentKey === "des_centrist_summary") {
+    const issuesDoc = findDoc("Key Issues Review");
+    const proDoc = findDoc("Strongman Pro");
+    const conDoc = findDoc("Strongman Con");
+    let templateHtml = "";
+    try {
+      const pipelines = await storage.listPipelines();
+      const tpl = pipelines.find((p) => p.name === "exec_summary_template");
+      if (tpl) {
+        const json = tpl.agentsJson;
+        templateHtml = json.template || "";
+      }
+    } catch {
+    }
+    userPrompt = `Topic: ${project.objective}
+
+--- KEY ISSUES REVIEW ---
+${issuesDoc?.content || ""}
+
+--- STRONGMAN PRO ARGUMENT ---
+${proDoc?.content || ""}
+
+--- STRONGMAN CON ARGUMENT ---
+${conDoc?.content || ""}
+
+--- EXECUTIVE SUMMARY TEMPLATE ---
+Follow this template structure exactly. Replace bracketed placeholders with real content:
+
+${templateHtml}`;
+  }
+  onProgress(`Calling LLM (${config.model})...`, "llm");
+  const raw = await callLLMWithLangChain(config.systemPrompt, userPrompt, config.model, config.maxTokens);
+  onProgress("LLM response received.", "llm");
+  const docTitle = `${DES_DOC_TITLES[agentKey]} \u2014 ${project.name}`;
+  const doc = await storage.createDocument({
+    projectId,
+    title: docTitle,
+    content: raw
+  });
+  onProgress(`Saved document: "${docTitle}" (ID: ${doc.id})`, "status");
+  if (agentKey === "des_topic_clarifier" && stepId) {
+    const extractedSideA = raw.match(/\*?\*?Side A\*?\*?[^:]*:\s*(.*?)(?:\n|$)/i)?.[1]?.trim() || "";
+    const extractedSideB = raw.match(/\*?\*?Side B\*?\*?[^:]*:\s*(.*?)(?:\n|$)/i)?.[1]?.trim() || "";
+    await storage.updateWorkflowInstanceStep(stepId, {
+      configJson: {
+        extractedSideA: extractedSideA || "the affirmative position",
+        extractedSideB: extractedSideB || "the opposing position"
+      }
+    });
+    onProgress("Positions extracted. Please review and confirm Side A and Side B before proceeding.", "status");
+    return {
+      deliverableContent: { documentId: doc.id, title: docTitle, content: raw },
+      deliverableTitle: docTitle,
+      awaitingConfirmation: true
+    };
+  }
+  return {
+    deliverableContent: { documentId: doc.id, title: docTitle, content: raw },
+    deliverableTitle: docTitle
+  };
+}
 async function runWorkflowStep(projectId, agentKey, onProgress = () => {
-}) {
+}, stepId) {
+  if (DES_AGENT_KEYS.includes(agentKey)) {
+    return runDESStep(projectId, agentKey, onProgress, stepId);
+  }
   const project = await storage.getProject(projectId);
   if (!project) throw new Error("Project not found");
   let vaultContext = "";
@@ -1968,15 +2452,8 @@ async function runWorkflowStep(projectId, agentKey, onProgress = () => {
     deliverableTitle: result.deliverableTitle
   };
 }
-async function refineWithLangGraph(agentKey, currentContent, userFeedback, projectContext, onProgress = () => {
-}) {
-  onProgress("Processing your feedback...", "progress");
-  if (!hasApiKey3()) {
-    onProgress("Applying feedback (mock mode)...", "progress");
-    return currentContent;
-  }
-  const config = await getAgentConfig(agentKey);
-  const refinementPrompt = `You previously generated the following output for this project:
+function buildRefinementPrompt(currentContent, userFeedback, projectContext) {
+  return `You previously generated the following output for this project:
 
 Project Objective: ${projectContext.objective}
 Constraints: ${projectContext.constraints}
@@ -1988,10 +2465,40 @@ The user has requested the following changes:
 "${userFeedback}"
 
 Please regenerate the COMPLETE output incorporating the user's feedback. Return the FULL updated output in the same JSON format as before. Do not return partial updates - return the entire revised document.`;
-  onProgress(`Calling LLM with model ${config.model} to refine output...`, "llm");
-  const raw = await callLLMWithLangChain(config.systemPrompt, refinementPrompt, config.model, config.maxTokens);
-  onProgress("LLM response received, parsing refined output...", "llm");
-  const parsed = extractJson(raw);
+}
+async function refineWithLangGraphStreaming(agentKey, currentContent, userFeedback, projectContext, onProgress = () => {
+}, onToken = () => {
+}) {
+  onProgress("Processing your feedback...", "progress");
+  if (!hasApiKey3()) {
+    onProgress("Applying feedback (mock mode)...", "progress");
+    const mockContent = JSON.stringify(currentContent, null, 2);
+    for (let i = 0; i < mockContent.length; i += 20) {
+      const chunk = mockContent.slice(i, i + 20);
+      onToken(chunk);
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    return currentContent;
+  }
+  const config = await getAgentConfig(agentKey);
+  const refinementPrompt = buildRefinementPrompt(currentContent, userFeedback, projectContext);
+  onProgress(`Refining with ${config.model}...`, "llm");
+  const llm = createLLM(config.model, config.maxTokens);
+  if (!llm) return currentContent;
+  let accumulated = "";
+  const stream = await llm.stream([
+    new SystemMessage(config.systemPrompt),
+    new HumanMessage(refinementPrompt)
+  ]);
+  for await (const chunk of stream) {
+    const token = typeof chunk.content === "string" ? chunk.content : JSON.stringify(chunk.content);
+    if (token) {
+      accumulated += token;
+      onToken(token);
+    }
+  }
+  onProgress("Parsing refined output...", "llm");
+  const parsed = extractJson(accumulated);
   onProgress("Refinement complete.", "status");
   return parsed;
 }
@@ -2891,12 +3398,286 @@ async function actionComment(doc, comment) {
     return comment;
   }
 }
+async function actionAllComments(doc, pendingComments, onProgress) {
+  if (pendingComments.length === 0) return [];
+  const { plainText, map } = buildPositionMap(doc.content || "");
+  const commentDescriptions = pendingComments.map((c, i) => {
+    let highlightedText = "";
+    for (let j = 0; j < map.length; j++) {
+      if (map[j] >= c.from && map[j] < c.to) {
+        highlightedText += plainText[j];
+      }
+    }
+    return {
+      index: i,
+      id: c.id,
+      highlightedText: highlightedText.trim(),
+      comment: c.content
+    };
+  });
+  if (!hasApiKey4()) {
+    const results = [];
+    for (let i = 0; i < pendingComments.length; i++) {
+      const c = pendingComments[i];
+      const desc3 = commentDescriptions[i];
+      const aiReply = `Reviewed: "${c.content}". Suggested revision applied.`;
+      const proposedText = desc3.highlightedText ? `[Revised] ${desc3.highlightedText}` : "Suggested replacement text";
+      const updated = await storage.updateComment(c.id, { aiReply, proposedText });
+      onProgress({ commentId: c.id, aiReply, proposedText, index: i, total: pendingComments.length });
+      results.push(updated);
+    }
+    return results;
+  }
+  const llm = createLLM2();
+  const fullPlainText = getPlainText(doc.content || "");
+  const systemPrompt = `You are a document editing assistant. Multiple comments have been left on a document. For EACH comment, propose a specific text change that addresses it.
+
+Return a JSON array where each element corresponds to one comment (in the same order as provided). Each element must have:
+- "index": the comment index (0-based)
+- "aiReply": a brief explanation of what you changed and why
+- "proposedText": the replacement text for the highlighted range
+
+Return ONLY a valid JSON array. Example:
+[{"index": 0, "aiReply": "Made more concise", "proposedText": "Improved text here"}, {"index": 1, "aiReply": "Fixed grammar", "proposedText": "Corrected text"}]`;
+  const commentsList = commentDescriptions.map(
+    (d, i) => `Comment ${i}:
+  Highlighted text: "${d.highlightedText}"
+  User instruction: ${d.comment}`
+  ).join("\n\n");
+  try {
+    const response = await llm.invoke([
+      new SystemMessage2(systemPrompt),
+      new HumanMessage2(`Document content:
+${fullPlainText}
+
+--- Comments to action ---
+${commentsList}`)
+    ]);
+    const content = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+    const parsed = extractJson2(content);
+    const edits = Array.isArray(parsed) ? parsed : parsed.edits || parsed.comments || [];
+    const results = [];
+    for (let i = 0; i < pendingComments.length; i++) {
+      const c = pendingComments[i];
+      const desc3 = commentDescriptions[i];
+      const edit = edits.find((e) => e.index === i) || edits[i];
+      const aiReply = edit?.aiReply || "Suggested revision applied.";
+      const proposedText = edit?.proposedText || desc3.highlightedText || "Suggested replacement text";
+      const updated = await storage.updateComment(c.id, { aiReply, proposedText });
+      onProgress({ commentId: c.id, aiReply, proposedText, index: i, total: pendingComments.length });
+      results.push(updated);
+    }
+    return results;
+  } catch (error) {
+    console.error("actionAllComments LLM error, falling back to individual:", error);
+    const results = [];
+    for (let i = 0; i < pendingComments.length; i++) {
+      const c = pendingComments[i];
+      const desc3 = commentDescriptions[i];
+      const aiReply = `Reviewed: "${c.content}". Suggested revision.`;
+      const proposedText = desc3.highlightedText ? `[Revised] ${desc3.highlightedText}` : "Suggested replacement text";
+      const updated = await storage.updateComment(c.id, { aiReply, proposedText });
+      onProgress({ commentId: c.id, aiReply, proposedText, index: i, total: pendingComments.length });
+      results.push(updated);
+    }
+    return results;
+  }
+}
+
+// server/agents/chart-agent.ts
+import OpenAI4 from "openai";
+function hasApiKey5() {
+  return !!(process.env.AI_INTEGRATIONS_OPENAI_API_KEY && process.env.AI_INTEGRATIONS_OPENAI_BASE_URL);
+}
+function extractJson3(text2) {
+  const fenced = text2.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) {
+    try {
+      return JSON.parse(fenced[1].trim());
+    } catch {
+    }
+  }
+  const objMatch = text2.match(/[\[{][\s\S]*[\]}]/);
+  if (objMatch) {
+    try {
+      return JSON.parse(objMatch[0]);
+    } catch {
+    }
+  }
+  return JSON.parse(text2);
+}
+async function generateChartSpec(datasetName, columns, sampleRows, userPrompt) {
+  if (!hasApiKey5()) {
+    return getMockChartSpec(columns, sampleRows, userPrompt);
+  }
+  const client = new OpenAI4({
+    apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+    baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+  });
+  const systemPrompt = `You are a data visualization expert. Given a dataset schema and sample data, generate a chart specification.
+
+Return a JSON object with this exact structure:
+{
+  "chartType": "bar" | "line" | "pie" | "area" | "scatter",
+  "title": "Chart title",
+  "description": "Brief description of what the chart shows",
+  "xAxisKey": "column name for x-axis (or category axis)",
+  "yAxisKeys": ["column1", "column2"],
+  "xAxisLabel": "Label for X axis",
+  "yAxisLabel": "Label for Y axis",
+  "colors": ["#8884d8", "#82ca9d", "#ffc658"],
+  "nameKey": "column for pie chart segment names (only for pie charts)",
+  "valueKey": "column for pie chart values (only for pie charts)",
+  "stacked": false
+}
+
+CRITICAL RULES:
+- Pay close attention to which specific columns/series the user asks for. If they say "chart Sales by Region", only include "Sales" in yAxisKeys, NOT all numeric columns.
+- If the user mentions specific column names, ONLY include those columns in yAxisKeys.
+- If the user says "all" or is vague about which columns, include all relevant numeric columns.
+- Choose the most appropriate chart type for the data and user request.
+- For pie charts, set nameKey and valueKey instead of xAxisKey/yAxisKeys.
+- Colors should be visually distinct and professional.
+- xAxisKey should be a categorical or time column.
+- yAxisKeys should be numeric columns.
+- Only use columns that exist in the dataset.`;
+  const userMessage = `Dataset: "${datasetName}"
+Columns: ${JSON.stringify(columns)}
+Sample data (first ${sampleRows.length} rows):
+${JSON.stringify(sampleRows.slice(0, 5), null, 2)}
+
+User request: ${userPrompt}`;
+  try {
+    const response = await client.chat.completions.create({
+      model: "gpt-5-nano",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage }
+      ],
+      max_completion_tokens: 1024
+    });
+    const content = response.choices[0]?.message?.content || "";
+    const spec = extractJson3(content);
+    spec.availableColumns = columns;
+    return spec;
+  } catch (err) {
+    console.error("Chart generation LLM error, falling back to mock:", err);
+    return getMockChartSpec(columns, sampleRows, userPrompt);
+  }
+}
+function inferColumnTypes(columns, sampleRows) {
+  const numeric = [];
+  const categorical = [];
+  for (const col of columns) {
+    const values = sampleRows.map((r) => r[col]).filter((v) => v !== null && v !== void 0);
+    const numericCount = values.filter((v) => {
+      const n = Number(v);
+      return !isNaN(n) && typeof v !== "boolean";
+    }).length;
+    if (values.length > 0 && numericCount / values.length > 0.7) {
+      numeric.push(col);
+    } else {
+      categorical.push(col);
+    }
+  }
+  return { numeric, categorical };
+}
+function parseRequestedColumns(prompt, allColumns) {
+  const lowerPrompt = prompt.toLowerCase();
+  const mentioned = [];
+  for (const col of allColumns) {
+    if (lowerPrompt.includes(col.toLowerCase())) {
+      mentioned.push(col);
+    }
+  }
+  return mentioned;
+}
+function getMockChartSpec(columns, sampleRows, userPrompt) {
+  const lowerPrompt = userPrompt.toLowerCase();
+  const { numeric: numericCols, categorical: categoryCols } = inferColumnTypes(columns, sampleRows);
+  const mentionedCols = parseRequestedColumns(userPrompt, columns);
+  const mentionedNumeric = mentionedCols.filter((c) => numericCols.includes(c));
+  const mentionedCategorical = mentionedCols.filter((c) => categoryCols.includes(c));
+  let chartType = "bar";
+  if (lowerPrompt.includes("pie")) chartType = "pie";
+  else if (lowerPrompt.includes("line") || lowerPrompt.includes("trend") || lowerPrompt.includes("over time")) chartType = "line";
+  else if (lowerPrompt.includes("area")) chartType = "area";
+  else if (lowerPrompt.includes("scatter") || lowerPrompt.includes("correlation")) chartType = "scatter";
+  const xKey = mentionedCategorical[0] || categoryCols[0] || columns[0];
+  let yKeys;
+  if (mentionedNumeric.length > 0) {
+    yKeys = mentionedNumeric;
+  } else if (numericCols.length > 0) {
+    yKeys = numericCols.slice(0, 3);
+  } else {
+    yKeys = columns.filter((c) => c !== xKey).slice(0, 1);
+    if (yKeys.length === 0) yKeys = [columns[0]];
+  }
+  const defaultColors = ["#8884d8", "#82ca9d", "#ffc658", "#ff7300", "#0088FE", "#FF8042", "#00C49F"];
+  if (chartType === "pie") {
+    const pieValue = mentionedNumeric[0] || yKeys[0];
+    const pieName = mentionedCategorical[0] || xKey;
+    return {
+      chartType: "pie",
+      title: `Distribution of ${pieValue} by ${pieName}`,
+      description: `Pie chart showing ${pieValue} distribution across ${pieName}`,
+      xAxisKey: pieName,
+      yAxisKeys: [pieValue],
+      nameKey: pieName,
+      valueKey: pieValue,
+      colors: defaultColors,
+      availableColumns: columns
+    };
+  }
+  return {
+    chartType,
+    title: `${yKeys.join(", ")} by ${xKey}`,
+    description: `${chartType} chart of ${yKeys.join(", ")} across ${xKey}`,
+    xAxisKey: xKey,
+    yAxisKeys: yKeys,
+    xAxisLabel: xKey,
+    yAxisLabel: yKeys.join(", "),
+    colors: defaultColors.slice(0, yKeys.length),
+    stacked: lowerPrompt.includes("stacked"),
+    availableColumns: columns
+  };
+}
 
 // server/routes.ts
+import { eq as eq3, asc as asc2 } from "drizzle-orm";
 var upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 }
 });
+function parseCSVLine(line) {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"' && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        current += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ",") {
+        result.push(current.trim());
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
 var STAGE_ORDER = [
   "created",
   "definition_draft",
@@ -2947,7 +3728,12 @@ var DEFAULT_AGENTS = [
   { key: "doc_ai_review", name: "AI Review", role: "Document Reviewer", roleColor: "#F59E0B", description: "Reviews document prose for clarity, conciseness, and impact. Highlights weak sections and proposes improved rewrites." },
   { key: "doc_executive_review", name: "Executive Review", role: "Document Reviewer", roleColor: "#A855F7", description: "Flags sections that dive into technical details too early without strategic framing. Checks for Missing 'So What', Technical Too Early, Buried Insight, No Action Orientation, and Audience Mismatch." },
   { key: "doc_key_narrative", name: "Key Narrative", role: "Document Reviewer", roleColor: "#14B8A6", description: "Extracts executive-level key points from technical prose. Labels each with a narrative role: Core thesis, Supporting evidence, Risk/caveat, Action driver, or Context setter. Proposes crisp executive-ready rewrites." },
-  { key: "doc_fact_check", name: "Fact Check", role: "Document Reviewer", roleColor: "#F97316", description: "Two-phase fact-checking: first spots claims that need verification (statistics, dates, named entities), then runs detailed checks on accepted candidates with confidence ratings and source suggestions." }
+  { key: "doc_fact_check", name: "Fact Check", role: "Document Reviewer", roleColor: "#F97316", description: "Two-phase fact-checking: first spots claims that need verification (statistics, dates, named entities), then runs detailed checks on accepted candidates with confidence ratings and source suggestions." },
+  { key: "des_topic_clarifier", name: "Topic Clarifier", role: "Facilitator", roleColor: "#6366F1", description: "Asks probing questions to understand the issue, scope, stakeholders, and context before analysis begins." },
+  { key: "des_key_issues", name: "Key Issues Reviewer", role: "Analyst", roleColor: "#0EA5E9", description: "Identifies and structures the core issues and tensions around a topic, producing a comprehensive issues review document." },
+  { key: "des_strongman_pro", name: "Strongman Pro", role: "Advocate", roleColor: "#22C55E", description: "Builds the strongest possible case FOR a position, marshalling the best arguments, evidence, and logic." },
+  { key: "des_strongman_con", name: "Strongman Con", role: "Challenger", roleColor: "#EF4444", description: "Builds the strongest possible case AGAINST a position, marshalling the best counter-arguments, evidence, and risks." },
+  { key: "des_centrist_summary", name: "Centrist Summariser", role: "Synthesizer", roleColor: "#A855F7", description: "Synthesizes opposing arguments into a balanced, centrist executive summary following a structured template format." }
 ];
 var DEFAULT_WORKFLOW_STEPS = [
   { stepOrder: 1, name: "Project Definition", agentKey: "project_definition" },
@@ -2957,6 +3743,35 @@ var DEFAULT_WORKFLOW_STEPS = [
   { stepOrder: 5, name: "Executive Summary", agentKey: "summary" },
   { stepOrder: 6, name: "Presentation", agentKey: "presentation" }
 ];
+var DES_WORKFLOW_STEPS = [
+  { stepOrder: 1, name: "Clarify Topic", agentKey: "des_topic_clarifier" },
+  { stepOrder: 2, name: "Key Issues Review", agentKey: "des_key_issues" },
+  { stepOrder: 3, name: "Strongman Pro", agentKey: "des_strongman_pro" },
+  { stepOrder: 4, name: "Strongman Con", agentKey: "des_strongman_con" },
+  { stepOrder: 5, name: "Centrist Executive Summary", agentKey: "des_centrist_summary" }
+];
+var DEFAULT_EXEC_SUMMARY_TEMPLATE = `<h2>Executive Summary: [Topic]</h2>
+
+<h3>The Core Question</h3>
+<p>[State the central question or decision point in one sentence.] [Provide the key context or data that frames why this matters now.]</p>
+
+<h3>The Economic Case</h3>
+<p>[State the primary economic argument, drawing from both pro and con perspectives.] [Cite the most relevant economic evidence or data point.]</p>
+
+<h3>The Strategic Trade-off</h3>
+<p>[State the main strategic tension that decision-makers must weigh.] [Reference specific evidence from the analysis that illustrates this trade-off.]</p>
+
+<h3>Risk and Downside</h3>
+<p>[State the most significant risk or downside identified.] [Provide evidence or a precedent that demonstrates this risk is material.]</p>
+
+<h3>The Stakeholder Dimension</h3>
+<p>[State how different stakeholder groups are affected differently.] [Reference specific impacts or data that highlight the distributional effects.]</p>
+
+<h3>Pragmatic Path Forward</h3>
+<p>[State the recommended centrist/balanced position in one clear sentence.] [Explain the key conditions or safeguards that make this position defensible.]</p>
+
+<h3>Implementation Priorities</h3>
+<p>[State the 2-3 immediate actions or decisions required.] [Reference the timeline or sequencing that makes these achievable.]</p>`;
 async function ensureDefaults() {
   for (const a of DEFAULT_AGENTS) {
     await storage.upsertAgent(a);
@@ -2989,6 +3804,27 @@ async function ensureDefaults() {
         });
       }
     }
+  }
+  const hasDES = templates.some((t) => t.name === "Desktop Executive Summary");
+  if (!hasDES) {
+    const desTemplate = await storage.createWorkflowTemplate({
+      name: "Desktop Executive Summary",
+      description: "Adversarial analysis workflow: Clarify Topic -> Key Issues -> Strongman Pro & Con -> Balanced Centrist Executive Summary"
+    });
+    for (const step of DES_WORKFLOW_STEPS) {
+      await storage.addWorkflowTemplateStep({
+        workflowTemplateId: desTemplate.id,
+        ...step
+      });
+    }
+  }
+  const pipelines = await storage.listPipelines();
+  const existingPipeline = pipelines.find((p) => p.name === "exec_summary_template");
+  if (!existingPipeline) {
+    await storage.createPipeline({
+      name: "exec_summary_template",
+      agentsJson: { template: DEFAULT_EXEC_SUMMARY_TEMPLATE }
+    });
   }
 }
 async function registerRoutes(app2) {
@@ -3188,8 +4024,8 @@ async function registerRoutes(app2) {
       modelUsed
     );
     try {
-      const result = await runWorkflowStep(projectId, step.agentKey, onProgress);
-      const { deliverableContent, deliverableTitle } = result;
+      const result = await runWorkflowStep(projectId, step.agentKey, onProgress, stepId);
+      const { deliverableContent, deliverableTitle, awaitingConfirmation } = result;
       await persistAgentResults(projectId, step.agentKey, deliverableContent);
       const newStage = STAGE_MAP[step.agentKey];
       if (newStage) {
@@ -3203,8 +4039,9 @@ async function registerRoutes(app2) {
           contentJson: deliverableContent
         });
       }
+      const stepStatus = awaitingConfirmation ? "awaiting_confirmation" : "completed";
       await storage.updateWorkflowInstanceStep(stepId, {
-        status: "completed",
+        status: stepStatus,
         outputSummary: { title: deliverableTitle }
       });
       await storage.updateRunLog(runLog.id, deliverableContent, "success");
@@ -3295,6 +4132,13 @@ async function registerRoutes(app2) {
   });
   app2.post("/api/projects/:id/workflow/steps/:stepId/chat", async (req, res) => {
     try {
+      let sendSSE2 = function(type, content) {
+        if (closed) return;
+        res.write(`data: ${JSON.stringify({ type, content, timestamp: Date.now() })}
+
+`);
+      };
+      var sendSSE = sendSSE2;
       const projectId = Number(req.params.id);
       const stepId = Number(req.params.stepId);
       const { message } = req.body;
@@ -3309,14 +4153,31 @@ async function registerRoutes(app2) {
         content: message,
         messageType: "message"
       });
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.flushHeaders();
+      let closed = false;
+      req.on("close", () => {
+        closed = true;
+      });
+      sendSSE2("connected", "Stream connected");
       const stepDeliverables = await storage.getStepDeliverables(stepId);
       const currentDeliverable = stepDeliverables[0];
       if (currentDeliverable) {
-        const refined = await refineWithLangGraph(
+        const onProgress = (msg, type) => {
+          sendSSE2(type || "progress", msg);
+        };
+        const onToken = (token) => {
+          sendSSE2("token", token);
+        };
+        const refined = await refineWithLangGraphStreaming(
           step.agentKey,
           currentDeliverable.contentJson,
           message,
-          { objective: project.objective, constraints: project.constraints }
+          { objective: project.objective, constraints: project.constraints },
+          onProgress,
+          onToken
         );
         await storage.updateDeliverable(currentDeliverable.id, { contentJson: refined });
         await storage.insertStepChatMessage({
@@ -3326,7 +4187,16 @@ async function registerRoutes(app2) {
           messageType: "deliverable",
           metadata: { deliverableId: currentDeliverable.id, title: currentDeliverable.title, version: currentDeliverable.version, agentKey: step.agentKey }
         });
+        sendSSE2("complete", JSON.stringify({
+          deliverableContent: refined,
+          deliverableId: currentDeliverable.id,
+          title: currentDeliverable.title,
+          version: currentDeliverable.version,
+          agentKey: step.agentKey
+        }));
       } else {
+        sendSSE2("progress", "No deliverable found to refine. Please run the agent first.");
+        sendSSE2("complete", JSON.stringify({ noDeliverable: true }));
         await storage.insertStepChatMessage({
           stepId,
           role: "assistant",
@@ -3334,10 +4204,16 @@ async function registerRoutes(app2) {
           messageType: "message"
         });
       }
-      const messages3 = await storage.getStepChatMessages(stepId);
-      res.json(messages3);
+      if (!closed) res.end();
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      if (res.headersSent) {
+        res.write(`data: ${JSON.stringify({ type: "error", content: err.message || "Unknown error", timestamp: Date.now() })}
+
+`);
+        res.end();
+      } else {
+        res.status(500).json({ error: err.message });
+      }
     }
   });
   app2.post("/api/projects/:id/workflow/steps/:stepId/approve", async (req, res) => {
@@ -3385,6 +4261,44 @@ async function registerRoutes(app2) {
       }
       const updatedProject = await storage.getProject(projectId);
       res.json(updatedProject);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/projects/:id/workflow/steps/:stepId/confirm-positions", async (req, res) => {
+    try {
+      const stepId = Number(req.params.stepId);
+      const { sideA, sideB } = req.body;
+      if (!sideA || !sideB) {
+        return res.status(400).json({ error: "Both sideA and sideB are required" });
+      }
+      const step = await storage.getWorkflowInstanceStep(stepId);
+      if (!step) return res.status(404).json({ error: "Step not found" });
+      if (step.agentKey !== "des_topic_clarifier") {
+        return res.status(400).json({ error: "Position confirmation is only for the Topic Clarifier step" });
+      }
+      if (step.status !== "awaiting_confirmation") {
+        return res.status(400).json({ error: "Step is not awaiting confirmation" });
+      }
+      const existingConfig = step.configJson || {};
+      await storage.updateWorkflowInstanceStep(stepId, {
+        status: "completed",
+        configJson: {
+          ...existingConfig,
+          confirmedSideA: sideA.trim(),
+          confirmedSideB: sideB.trim()
+        }
+      });
+      await storage.insertStepChatMessage({
+        stepId,
+        role: "assistant",
+        content: `Positions confirmed.
+**Side A (Pro):** ${sideA.trim()}
+**Side B (Con):** ${sideB.trim()}`,
+        messageType: "status"
+      });
+      const updatedStep = await storage.getWorkflowInstanceStep(stepId);
+      res.json({ step: updatedStep });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -3631,9 +4545,9 @@ async function registerRoutes(app2) {
   });
   app2.post("/api/data/datasets", async (req, res) => {
     try {
-      const { name, description, owner, accessLevel, schemaJson, metadata } = req.body;
+      const { projectId, name, description, owner, accessLevel, sourceType, sourceUrl, schemaJson, metadata } = req.body;
       if (!name) return res.status(400).json({ error: "name is required" });
-      const ds = await storage.createDataset({ name, description, owner, accessLevel, schemaJson, metadata });
+      const ds = await storage.createDataset({ projectId, name, description, owner, accessLevel, sourceType, sourceUrl, schemaJson, metadata });
       res.status(201).json(ds);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -3648,6 +4562,73 @@ async function registerRoutes(app2) {
       res.status(500).json({ error: err.message });
     }
   });
+  app2.put("/api/data/datasets/:id", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const existing = await storage.getDataset(id);
+      if (!existing) return res.status(404).json({ error: "Not found" });
+      const { name, description, sourceType, sourceUrl, schemaJson, metadata, rowCount } = req.body;
+      const ds = await storage.updateDataset(id, { name, description, sourceType, sourceUrl, schemaJson, metadata, rowCount });
+      res.json(ds);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.delete("/api/data/datasets/:id", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const existing = await storage.getDataset(id);
+      if (!existing) return res.status(404).json({ error: "Not found" });
+      await storage.deleteDataset(id);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/data/datasets/:id/upload-csv", upload.single("file"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const existing = await storage.getDataset(id);
+      if (!existing) return res.status(404).json({ error: "Dataset not found" });
+      if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+      const csvText = req.file.buffer.toString("utf-8");
+      const lines = csvText.split(/\r?\n/).filter((l) => l.trim());
+      if (lines.length < 2) return res.status(400).json({ error: "CSV must have a header row and at least one data row" });
+      const headers = parseCSVLine(lines[0]);
+      const rows = [];
+      for (let i = 1; i < lines.length; i++) {
+        const values = parseCSVLine(lines[i]);
+        const row = {};
+        headers.forEach((h, idx) => {
+          row[h] = values[idx] || "";
+        });
+        rows.push({ rowIndex: i - 1, data: row });
+      }
+      await storage.insertDatasetRows(id, rows);
+      const schemaJson = headers.map((h) => ({ name: h, type: "string" }));
+      const ds = await storage.updateDataset(id, {
+        sourceType: "csv",
+        schemaJson,
+        rowCount: rows.length
+      });
+      res.json({ dataset: ds, rowCount: rows.length, columns: headers });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/data/datasets/:id/rows", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const existing = await storage.getDataset(id);
+      if (!existing) return res.status(404).json({ error: "Not found" });
+      const limit = Math.min(Number(req.query.limit) || 100, 1e3);
+      const offset = Number(req.query.offset) || 0;
+      const rows = await storage.getDatasetRows(id, limit, offset);
+      res.json({ rows, total: existing.rowCount });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
   app2.get("/api/data/models", async (_req, res) => {
     try {
       const ms = await storage.listModels();
@@ -3658,9 +4639,9 @@ async function registerRoutes(app2) {
   });
   app2.post("/api/data/models", async (req, res) => {
     try {
-      const { name, description, inputSchema, outputSchema, apiConfig } = req.body;
+      const { projectId, name, description, inputSchema, outputSchema, apiConfig } = req.body;
       if (!name) return res.status(400).json({ error: "name is required" });
-      const m = await storage.createModel({ name, description, inputSchema, outputSchema, apiConfig });
+      const m = await storage.createModel({ projectId, name, description, inputSchema, outputSchema, apiConfig });
       res.status(201).json(m);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -3671,6 +4652,90 @@ async function registerRoutes(app2) {
       const m = await storage.getModel(Number(req.params.id));
       if (!m) return res.status(404).json({ error: "Not found" });
       res.json(m);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/projects/:id/datasets", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const items = await storage.listProjectDatasets(projectId);
+      res.json(items);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/projects/:id/datasets/shared", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const items = await storage.listSharedDatasetsForProject(projectId);
+      res.json(items);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/projects/:id/datasets/link", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const { datasetId } = req.body;
+      if (!datasetId) return res.status(400).json({ error: "datasetId is required" });
+      const ds = await storage.getDataset(Number(datasetId));
+      if (!ds) return res.status(404).json({ error: "Dataset not found" });
+      if (ds.projectId) return res.status(400).json({ error: "Dataset is project-owned" });
+      const link = await storage.linkProjectDataset(projectId, Number(datasetId));
+      res.json(link);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.delete("/api/projects/:id/datasets/link/:datasetId", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const datasetId = Number(req.params.datasetId);
+      await storage.unlinkProjectDataset(projectId, datasetId);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/projects/:id/models", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const items = await storage.listProjectModels(projectId);
+      res.json(items);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/projects/:id/models/shared", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const items = await storage.listSharedModelsForProject(projectId);
+      res.json(items);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/projects/:id/models/link", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const { modelId } = req.body;
+      if (!modelId) return res.status(400).json({ error: "modelId is required" });
+      const m = await storage.getModel(Number(modelId));
+      if (!m) return res.status(404).json({ error: "Model not found" });
+      if (m.projectId) return res.status(400).json({ error: "Model is project-owned" });
+      const link = await storage.linkProjectModel(projectId, Number(modelId));
+      res.json(link);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.delete("/api/projects/:id/models/link/:modelId", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const modelId = Number(req.params.modelId);
+      await storage.unlinkProjectModel(projectId, modelId);
+      res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -3756,6 +4821,36 @@ async function registerRoutes(app2) {
     try {
       await storage.deletePipeline(Number(req.params.id));
       res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/exec-summary-template", async (_req, res) => {
+    try {
+      const pipelines = await storage.listPipelines();
+      const templatePipeline = pipelines.find((p) => p.name === "exec_summary_template");
+      if (!templatePipeline) {
+        return res.json({ template: DEFAULT_EXEC_SUMMARY_TEMPLATE });
+      }
+      const agentsJson = templatePipeline.agentsJson;
+      res.json({ id: templatePipeline.id, template: agentsJson.template || DEFAULT_EXEC_SUMMARY_TEMPLATE });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.put("/api/exec-summary-template", async (req, res) => {
+    try {
+      const { template } = req.body;
+      if (!template) return res.status(400).json({ error: "template is required" });
+      const pipelines = await storage.listPipelines();
+      const existing = pipelines.find((p) => p.name === "exec_summary_template");
+      if (existing) {
+        const updated = await storage.updatePipeline(existing.id, { agentsJson: { template } });
+        res.json({ id: updated.id, template });
+      } else {
+        const created = await storage.createPipeline({ name: "exec_summary_template", agentsJson: { template } });
+        res.json({ id: created.id, template });
+      }
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -3882,6 +4977,55 @@ async function registerRoutes(app2) {
       res.status(500).json({ error: err.message });
     }
   });
+  app2.post("/api/documents/:id/action-all-comments", async (req, res) => {
+    try {
+      const doc = await storage.getDocument(Number(req.params.id));
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+      const allComments = await storage.listComments(doc.id);
+      const pendingUserComments = allComments.filter(
+        (c) => c.type === "user" && c.status === "pending" && !c.aiReply
+      );
+      if (pendingUserComments.length === 0) {
+        return res.json({ message: "No pending user comments to action", results: [] });
+      }
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.flushHeaders();
+      let closed = false;
+      res.on("close", () => {
+        closed = true;
+      });
+      const sendEvent = (data) => {
+        if (closed) return;
+        res.write(`data: ${JSON.stringify(data)}
+
+`);
+      };
+      sendEvent({ type: "start", total: pendingUserComments.length });
+      await actionAllComments(doc, pendingUserComments, (progress) => {
+        sendEvent({
+          type: "progress",
+          commentId: progress.commentId,
+          aiReply: progress.aiReply,
+          proposedText: progress.proposedText,
+          index: progress.index,
+          total: progress.total
+        });
+      });
+      sendEvent({ type: "done" });
+      res.end();
+    } catch (err) {
+      if (!res.headersSent) {
+        res.status(500).json({ error: err.message });
+      } else {
+        res.write(`data: ${JSON.stringify({ type: "error", error: err.message })}
+
+`);
+        res.end();
+      }
+    }
+  });
   app2.post("/api/documents/:id/factcheck-candidates", async (req, res) => {
     try {
       const doc = await storage.getDocument(Number(req.params.id));
@@ -4000,6 +5144,617 @@ async function registerRoutes(app2) {
       res.json({ results, formattedContext: formatRAGContext(results) });
     } catch (err) {
       res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/charts", async (_req, res) => {
+    try {
+      const allCharts = await storage.listCharts();
+      res.json(allCharts);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/charts/:id", async (req, res) => {
+    try {
+      const chart = await storage.getChart(Number(req.params.id));
+      if (!chart) return res.status(404).json({ error: "Chart not found" });
+      res.json(chart);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/charts", async (req, res) => {
+    try {
+      const { projectId, datasetId, name, description, chartType, chartConfig } = req.body;
+      if (!name || !chartType) return res.status(400).json({ error: "name and chartType are required" });
+      const chart = await storage.createChart({
+        projectId: projectId || void 0,
+        datasetId: datasetId || void 0,
+        name,
+        description,
+        chartType,
+        chartConfig: chartConfig || {}
+      });
+      res.status(201).json(chart);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.put("/api/charts/:id", async (req, res) => {
+    try {
+      const chart = await storage.getChart(Number(req.params.id));
+      if (!chart) return res.status(404).json({ error: "Chart not found" });
+      const updated = await storage.updateChart(chart.id, req.body);
+      res.json(updated);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.delete("/api/charts/:id", async (req, res) => {
+    try {
+      await storage.deleteChart(Number(req.params.id));
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/charts/:id/data", async (req, res) => {
+    try {
+      const chart = await storage.getChart(Number(req.params.id));
+      if (!chart) return res.status(404).json({ error: "Chart not found" });
+      if (!chart.datasetId) return res.json({ chart, rows: [] });
+      const limit = Number(req.query.limit) || 1e3;
+      const rows = await db.select().from(datasetRows).where(eq3(datasetRows.datasetId, chart.datasetId)).orderBy(asc2(datasetRows.rowIndex)).limit(limit);
+      res.json({ chart, rows: rows.map((r) => r.data) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/charts/generate", async (req, res) => {
+    try {
+      const { datasetId, prompt, projectId } = req.body;
+      if (!datasetId || !prompt) return res.status(400).json({ error: "datasetId and prompt are required" });
+      const dataset = await storage.getDataset(Number(datasetId));
+      if (!dataset) return res.status(404).json({ error: "Dataset not found" });
+      const rows = await db.select().from(datasetRows).where(eq3(datasetRows.datasetId, dataset.id)).orderBy(asc2(datasetRows.rowIndex)).limit(50);
+      const sampleData = rows.map((r) => r.data);
+      const columns = sampleData.length > 0 ? Object.keys(sampleData[0]) : [];
+      const spec = await generateChartSpec(dataset.name, columns, sampleData, prompt);
+      const chart = await storage.createChart({
+        projectId: projectId || void 0,
+        datasetId: dataset.id,
+        name: spec.title || "Untitled Chart",
+        description: spec.description || "",
+        chartType: spec.chartType,
+        chartConfig: spec
+      });
+      res.status(201).json({ chart, spec });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/projects/:id/charts", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const projectCharts2 = await storage.listProjectCharts(projectId);
+      res.json(projectCharts2);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/projects/:id/charts/shared", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const sharedCharts = await storage.listSharedChartsForProject(projectId);
+      res.json(sharedCharts);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/projects/:id/charts/link", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const { chartId } = req.body;
+      if (!chartId) return res.status(400).json({ error: "chartId is required" });
+      const chart = await storage.getChart(Number(chartId));
+      if (!chart) return res.status(404).json({ error: "Chart not found" });
+      if (chart.projectId) return res.status(400).json({ error: "Chart is project-owned" });
+      const link = await storage.linkProjectChart(projectId, Number(chartId));
+      res.json(link);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.delete("/api/projects/:id/charts/link/:chartId", async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const chartId = Number(req.params.chartId);
+      await storage.unlinkProjectChart(projectId, chartId);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/presentations", async (req, res) => {
+    try {
+      const projectId = req.query.projectId ? Number(req.query.projectId) : void 0;
+      res.json(await storage.listPresentations(projectId));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/presentations", async (req, res) => {
+    try {
+      const pres = await storage.createPresentation(req.body);
+      res.status(201).json(pres);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/presentations/:id", async (req, res) => {
+    try {
+      const pres = await storage.getPresentation(Number(req.params.id));
+      if (!pres) return res.status(404).json({ error: "Not found" });
+      const presSlides = await storage.getPresentationSlides(pres.id);
+      res.json({ ...pres, slides: presSlides });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.patch("/api/presentations/:id", async (req, res) => {
+    try {
+      const pres = await storage.updatePresentation(Number(req.params.id), req.body);
+      res.json(pres);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.delete("/api/presentations/:id", async (req, res) => {
+    try {
+      await storage.deletePresentation(Number(req.params.id));
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/presentations/:id/slides", async (req, res) => {
+    try {
+      const presId = Number(req.params.id);
+      const pres = await storage.getPresentation(presId);
+      if (!pres) return res.status(404).json({ error: "Presentation not found" });
+      const existing = await storage.getPresentationSlides(presId);
+      const slide = await storage.createSlide({
+        presentationId: presId,
+        projectId: pres.projectId || null,
+        slideIndex: req.body.slideIndex ?? existing.length,
+        layout: req.body.layout || "title_body",
+        title: req.body.title || "New Slide",
+        subtitle: req.body.subtitle,
+        bodyJson: req.body.bodyJson || {},
+        elements: req.body.elements || [],
+        notesText: req.body.notesText
+      });
+      res.status(201).json(slide);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.patch("/api/slides/:id", async (req, res) => {
+    try {
+      const slide = await storage.updateSlide(Number(req.params.id), req.body);
+      res.json(slide);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.delete("/api/slides/:id", async (req, res) => {
+    try {
+      await storage.deleteSlide(Number(req.params.id));
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/slides/action-all-comments", async (req, res) => {
+    try {
+      const { slideContent, comments } = req.body;
+      if (!comments || comments.length === 0) {
+        return res.json({ message: "No comments to action", results: [] });
+      }
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.flushHeaders();
+      let closed = false;
+      res.on("close", () => {
+        closed = true;
+      });
+      const sendEvent = (data) => {
+        if (closed) return;
+        res.write(`data: ${JSON.stringify(data)}
+
+`);
+      };
+      sendEvent({ type: "start", total: comments.length });
+      const hasKey = !!(process.env.AI_INTEGRATIONS_OPENAI_API_KEY && process.env.AI_INTEGRATIONS_OPENAI_BASE_URL);
+      if (!hasKey) {
+        for (let i = 0; i < comments.length; i++) {
+          const c = comments[i];
+          sendEvent({
+            type: "progress",
+            index: i,
+            total: comments.length,
+            aiReply: `Reviewed: "${c.comment}". Suggested revision applied.`,
+            proposedText: c.elementContent ? `[Revised] ${c.elementContent}` : "Suggested replacement text"
+          });
+        }
+      } else {
+        const OpenAI6 = (await import("openai")).default;
+        const openai3 = new OpenAI6({
+          apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+          baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+        });
+        const commentsList = comments.map(
+          (c, i) => `Comment ${i}:
+  Element content: "${c.elementContent}"
+  User instruction: ${c.comment}`
+        ).join("\n\n");
+        const response = await openai3.chat.completions.create({
+          model: "gpt-5-nano",
+          messages: [
+            {
+              role: "system",
+              content: `You are a slide editing assistant. Multiple comments have been left on slide elements. For EACH comment, propose a specific text change.
+
+Return a JSON array where each element corresponds to one comment (same order). Each must have:
+- "index": the comment index (0-based)
+- "aiReply": brief explanation of the change
+- "proposedText": the replacement text for the element
+
+Return ONLY valid JSON array.`
+            },
+            {
+              role: "user",
+              content: `Slide content:
+${slideContent}
+
+--- Comments ---
+${commentsList}`
+            }
+          ]
+        });
+        const content = response.choices[0]?.message?.content || "[]";
+        let edits = [];
+        try {
+          const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+          const toParse = fenced ? fenced[1].trim() : content;
+          const objMatch = toParse.match(/[\[{][\s\S]*[\]}]/);
+          edits = JSON.parse(objMatch ? objMatch[0] : toParse);
+          if (!Array.isArray(edits)) edits = [];
+        } catch {
+          edits = [];
+        }
+        for (let i = 0; i < comments.length; i++) {
+          const c = comments[i];
+          const edit = edits.find((e) => e.index === i) || edits[i];
+          sendEvent({
+            type: "progress",
+            index: i,
+            total: comments.length,
+            aiReply: edit?.aiReply || "Suggested revision applied.",
+            proposedText: edit?.proposedText || c.elementContent || "Suggested replacement text"
+          });
+        }
+      }
+      sendEvent({ type: "done" });
+      res.end();
+    } catch (err) {
+      if (!res.headersSent) {
+        res.status(500).json({ error: err.message });
+      } else {
+        res.write(`data: ${JSON.stringify({ type: "error", error: err.message })}
+
+`);
+        res.end();
+      }
+    }
+  });
+  app2.post("/api/presentations/:id/reorder", async (req, res) => {
+    try {
+      await storage.reorderSlides(Number(req.params.id), req.body.slideIds);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.post("/api/presentations/:id/generate-from-document", async (req, res) => {
+    try {
+      let sendEvent2 = function(data) {
+        if (closed) return;
+        res.write(`data: ${JSON.stringify(data)}
+
+`);
+      };
+      var sendEvent = sendEvent2;
+      const presId = Number(req.params.id);
+      const pres = await storage.getPresentation(presId);
+      if (!pres) return res.status(404).json({ error: "Presentation not found" });
+      const { documentId, documentContent } = req.body;
+      let content = documentContent;
+      if (documentId && !content) {
+        const doc = await storage.getDocument(Number(documentId));
+        if (!doc) return res.status(404).json({ error: "Document not found" });
+        content = doc.content;
+      }
+      if (!content) return res.status(400).json({ error: "No content provided" });
+      const plainText = content.replace(/<[^>]*>/g, "").trim();
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.flushHeaders();
+      let closed = false;
+      req.on("close", () => {
+        closed = true;
+      });
+      sendEvent2({ status: "analyzing", message: "Analyzing document structure..." });
+      const useMock = !process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+      let generatedSlides = [];
+      if (useMock) {
+        const paragraphs = plainText.split(/\n\n+/).filter((p) => p.trim().length > 20);
+        sendEvent2({ status: "generating", message: "Generating slide outlines..." });
+        generatedSlides.push({
+          layout: "title_only",
+          title: paragraphs[0]?.slice(0, 80) || "Presentation",
+          subtitle: "Generated from document",
+          bodyJson: {},
+          elements: []
+        });
+        const bodyParagraphs = paragraphs.slice(1);
+        for (let i = 0; i < bodyParagraphs.length; i += 3) {
+          const chunk = bodyParagraphs.slice(i, i + 3);
+          const bullets = chunk.map((p) => {
+            const sentences = p.split(/[.!?]+/).filter((s) => s.trim());
+            return sentences[0]?.trim().slice(0, 120) || p.slice(0, 120);
+          });
+          generatedSlides.push({
+            layout: "title_body",
+            title: bullets[0]?.slice(0, 60) || `Section ${Math.floor(i / 3) + 1}`,
+            bodyJson: { bullets },
+            elements: []
+          });
+          sendEvent2({ status: "generating", message: `Generated slide ${generatedSlides.length}...` });
+        }
+        if (generatedSlides.length < 2) {
+          generatedSlides.push({
+            layout: "title_body",
+            title: "Key Points",
+            bodyJson: { bullets: ["Summary of key findings", "Recommendations", "Next steps"] },
+            elements: []
+          });
+        }
+      } else {
+        const { default: OpenAI6 } = await import("openai");
+        const openai3 = new OpenAI6();
+        sendEvent2({ status: "generating", message: "AI is creating slides..." });
+        const completion = await openai3.chat.completions.create({
+          model: "gpt-5.1-mini",
+          messages: [
+            {
+              role: "system",
+              content: `You are a presentation designer. Convert the given document into a structured slide deck.
+Return a JSON array of slides. Each slide has:
+- "layout": one of "title_only", "title_body", "two_column", "blank"
+- "title": string (concise slide title)
+- "subtitle": optional string
+- "bodyJson": object with "bullets" array of strings for key points
+- "elements": empty array
+
+Guidelines:
+- First slide should be a title slide (layout: "title_only")
+- Each slide should have 3-5 bullet points max
+- Keep titles under 60 characters
+- Keep bullets concise and actionable
+- Create 5-15 slides depending on content length
+- End with a summary or next steps slide
+
+Return ONLY the JSON array, no other text.`
+            },
+            {
+              role: "user",
+              content: plainText.slice(0, 12e3)
+            }
+          ],
+          max_completion_tokens: 4096
+        });
+        const raw = completion.choices[0]?.message?.content || "[]";
+        try {
+          const jsonMatch = raw.match(/\[[\s\S]*\]/);
+          generatedSlides = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
+        } catch {
+          generatedSlides = [{
+            layout: "title_body",
+            title: "Generated Content",
+            bodyJson: { bullets: ["Failed to parse AI output \u2014 please try again."] },
+            elements: []
+          }];
+        }
+      }
+      sendEvent2({ status: "saving", message: `Saving ${generatedSlides.length} slides...` });
+      const created = [];
+      for (let i = 0; i < generatedSlides.length; i++) {
+        const s = generatedSlides[i];
+        const slide = await storage.createSlide({
+          presentationId: presId,
+          projectId: pres.projectId || null,
+          slideIndex: i,
+          layout: s.layout || "title_body",
+          title: s.title || `Slide ${i + 1}`,
+          subtitle: s.subtitle,
+          bodyJson: s.bodyJson || {},
+          elements: s.elements || [],
+          notesText: s.notesText
+        });
+        created.push(slide);
+      }
+      sendEvent2({ done: true, slides: created });
+      if (!closed) res.end();
+    } catch (err) {
+      console.error("Generate slides error:", err);
+      if (res.headersSent) {
+        res.write(`data: ${JSON.stringify({ error: err.message })}
+
+`);
+        res.end();
+      } else {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  });
+  app2.post("/api/editor-chat", async (req, res) => {
+    try {
+      let sendEvent2 = function(data) {
+        if (closed) return;
+        res.write(`data: ${JSON.stringify(data)}
+
+`);
+      };
+      var sendEvent = sendEvent2;
+      const { editorType, editorId, mode, message, editorContent, history } = req.body;
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.flushHeaders();
+      let closed = false;
+      res.on("close", () => {
+        closed = true;
+      });
+      sendEvent2({ status: "thinking", message: "Preparing..." });
+      const openai3 = new OpenAI5({
+        apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
+        baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+      });
+      const contentLabel = editorType === "document" ? "Document" : "Slide Deck";
+      const contentSnippet = (editorContent || "").replace(/<[^>]*>/g, "").slice(0, 12e3);
+      if (mode.startsWith("workflow:")) {
+        const workflowId = Number(mode.split(":")[1]);
+        const wfSteps = await storage.getWorkflowTemplateSteps(workflowId);
+        sendEvent2({ status: "starting", message: "Starting workflow..." });
+        let accumulatedContext = `${contentLabel} content:
+${contentSnippet}
+
+User request: ${message}`;
+        for (let i = 0; i < wfSteps.length; i++) {
+          const step = wfSteps[i];
+          sendEvent2({ workflowStep: `Step ${i + 1}/${wfSteps.length}: ${step.name}` });
+          sendEvent2({ status: "running", message: `Running ${step.name}...`, agentName: step.name });
+          const agentConfig = await storage.getAgentConfig(step.agentKey);
+          const sysPrompt = agentConfig?.systemPrompt || DEFAULT_PROMPTS[step.agentKey] || `You are a ${step.name} agent.`;
+          try {
+            const stream = await openai3.chat.completions.create({
+              model: agentConfig?.model || "gpt-5-nano",
+              messages: [
+                { role: "system", content: `${sysPrompt}
+
+You are operating within a workflow pipeline. Analyze the input and produce output that flows to the next step. Be concise and structured.${editorType === "document" ? " IMPORTANT: Format all output as HTML (use <h1>, <h2>, <strong>, <em>, <ul>/<ol>/<li>, <p>, <hr> tags). Never use markdown syntax." : ""}` },
+                { role: "user", content: accumulatedContext }
+              ],
+              stream: true,
+              max_completion_tokens: agentConfig?.maxTokens || 4096
+            });
+            let stepOutput = "";
+            for await (const chunk of stream) {
+              const token = chunk.choices[0]?.delta?.content || "";
+              if (token) {
+                stepOutput += token;
+                sendEvent2({ content: token });
+              }
+            }
+            accumulatedContext = `Previous step (${step.name}) output:
+${stepOutput}
+
+Original ${contentLabel} content:
+${contentSnippet}
+
+Original user request: ${message}`;
+          } catch (err) {
+            console.error(`Workflow step ${step.name} error:`, err);
+            sendEvent2({ content: `
+
+[${step.name} encountered an error: ${err.message}]
+` });
+          }
+        }
+        sendEvent2({ done: true });
+        if (!closed) res.end();
+        return;
+      }
+      let systemPrompt;
+      let agentName = "";
+      const htmlFormatInstructions = editorType === "document" ? `
+
+IMPORTANT: Your output will be inserted directly into a rich text editor (HTML). You MUST format your response as HTML, NOT markdown. Use <h1>, <h2>, <h3> for headings, <strong> for bold, <em> for italics, <ul>/<ol> with <li> for lists, <p> for paragraphs, <hr> for dividers. Never use markdown syntax like **, ##, ---, or - for lists.` : "";
+      if (mode === "general") {
+        systemPrompt = `You are a helpful AI assistant embedded in a ${editorType === "document" ? "word processor" : "slide editor"}. You have access to the user's current ${contentLabel.toLowerCase()} content. Help them with writing, editing, analysis, brainstorming, and any other questions. Be concise and actionable.${htmlFormatInstructions}
+
+${contentLabel} content:
+${contentSnippet}`;
+        agentName = "General Assistant";
+      } else {
+        const agentConfig = await storage.getAgentConfig(mode);
+        systemPrompt = agentConfig?.systemPrompt || DEFAULT_PROMPTS[mode] || `You are a ${mode} agent. Help the user with their ${contentLabel.toLowerCase()}.`;
+        systemPrompt = `${systemPrompt}
+
+You are operating inside an editor chat. The user is asking you to apply your expertise to their current ${contentLabel.toLowerCase()}. Provide actionable feedback and suggestions.${htmlFormatInstructions}
+
+${contentLabel} content:
+${contentSnippet}`;
+        const agentRecord = await storage.getAgentByKey(mode);
+        agentName = agentRecord?.name || mode;
+      }
+      console.log("[editor-chat] Sending connecting event for:", agentName);
+      sendEvent2({ status: "connecting", message: `${agentName} is thinking...`, agentName });
+      const chatMessages = [
+        { role: "system", content: systemPrompt }
+      ];
+      if (history && Array.isArray(history)) {
+        for (const h of history.slice(-10)) {
+          chatMessages.push({ role: h.role, content: h.content });
+        }
+      }
+      chatMessages.push({ role: "user", content: message });
+      sendEvent2({ status: "streaming", message: "Generating response..." });
+      try {
+        const stream = await openai3.chat.completions.create({
+          model: "gpt-5.1",
+          messages: chatMessages,
+          stream: true,
+          max_completion_tokens: 4096
+        });
+        for await (const chunk of stream) {
+          const token = chunk.choices[0]?.delta?.content || "";
+          if (token) {
+            sendEvent2({ content: token });
+          }
+        }
+      } catch (aiErr) {
+        console.error("[editor-chat] OpenAI error:", aiErr.message);
+        sendEvent2({ error: `AI error: ${aiErr.message}` });
+      }
+      sendEvent2({ done: true });
+      if (!closed) res.end();
+    } catch (error) {
+      console.error("Editor chat error:", error);
+      if (res.headersSent) {
+        res.write(`data: ${JSON.stringify({ error: error.message || "Failed to process request" })}
+
+`);
+        res.write(`data: ${JSON.stringify({ done: true })}
+
+`);
+        res.end();
+      } else {
+        res.status(500).json({ error: "Failed to process request" });
+      }
     }
   });
   registerChatRoutes(app2);
@@ -4124,16 +5879,9 @@ function setupErrorHandler(app2) {
   }
   setupErrorHandler(app);
   const port = parseInt(process.env.PORT || "5000", 10);
-  server.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true
-    },
-    () => {
-      log(`express server serving on port ${port}`);
-    }
-  );
+  server.listen(port, "0.0.0.0", () => {
+    log(`express server serving on port ${port}`);
+  });
   if (isDev) {
     const http = await import("http");
     const proxyPort = 8081;

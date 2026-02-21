@@ -19,6 +19,9 @@ import {
   models,
   workflowInstances,
   workflowInstanceSteps,
+  projectPhases,
+  projectTasks,
+  projectCheckpoints,
   deliverables,
   stepChatMessages,
   conversations,
@@ -29,6 +32,10 @@ import {
   vaultChunks,
   datasetRows,
   charts,
+  projectCharts,
+  projectDatasets,
+  projectModels,
+  users,
   type Project,
   type InsertProject,
   type StepChatMessage,
@@ -45,16 +52,23 @@ import {
   type WorkflowTemplate,
   type WorkflowTemplateStep,
   type Agent,
+  type User,
   type Dataset,
   type Model,
   type WorkflowInstance,
   type WorkflowInstanceStep,
+  type ProjectPhase,
+  type ProjectTask,
+  type ProjectCheckpoint,
   type Deliverable,
   type Document,
   type DocumentComment,
   type VaultFile,
   type VaultChunk,
   type Chart,
+  type ProjectChart,
+  type ProjectDataset,
+  type ProjectModel,
 } from "@shared/schema";
 
 export const storage = {
@@ -85,6 +99,33 @@ export const storage = {
       .where(eq(projects.id, id))
       .returning();
     return project;
+  },
+
+  async listUsers(): Promise<User[]> {
+    return db.select().from(users).orderBy(desc(users.updatedAt));
+  },
+
+  async getUser(id: number): Promise<User | undefined> {
+    const [u] = await db.select().from(users).where(eq(users.id, id));
+    return u;
+  },
+
+  async createUser(data: { name: string; email: string; role?: string }): Promise<User> {
+    const [u] = await db.insert(users).values({
+      name: data.name,
+      email: data.email,
+      role: data.role || "member",
+    }).returning();
+    return u;
+  },
+
+  async ensureDefaultUsers(): Promise<void> {
+    const [{ count }] = await db.select({ count: sql<number>`count(*)` }).from(users);
+    if (count && Number(count) > 0) return;
+    await db.insert(users).values([
+      { name: "Avery Chen", email: "avery.chen@example.com", role: "admin" },
+      { name: "Jordan Patel", email: "jordan.patel@example.com", role: "member" },
+    ]);
   },
 
   async createWorkflowTemplate(data: { name: string; description?: string }): Promise<WorkflowTemplate> {
@@ -257,8 +298,10 @@ export const storage = {
     return d;
   },
 
-  async createDataset(data: { name: string; description?: string; owner?: string; accessLevel?: string; sourceType?: string; sourceUrl?: string; schemaJson?: any; metadata?: any; rowCount?: number }): Promise<Dataset> {
+  async createDataset(data: { projectId?: number | null; lastEditedByUserId?: number | null; name: string; description?: string; owner?: string; accessLevel?: string; sourceType?: string; sourceUrl?: string; schemaJson?: any; metadata?: any; rowCount?: number }): Promise<Dataset> {
     const [d] = await db.insert(datasets).values({
+      projectId: data.projectId || null,
+      lastEditedByUserId: data.lastEditedByUserId || null,
       name: data.name,
       description: data.description || "",
       owner: data.owner || "system",
@@ -272,7 +315,7 @@ export const storage = {
     return d;
   },
 
-  async updateDataset(id: number, data: { name?: string; description?: string; sourceType?: string; sourceUrl?: string; schemaJson?: any; metadata?: any; rowCount?: number }): Promise<Dataset> {
+  async updateDataset(id: number, data: { name?: string; description?: string; sourceType?: string; sourceUrl?: string; schemaJson?: any; metadata?: any; rowCount?: number; lastEditedByUserId?: number | null }): Promise<Dataset> {
     const [d] = await db.update(datasets).set({ ...data, updatedAt: new Date() }).where(eq(datasets.id, id)).returning();
     return d;
   },
@@ -280,6 +323,64 @@ export const storage = {
   async deleteDataset(id: number): Promise<void> {
     await db.delete(datasetRows).where(eq(datasetRows.datasetId, id));
     await db.delete(datasets).where(eq(datasets.id, id));
+  },
+
+  async listProjectDatasets(projectId: number): Promise<Dataset[]> {
+    const owned = await db
+      .select()
+      .from(datasets)
+      .where(eq(datasets.projectId, projectId))
+      .orderBy(desc(datasets.createdAt));
+
+    const linked = await db
+      .select({ dataset: datasets })
+      .from(projectDatasets)
+      .innerJoin(datasets, eq(projectDatasets.datasetId, datasets.id))
+      .where(and(eq(projectDatasets.projectId, projectId), sql`${datasets.projectId} is null`))
+      .orderBy(desc(datasets.createdAt));
+
+    const combined = [...owned, ...linked.map((l) => l.dataset)];
+    const seen = new Set<number>();
+    return combined.filter((d) => {
+      if (seen.has(d.id)) return false;
+      seen.add(d.id);
+      return true;
+    });
+  },
+
+  async listSharedDatasetsForProject(projectId: number): Promise<Dataset[]> {
+    const shared = await db
+      .select()
+      .from(datasets)
+      .where(sql`${datasets.projectId} is null`)
+      .orderBy(desc(datasets.createdAt));
+
+    const linked = await db
+      .select({ datasetId: projectDatasets.datasetId })
+      .from(projectDatasets)
+      .where(eq(projectDatasets.projectId, projectId));
+    const linkedIds = new Set(linked.map((l) => l.datasetId));
+
+    return shared.filter((d) => !linkedIds.has(d.id));
+  },
+
+  async linkProjectDataset(projectId: number, datasetId: number): Promise<ProjectDataset> {
+    const existing = await db
+      .select()
+      .from(projectDatasets)
+      .where(and(eq(projectDatasets.projectId, projectId), eq(projectDatasets.datasetId, datasetId)));
+    if (existing.length > 0) return existing[0];
+    const [link] = await db
+      .insert(projectDatasets)
+      .values({ projectId, datasetId })
+      .returning();
+    return link;
+  },
+
+  async unlinkProjectDataset(projectId: number, datasetId: number): Promise<void> {
+    await db
+      .delete(projectDatasets)
+      .where(and(eq(projectDatasets.projectId, projectId), eq(projectDatasets.datasetId, datasetId)));
   },
 
   async insertDatasetRows(datasetId: number, rows: Array<{ rowIndex: number; data: any }>): Promise<void> {
@@ -314,8 +415,10 @@ export const storage = {
     return m;
   },
 
-  async createModel(data: { name: string; description?: string; inputSchema?: any; outputSchema?: any; apiConfig?: any }): Promise<Model> {
+  async createModel(data: { projectId?: number | null; lastEditedByUserId?: number | null; name: string; description?: string; inputSchema?: any; outputSchema?: any; apiConfig?: any }): Promise<Model> {
     const [m] = await db.insert(models).values({
+      projectId: data.projectId || null,
+      lastEditedByUserId: data.lastEditedByUserId || null,
       name: data.name,
       description: data.description || "",
       inputSchema: data.inputSchema || null,
@@ -323,6 +426,64 @@ export const storage = {
       apiConfig: data.apiConfig || null,
     }).returning();
     return m;
+  },
+
+  async listProjectModels(projectId: number): Promise<Model[]> {
+    const owned = await db
+      .select()
+      .from(models)
+      .where(eq(models.projectId, projectId))
+      .orderBy(desc(models.createdAt));
+
+    const linked = await db
+      .select({ model: models })
+      .from(projectModels)
+      .innerJoin(models, eq(projectModels.modelId, models.id))
+      .where(and(eq(projectModels.projectId, projectId), sql`${models.projectId} is null`))
+      .orderBy(desc(models.createdAt));
+
+    const combined = [...owned, ...linked.map((l) => l.model)];
+    const seen = new Set<number>();
+    return combined.filter((m) => {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
+  },
+
+  async listSharedModelsForProject(projectId: number): Promise<Model[]> {
+    const shared = await db
+      .select()
+      .from(models)
+      .where(sql`${models.projectId} is null`)
+      .orderBy(desc(models.createdAt));
+
+    const linked = await db
+      .select({ modelId: projectModels.modelId })
+      .from(projectModels)
+      .where(eq(projectModels.projectId, projectId));
+    const linkedIds = new Set(linked.map((l) => l.modelId));
+
+    return shared.filter((m) => !linkedIds.has(m.id));
+  },
+
+  async linkProjectModel(projectId: number, modelId: number): Promise<ProjectModel> {
+    const existing = await db
+      .select()
+      .from(projectModels)
+      .where(and(eq(projectModels.projectId, projectId), eq(projectModels.modelId, modelId)));
+    if (existing.length > 0) return existing[0];
+    const [link] = await db
+      .insert(projectModels)
+      .values({ projectId, modelId })
+      .returning();
+    return link;
+  },
+
+  async unlinkProjectModel(projectId: number, modelId: number): Promise<void> {
+    await db
+      .delete(projectModels)
+      .where(and(eq(projectModels.projectId, projectId), eq(projectModels.modelId, modelId)));
   },
 
   async createWorkflowInstance(data: {
@@ -397,6 +558,163 @@ export const storage = {
       .where(eq(workflowInstances.id, instanceId))
       .returning();
     return instance;
+  },
+
+  async listProjectPhases(projectId: number): Promise<ProjectPhase[]> {
+    return db
+      .select()
+      .from(projectPhases)
+      .where(eq(projectPhases.projectId, projectId))
+      .orderBy(asc(projectPhases.sortOrder));
+  },
+
+  async createProjectPhase(data: {
+    projectId: number;
+    title: string;
+    description?: string;
+    status?: string;
+    sortOrder?: number;
+  }): Promise<ProjectPhase> {
+    const [phase] = await db
+      .insert(projectPhases)
+      .values({
+        projectId: data.projectId,
+        title: data.title,
+        description: data.description || "",
+        status: data.status || "not_started",
+        sortOrder: data.sortOrder ?? 0,
+      })
+      .returning();
+    return phase;
+  },
+
+  async updateProjectPhase(id: number, data: { title?: string; description?: string; status?: string; sortOrder?: number }): Promise<ProjectPhase> {
+    const [phase] = await db
+      .update(projectPhases)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(projectPhases.id, id))
+      .returning();
+    return phase;
+  },
+
+  async deleteProjectPhase(id: number): Promise<void> {
+    await db.delete(projectPhases).where(eq(projectPhases.id, id));
+  },
+
+  async listProjectTasks(projectId: number): Promise<ProjectTask[]> {
+    return db
+      .select()
+      .from(projectTasks)
+      .where(eq(projectTasks.projectId, projectId))
+      .orderBy(asc(projectTasks.sortOrder));
+  },
+
+  async createProjectTask(data: {
+    projectId: number;
+    phaseId?: number | null;
+    title: string;
+    description?: string;
+    ownerType?: string;
+    assigneeUserId?: number | null;
+    workflowStepId?: number | null;
+    status?: string;
+    dueDate?: Date | null;
+    sortOrder?: number;
+  }): Promise<ProjectTask> {
+    const [task] = await db
+      .insert(projectTasks)
+      .values({
+        projectId: data.projectId,
+        phaseId: data.phaseId ?? null,
+        title: data.title,
+        description: data.description || "",
+        ownerType: data.ownerType || "human",
+        assigneeUserId: data.assigneeUserId ?? null,
+        workflowStepId: data.workflowStepId ?? null,
+        status: data.status || "not_started",
+        dueDate: data.dueDate ?? null,
+        sortOrder: data.sortOrder ?? 0,
+      })
+      .returning();
+    return task;
+  },
+
+  async updateProjectTask(id: number, data: {
+    phaseId?: number | null;
+    title?: string;
+    description?: string;
+    ownerType?: string;
+    assigneeUserId?: number | null;
+    workflowStepId?: number | null;
+    status?: string;
+    dueDate?: Date | null;
+    sortOrder?: number;
+  }): Promise<ProjectTask> {
+    const [task] = await db
+      .update(projectTasks)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(projectTasks.id, id))
+      .returning();
+    return task;
+  },
+
+  async deleteProjectTask(id: number): Promise<void> {
+    await db.delete(projectTasks).where(eq(projectTasks.id, id));
+  },
+
+  async listProjectCheckpoints(projectId: number): Promise<ProjectCheckpoint[]> {
+    return db
+      .select()
+      .from(projectCheckpoints)
+      .where(eq(projectCheckpoints.projectId, projectId))
+      .orderBy(asc(projectCheckpoints.sortOrder));
+  },
+
+  async createProjectCheckpoint(data: {
+    projectId: number;
+    phaseId?: number | null;
+    title: string;
+    description?: string;
+    status?: string;
+    linkedDeliverableId?: number | null;
+    dueDate?: Date | null;
+    sortOrder?: number;
+  }): Promise<ProjectCheckpoint> {
+    const [checkpoint] = await db
+      .insert(projectCheckpoints)
+      .values({
+        projectId: data.projectId,
+        phaseId: data.phaseId ?? null,
+        title: data.title,
+        description: data.description || "",
+        status: data.status || "pending",
+        linkedDeliverableId: data.linkedDeliverableId ?? null,
+        dueDate: data.dueDate ?? null,
+        sortOrder: data.sortOrder ?? 0,
+      })
+      .returning();
+    return checkpoint;
+  },
+
+  async updateProjectCheckpoint(id: number, data: {
+    phaseId?: number | null;
+    title?: string;
+    description?: string;
+    status?: string;
+    linkedDeliverableId?: number | null;
+    dueDate?: Date | null;
+    sortOrder?: number;
+  }): Promise<ProjectCheckpoint> {
+    const [checkpoint] = await db
+      .update(projectCheckpoints)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(projectCheckpoints.id, id))
+      .returning();
+    return checkpoint;
+  },
+
+  async deleteProjectCheckpoint(id: number): Promise<void> {
+    await db.delete(projectCheckpoints).where(eq(projectCheckpoints.id, id));
   },
 
   async createDeliverable(data: {
@@ -685,7 +1003,14 @@ export const storage = {
       .orderBy(desc(slides.version), slides.slideIndex);
   },
 
-  async listPresentations(): Promise<Presentation[]> {
+  async listPresentations(projectId?: number): Promise<Presentation[]> {
+    if (projectId) {
+      return db
+        .select()
+        .from(presentations)
+        .where(eq(presentations.projectId, projectId))
+        .orderBy(desc(presentations.updatedAt));
+    }
     return db.select().from(presentations).orderBy(desc(presentations.updatedAt));
   },
 
@@ -694,16 +1019,17 @@ export const storage = {
     return p;
   },
 
-  async createPresentation(data: { title?: string; projectId?: number; theme?: any }): Promise<Presentation> {
+  async createPresentation(data: { title?: string; projectId?: number; theme?: any; lastEditedByUserId?: number | null }): Promise<Presentation> {
     const [p] = await db.insert(presentations).values({
       title: data.title || "Untitled Presentation",
       projectId: data.projectId || null,
+      lastEditedByUserId: data.lastEditedByUserId || null,
       theme: data.theme || { bgColor: "#ffffff", textColor: "#1a1a2e", accentColor: "#3b82f6", fontFamily: "Inter" },
     }).returning();
     return p;
   },
 
-  async updatePresentation(id: number, data: { title?: string; theme?: any }): Promise<Presentation> {
+  async updatePresentation(id: number, data: { title?: string; theme?: any; lastEditedByUserId?: number | null }): Promise<Presentation> {
     const [p] = await db.update(presentations)
       .set({ ...data, updatedAt: new Date() })
       .where(eq(presentations.id, id))
@@ -724,6 +1050,7 @@ export const storage = {
   async createSlide(data: {
     presentationId: number;
     projectId?: number | null;
+    lastEditedByUserId?: number | null;
     slideIndex: number;
     layout?: string;
     title: string;
@@ -735,6 +1062,7 @@ export const storage = {
     const [s] = await db.insert(slides).values({
       presentationId: data.presentationId,
       projectId: data.projectId || null,
+      lastEditedByUserId: data.lastEditedByUserId || null,
       slideIndex: data.slideIndex,
       layout: data.layout || "title_body",
       title: data.title,
@@ -754,6 +1082,7 @@ export const storage = {
     elements?: any;
     notesText?: string;
     slideIndex?: number;
+    lastEditedByUserId?: number | null;
   }): Promise<Slide> {
     const [s] = await db.update(slides)
       .set(data)
@@ -878,11 +1207,12 @@ export const storage = {
     await db.delete(stepChatMessages).where(eq(stepChatMessages.stepId, stepId));
   },
 
-  async createDocument(data: { projectId?: number; title?: string; content?: string; contentJson?: any }): Promise<Document> {
+  async createDocument(data: { projectId?: number; lastEditedByUserId?: number | null; title?: string; content?: string; contentJson?: any }): Promise<Document> {
     const [doc] = await db
       .insert(documents)
       .values({
         projectId: data.projectId || null,
+        lastEditedByUserId: data.lastEditedByUserId || null,
         title: data.title || "Untitled Document",
         content: data.content || "",
         contentJson: data.contentJson || null,
@@ -903,7 +1233,7 @@ export const storage = {
     return doc;
   },
 
-  async updateDocument(id: number, data: { title?: string; content?: string; contentJson?: any }): Promise<Document> {
+  async updateDocument(id: number, data: { title?: string; content?: string; contentJson?: any; lastEditedByUserId?: number | null }): Promise<Document> {
     const [doc] = await db
       .update(documents)
       .set({ ...data, updatedAt: new Date() })
@@ -1056,6 +1386,7 @@ export const storage = {
   async createChart(data: {
     projectId?: number;
     datasetId?: number;
+    lastEditedByUserId?: number | null;
     name: string;
     description?: string;
     chartType: string;
@@ -1066,6 +1397,7 @@ export const storage = {
       .values({
         projectId: data.projectId || null,
         datasetId: data.datasetId || null,
+        lastEditedByUserId: data.lastEditedByUserId || null,
         name: data.name,
         description: data.description || "",
         chartType: data.chartType,
@@ -1077,6 +1409,64 @@ export const storage = {
 
   async listCharts(): Promise<Chart[]> {
     return db.select().from(charts).orderBy(desc(charts.createdAt));
+  },
+
+  async listProjectCharts(projectId: number): Promise<Chart[]> {
+    const owned = await db
+      .select()
+      .from(charts)
+      .where(eq(charts.projectId, projectId))
+      .orderBy(desc(charts.createdAt));
+
+    const linked = await db
+      .select({ chart: charts })
+      .from(projectCharts)
+      .innerJoin(charts, eq(projectCharts.chartId, charts.id))
+      .where(and(eq(projectCharts.projectId, projectId), sql`${charts.projectId} is null`))
+      .orderBy(desc(charts.createdAt));
+
+    const combined = [...owned, ...linked.map((l) => l.chart)];
+    const seen = new Set<number>();
+    return combined.filter((c) => {
+      if (seen.has(c.id)) return false;
+      seen.add(c.id);
+      return true;
+    });
+  },
+
+  async listSharedChartsForProject(projectId: number): Promise<Chart[]> {
+    const shared = await db
+      .select()
+      .from(charts)
+      .where(sql`${charts.projectId} is null`)
+      .orderBy(desc(charts.createdAt));
+
+    const linked = await db
+      .select({ chartId: projectCharts.chartId })
+      .from(projectCharts)
+      .where(eq(projectCharts.projectId, projectId));
+    const linkedIds = new Set(linked.map((l) => l.chartId));
+
+    return shared.filter((c) => !linkedIds.has(c.id));
+  },
+
+  async linkProjectChart(projectId: number, chartId: number): Promise<ProjectChart> {
+    const existing = await db
+      .select()
+      .from(projectCharts)
+      .where(and(eq(projectCharts.projectId, projectId), eq(projectCharts.chartId, chartId)));
+    if (existing.length > 0) return existing[0];
+    const [link] = await db
+      .insert(projectCharts)
+      .values({ projectId, chartId })
+      .returning();
+    return link;
+  },
+
+  async unlinkProjectChart(projectId: number, chartId: number): Promise<void> {
+    await db
+      .delete(projectCharts)
+      .where(and(eq(projectCharts.projectId, projectId), eq(projectCharts.chartId, chartId)));
   },
 
   async getChart(id: number): Promise<Chart | undefined> {
@@ -1091,6 +1481,7 @@ export const storage = {
     chartConfig: any;
     datasetId: number | null;
     projectId: number | null;
+    lastEditedByUserId: number | null;
   }>): Promise<Chart> {
     const [chart] = await db
       .update(charts)

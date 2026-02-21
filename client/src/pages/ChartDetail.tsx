@@ -11,6 +11,7 @@ import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { Separator } from "../components/ui/separator";
+import { Skeleton } from "../components/ui/skeleton";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "../components/ui/dialog";
@@ -18,6 +19,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "../components/ui/select";
 import ChartRenderer from "../components/ChartRenderer";
+import { useUserContext } from "../lib/user-context";
 
 const CHART_TYPES = [
   { value: "bar", label: "Bar" },
@@ -34,9 +36,10 @@ const PRESET_COLORS = [
 ];
 
 export default function ChartDetail() {
-  const { id } = useParams();
+  const { id, projectId } = useParams<{ id: string; projectId?: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { activeUser } = useUserContext();
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
@@ -96,7 +99,7 @@ export default function ChartDetail() {
       const res = await fetch(`/api/charts/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, lastEditedByUserId: activeUser?.id || null }),
       });
       return res.json();
     },
@@ -122,7 +125,11 @@ export default function ChartDetail() {
       const res = await fetch("/api/charts/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          ...data,
+          projectId: projectId ? Number(projectId) : undefined,
+          lastEditedByUserId: activeUser?.id || null,
+        }),
       });
       if (!res.ok) throw new Error(await res.text());
       return res.json();
@@ -133,7 +140,11 @@ export default function ChartDetail() {
       }
       queryClient.invalidateQueries({ queryKey: ["/api/charts"] });
       setRegenOpen(false);
-      navigate(`/charts/${result.chart.id}`);
+      if (projectId) {
+        navigate(`/project/${projectId}/charts/${result.chart.id}`);
+      } else {
+        navigate(`/charts/${result.chart.id}`);
+      }
     },
   });
 
@@ -174,17 +185,40 @@ export default function ChartDetail() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <Loader2 className="animate-spin" size={24} />
+      <div className="p-6 max-w-6xl mx-auto space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-9 w-24" />
+            <Skeleton className="h-6 w-48" />
+          </div>
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-8 w-20" />
+            <Skeleton className="h-8 w-20" />
+          </div>
+        </div>
+        <Card className="p-4">
+          <Skeleton className="h-6 w-40 mb-4" />
+          <Skeleton className="h-[280px] w-full" />
+        </Card>
+        <Card className="p-4">
+          <Skeleton className="h-5 w-32 mb-3" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-24 w-full md:col-span-2" />
+          </div>
+        </Card>
       </div>
     );
   }
+
+  const backPath = projectId ? `/project/${projectId}/charts` : "/charts";
 
   if (!c) {
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-4">
         <p className="text-muted-foreground">Chart not found</p>
-        <Button variant="outline" onClick={() => navigate("/charts")}>
+        <Button variant="outline" onClick={() => navigate(backPath)}>
           <ArrowLeft size={16} className="mr-2" /> Back to Charts
         </Button>
       </div>
@@ -196,7 +230,7 @@ export default function ChartDetail() {
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
       <div className="sticky top-0 z-20 flex items-center h-14 px-4 border-b bg-background/95 backdrop-blur gap-3">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/charts")}>
+        <Button variant="ghost" size="sm" onClick={() => navigate(backPath)}>
           <ArrowLeft size={16} />
         </Button>
         {editing ? (

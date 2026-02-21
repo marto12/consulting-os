@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Bot, ChevronRight, Loader2 } from "lucide-react";
+import { Bot, ChevronRight } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
+import { Skeleton } from "../components/ui/skeleton";
 
 interface Agent {
   id: number;
@@ -21,9 +22,28 @@ export default function Agents() {
   });
 
   if (isLoading) {
+    const skeletonCards = Array.from({ length: 6 });
     return (
-      <div className="flex items-center justify-center min-h-[300px]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {skeletonCards.map((_, idx) => (
+          <Card key={`agent-skeleton-${idx}`} className="p-4">
+            <div className="flex items-start gap-3 mb-3">
+              <Skeleton className="h-10 w-10 rounded-lg" />
+              <div className="flex-1 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-4 w-4" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-5 w-20" />
+                  <Skeleton className="h-3 w-16" />
+                </div>
+              </div>
+            </div>
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-5/6 mt-2" />
+          </Card>
+        ))}
       </div>
     );
   }
@@ -46,7 +66,7 @@ export default function Agents() {
             <Card
               key={agent.id}
               className="cursor-pointer hover:-translate-y-0.5 hover:shadow-md transition-all p-4"
-              onClick={() => navigate(`/agent/${agent.key}`)}
+              onClick={() => navigate(`/global/agent/${agent.key}`)}
               data-testid={`agent-card-${agent.key}`}
             >
               <div className="flex items-start gap-3 mb-3">

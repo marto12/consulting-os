@@ -11,6 +11,7 @@ import { Textarea } from "../components/ui/textarea";
 import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { Progress } from "../components/ui/progress";
+import { Skeleton } from "../components/ui/skeleton";
 import { cn } from "../lib/utils";
 
 const STAGE_LABELS: Record<string, string> = {
@@ -74,6 +75,8 @@ export default function Projects() {
     },
   });
 
+  const skeletonCards = Array.from({ length: 6 });
+
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
@@ -88,8 +91,29 @@ export default function Projects() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center min-h-[300px]">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {skeletonCards.map((_, idx) => (
+            <Card key={`project-skeleton-${idx}`} className="p-4">
+              <div className="flex items-start justify-between gap-2 mb-3">
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-3 w-full" />
+                  <Skeleton className="h-3 w-5/6" />
+                </div>
+                <Skeleton className="h-5 w-5" />
+              </div>
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-5 w-20" />
+                  <Skeleton className="h-5 w-24" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-2 w-full" />
+                  <Skeleton className="h-3 w-10" />
+                </div>
+              </div>
+            </Card>
+          ))}
         </div>
       ) : !projects || projects.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 px-10 gap-3 text-muted-foreground">

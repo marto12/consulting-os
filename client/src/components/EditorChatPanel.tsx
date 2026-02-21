@@ -18,8 +18,20 @@ import { Textarea } from "./ui/textarea";
 import { ScrollArea } from "./ui/scroll-area";
 import { cn } from "../lib/utils";
 
+const markdownPattern = /(\*\*|__|##|^- |\n\d+\. |^#{1,6} |```|---)/m;
+
+function normalizeEditorInsertText(text: string): string {
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (markdownPattern.test(normalized)) return normalized.trim();
+  return normalized
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/([^\n])\n([^\n])/g, "$1 $2")
+    .trim();
+}
+
 function markdownToHtml(text: string): string {
-  const hasMarkdown = /(\*\*|__|##|^- |\n\d+\. |^#{1,6} |```|---)/m.test(text);
+  const hasMarkdown = markdownPattern.test(text);
   if (!hasMarkdown) return text;
   let result = marked.parse(text, { async: false }) as string;
   result = result
@@ -56,6 +68,7 @@ interface EditorChatPanelProps {
   editorId: number;
   getContentFn: () => string;
   onInsertContent?: (text: string) => void;
+  onClearContent?: () => void;
   className?: string;
 }
 
@@ -71,6 +84,7 @@ export default function EditorChatPanel({
   editorId,
   getContentFn,
   onInsertContent,
+  onClearContent,
   className,
 }: EditorChatPanelProps) {
   const [open, setOpen] = useState(false);
@@ -133,6 +147,13 @@ export default function EditorChatPanel({
 
   const writeToDoc = editorType === "document" && !!onInsertContent;
 
+  const isDeleteAllIntent = useCallback((message: string) => {
+    const normalized = message.trim().toLowerCase();
+    if (!normalized) return false;
+    if (/^(don'?t|do not|never)\s+/.test(normalized)) return false;
+    return /(delete|clear|remove|wipe|erase|empty)\s+(all|everything|the\s+entire)\s+(content|document|text|body)/i.test(normalized);
+  }, []);
+
   const sendMessage = useCallback(async () => {
     if (!input.trim() || isStreaming) return;
 
@@ -146,6 +167,20 @@ export default function EditorChatPanel({
 
     const messageText = input;
     setInput("");
+
+    if (writeToDoc && onClearContent && isDeleteAllIntent(messageText)) {
+      onClearContent();
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString() + "_cleared",
+          role: "assistant",
+          content: "Cleared the document.",
+        },
+      ]);
+      return;
+    }
+
     setIsStreaming(true);
     setStreamingContent("");
     setStatusMessage("");
@@ -195,7 +230,8 @@ export default function EditorChatPanel({
               if (data.workflowStep) {
                 if (accumulated.trim()) {
                   if (writeToDoc) {
-                    const html = markdownToHtml(accumulated.trim());
+                    const normalized = normalizeEditorInsertText(accumulated);
+                    const html = markdownToHtml(normalized);
                     onInsertContent!(html);
                     setMessages((prev) => [
                       ...prev,
@@ -245,7 +281,8 @@ export default function EditorChatPanel({
               }
               if (data.done) {
                 if (writeToDoc && accumulated.trim()) {
-                  const html = markdownToHtml(accumulated.trim());
+                  const normalized = normalizeEditorInsertText(accumulated);
+                  const html = markdownToHtml(normalized);
                   onInsertContent!(html);
                   setMessages((prev) => [
                     ...prev,
@@ -288,7 +325,7 @@ export default function EditorChatPanel({
       setStreamingContent("");
       setStatusMessage("");
     }
-  }, [input, isStreaming, selectedMode, editorType, editorId, getContentFn, messages, writeToDoc, onInsertContent]);
+  }, [input, isStreaming, selectedMode, editorType, editorId, getContentFn, messages, writeToDoc, onInsertContent, onClearContent, isDeleteAllIntent]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
