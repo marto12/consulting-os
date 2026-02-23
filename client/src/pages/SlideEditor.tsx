@@ -6,7 +6,7 @@ import {
   Bold, Italic, AlignLeft, AlignCenter, AlignRight,
   Palette, Save, Loader2, GripVertical, FileText,
   Maximize2, Minimize2, ChevronUp, ChevronDown,
-  Sparkles, MessageSquare, Check, X,
+  Sparkles, MessageSquare, Check, X, BarChart3,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -26,12 +26,13 @@ interface SlideComment {
 
 interface SlideElement {
   id: string;
-  type: "text" | "image" | "shape";
+  type: "text" | "image" | "shape" | "chart";
   x: number;
   y: number;
   width: number;
   height: number;
   content: string;
+  chartId?: number;
   fontSize?: number;
   fontWeight?: string;
   fontStyle?: string;
@@ -117,6 +118,10 @@ export default function SlideEditor() {
   const [saving, setSaving] = useState(false);
   const [titleEditing, setTitleEditing] = useState(false);
   const [showDocPicker, setShowDocPicker] = useState(false);
+  const [showChartPicker, setShowChartPicker] = useState(false);
+  const [charts, setCharts] = useState<any[]>([]);
+  const [chartsLoading, setChartsLoading] = useState(false);
+  const [chartPickerTarget, setChartPickerTarget] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [genStatus, setGenStatus] = useState("");
   const [documents, setDocuments] = useState<any[]>([]);
@@ -261,6 +266,38 @@ export default function SlideEditor() {
     setSelectedElement(el.id);
   }, [pres, activeSlide, activeSlideIndex, updateSlideLocal]);
 
+  const handleSelectChart = useCallback((chart: any) => {
+    if (!activeSlide) return;
+    setShowChartPicker(false);
+    if (chartPickerTarget) {
+      updateElement(chartPickerTarget, {
+        type: "chart",
+        chartId: chart.id,
+        content: chart.name || "Chart",
+        borderRadius: 8,
+      });
+      setSelectedElement(chartPickerTarget);
+      setChartPickerTarget(null);
+      return;
+    }
+
+    const el: SlideElement = {
+      id: generateId(),
+      type: "chart",
+      x: 140,
+      y: 120,
+      width: 520,
+      height: 320,
+      content: chart.name || "Chart",
+      chartId: chart.id,
+      borderRadius: 8,
+    };
+    updateSlideLocal(activeSlideIndex, {
+      elements: [...(activeSlide.elements || []), el],
+    });
+    setSelectedElement(el.id);
+  }, [activeSlide, activeSlideIndex, chartPickerTarget, updateElement, updateSlideLocal]);
+
   const deleteElement = useCallback((elId: string) => {
     if (!activeSlide) return;
     updateSlideLocal(activeSlideIndex, {
@@ -365,6 +402,29 @@ export default function SlideEditor() {
     setDocuments(docs);
     setShowDocPicker(true);
   }, [pres, activeUser]);
+
+  const loadCharts = useCallback(async () => {
+    if (!pres?.projectId) return;
+    setChartsLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${pres.projectId}/charts`);
+      const data = await res.json();
+      setCharts(data || []);
+      setShowChartPicker(true);
+    } finally {
+      setChartsLoading(false);
+    }
+  }, [pres]);
+
+  const openChartPicker = useCallback((targetId?: string | null) => {
+    setChartPickerTarget(targetId || null);
+    loadCharts();
+  }, [loadCharts]);
+
+  const addChartElement = useCallback(() => {
+    if (!pres || !activeSlide) return;
+    openChartPicker(null);
+  }, [pres, activeSlide, openChartPicker]);
 
   const generateFromDocument = useCallback(async (docId: number) => {
     if (!pres) return;
@@ -672,6 +732,10 @@ export default function SlideEditor() {
             <Square size={14} />
             Shape
           </Button>
+          <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={addChartElement}>
+            <BarChart3 size={14} />
+            Chart
+          </Button>
         </div>
 
         {selectedEl && (
@@ -727,6 +791,18 @@ export default function SlideEditor() {
                 value={selectedEl.bgColor || "#3b82f6"}
                 onChange={(e) => updateElement(selectedEl.id, { bgColor: e.target.value })}
               />
+            )}
+            {selectedEl.type === "chart" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => {
+                  openChartPicker(selectedEl.id);
+                }}
+              >
+                Change chart
+              </Button>
             )}
             <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => deleteElement(selectedEl.id)}>
               <Trash2 size={14} />
@@ -792,6 +868,40 @@ export default function SlideEditor() {
                       <div className="text-xs text-muted-foreground truncate">
                         {doc.content?.replace(/<[^>]*>/g, "").slice(0, 80) || "Empty"}
                       </div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showChartPicker && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center" onClick={() => setShowChartPicker(false)}>
+          <div className="bg-background rounded-xl border shadow-xl w-[520px] max-h-[60vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b font-semibold text-sm flex items-center gap-2">
+              <BarChart3 size={16} />
+              Select a Chart
+            </div>
+            <div className="overflow-y-auto max-h-[420px]">
+              {chartsLoading ? (
+                <div className="p-8 text-center text-muted-foreground text-sm">Loading charts...</div>
+              ) : charts.length === 0 ? (
+                <div className="p-8 text-center text-muted-foreground text-sm">
+                  No charts found for this project.
+                </div>
+              ) : (
+                charts.map((chart) => (
+                  <button
+                    key={chart.id}
+                    className="w-full text-left px-4 py-3 hover:bg-accent transition-colors border-b last:border-b-0 flex items-center gap-3"
+                    onClick={() => handleSelectChart(chart)}
+                  >
+                    <BarChart3 size={16} className="shrink-0 text-muted-foreground" />
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate">{chart.name || `Chart ${chart.id}`}</div>
+                      <div className="text-xs text-muted-foreground truncate">{chart.description || "No description"}</div>
                     </div>
                   </button>
                 ))
@@ -869,6 +979,11 @@ export default function SlideEditor() {
                         }}
                       >
                         {el.type === "text" ? el.content : ""}
+                        {el.type === "chart" && (
+                          <div className="w-full h-full flex items-center justify-center text-[10px] text-muted-foreground border border-dashed border-border/60 rounded-md">
+                            {el.content || "Chart"}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -962,6 +1077,14 @@ export default function SlideEditor() {
                   )}
                   {el.type === "shape" && (
                     <div className="w-full h-full" />
+                  )}
+                  {el.type === "chart" && (
+                    <iframe
+                      title="Chart"
+                      src={el.chartId && pres?.projectId ? `/project/${pres.projectId}/charts/${el.chartId}` : el.content}
+                      className="w-full h-full"
+                      style={{ border: "none", pointerEvents: "none", borderRadius: el.borderRadius }}
+                    />
                   )}
                   {/* Resize handle */}
                   {selectedElement === el.id && (

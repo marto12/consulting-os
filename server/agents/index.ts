@@ -316,6 +316,22 @@ export function getDefaultConfigs() {
     systemPrompt,
     model: DEFAULT_MODEL,
     maxTokens: 8192,
+    temperature: 0.2,
+    topP: 1,
+    presencePenalty: 0,
+    frequencyPenalty: 0,
+    maxIterations: 4,
+    toolWhitelist: null,
+    toolCallBudget: 6,
+    retryCount: 1,
+    timeoutMs: 60000,
+    memoryScope: "project",
+    outputSchema: null,
+    safetyRules: null,
+    stopSequences: null,
+    streaming: false,
+    parallelism: 1,
+    cacheTtlSeconds: 0,
   }));
 }
 
@@ -327,23 +343,49 @@ async function getAgentPrompt(agentType: string): Promise<string> {
   return DEFAULT_PROMPTS[agentType] || "";
 }
 
-async function getAgentModel(agentType: string): Promise<string> {
+async function getAgentSettings(agentType: string) {
   try {
     const config = await storage.getAgentConfig(agentType);
-    if (config) return config.model;
+    if (config) {
+      return {
+        model: config.model,
+        maxTokens: config.maxTokens,
+        temperature: config.temperature ?? 0.2,
+        topP: config.topP ?? 1,
+        presencePenalty: config.presencePenalty ?? 0,
+        frequencyPenalty: config.frequencyPenalty ?? 0,
+        stopSequences: config.stopSequences ? config.stopSequences.split("\n").filter(Boolean) : undefined,
+        retryCount: config.retryCount ?? 1,
+      };
+    }
   } catch {}
-  return DEFAULT_MODEL;
+
+  return {
+    model: DEFAULT_MODEL,
+    maxTokens: 8192,
+    temperature: 0.2,
+    topP: 1,
+    presencePenalty: 0,
+    frequencyPenalty: 0,
+    stopSequences: undefined,
+    retryCount: 1,
+  };
 }
 
-async function getAgentMaxTokens(agentType: string): Promise<number> {
-  try {
-    const config = await storage.getAgentConfig(agentType);
-    if (config) return config.maxTokens;
-  } catch {}
-  return 8192;
-}
-
-async function callLLM(systemPrompt: string, userPrompt: string, model?: string, maxTokens?: number, retries = 1): Promise<string> {
+async function callLLM(
+  systemPrompt: string,
+  userPrompt: string,
+  model?: string,
+  maxTokens?: number,
+  retries = 1,
+  options?: {
+    temperature?: number;
+    topP?: number;
+    presencePenalty?: number;
+    frequencyPenalty?: number;
+    stopSequences?: string[];
+  }
+): Promise<string> {
   if (!openai) {
     return "";
   }
@@ -364,6 +406,11 @@ async function callLLM(systemPrompt: string, userPrompt: string, model?: string,
       model: resolvedModel,
       messages,
       max_completion_tokens: resolvedTokens,
+      temperature: options?.temperature,
+      top_p: options?.topP,
+      presence_penalty: options?.presencePenalty,
+      frequency_penalty: options?.frequencyPenalty,
+      stop: options?.stopSequences,
     });
 
     const content = response.choices[0]?.message?.content || "";
@@ -550,12 +597,18 @@ export async function projectDefinitionAgent(
   }
 
   const systemPrompt = await getAgentPrompt("project_definition");
-  const model = await getAgentModel("project_definition");
-  const maxTokens = await getAgentMaxTokens("project_definition");
+  const { model, maxTokens, temperature, topP, presencePenalty, frequencyPenalty, stopSequences, retryCount } =
+    await getAgentSettings("project_definition");
 
   onProgress(`Calling LLM with model ${model}...`, "llm");
   const userPrompt = `Project Objective: ${objective}\n\nConstraints & Context: ${constraints}`;
-  const raw = await callLLM(systemPrompt, userPrompt, model, maxTokens);
+  const raw = await callLLM(systemPrompt, userPrompt, model, maxTokens, retryCount, {
+    temperature,
+    topP,
+    presencePenalty,
+    frequencyPenalty,
+    stopSequences,
+  });
   onProgress("LLM response received, parsing output...", "llm");
   const parsed = extractJson(raw);
   onProgress("Analysis complete. Generated project definition with " + (parsed.success_metrics?.length || 0) + " success metrics.", "status");
@@ -618,25 +671,49 @@ export async function issuesTreeAgent(
   }
 
   const generatorPrompt = await getAgentPrompt("issues_tree");
-  const generatorModel = await getAgentModel("issues_tree");
-  const generatorMaxTokens = await getAgentMaxTokens("issues_tree");
+  const generatorSettings = await getAgentSettings("issues_tree");
   const criticPrompt = await getAgentPrompt("mece_critic");
-  const criticModel = await getAgentModel("mece_critic");
-  const criticMaxTokens = await getAgentMaxTokens("mece_critic");
+  const criticSettings = await getAgentSettings("mece_critic");
 
   const baseUserPrompt = `Objective: ${objective}\nConstraints: ${constraints}`;
   const criticLog: { iteration: number; critic: CriticResult }[] = [];
 
   let currentTree: { issues: IssueNodeOutput[] };
-  onProgress(`Calling LLM with model ${generatorModel}...`, "llm");
-  let raw = await callLLM(generatorPrompt, baseUserPrompt, generatorModel, generatorMaxTokens);
+  onProgress(`Calling LLM with model ${generatorSettings.model}...`, "llm");
+  let raw = await callLLM(
+    generatorPrompt,
+    baseUserPrompt,
+    generatorSettings.model,
+    generatorSettings.maxTokens,
+    generatorSettings.retryCount,
+    {
+      temperature: generatorSettings.temperature,
+      topP: generatorSettings.topP,
+      presencePenalty: generatorSettings.presencePenalty,
+      frequencyPenalty: generatorSettings.frequencyPenalty,
+      stopSequences: generatorSettings.stopSequences,
+    }
+  );
   onProgress("LLM response received, parsing output...", "llm");
   currentTree = extractJson(raw);
 
   for (let iteration = 0; iteration <= MAX_REVISIONS; iteration++) {
     onProgress(`Running MECE Critic evaluation (iteration ${iteration + 1})...`, "critic");
     const treeDescription = formatTreeForCritic(currentTree.issues, objective);
-    const criticRaw = await callLLM(criticPrompt, treeDescription, criticModel, criticMaxTokens);
+      const criticRaw = await callLLM(
+        criticPrompt,
+        treeDescription,
+        criticSettings.model,
+        criticSettings.maxTokens,
+        criticSettings.retryCount,
+        {
+          temperature: criticSettings.temperature,
+          topP: criticSettings.topP,
+          presencePenalty: criticSettings.presencePenalty,
+          frequencyPenalty: criticSettings.frequencyPenalty,
+          stopSequences: criticSettings.stopSequences,
+        }
+      );
 
     let criticResult: CriticResult;
     try {
@@ -666,7 +743,20 @@ export async function issuesTreeAgent(
     onProgress("Revising tree based on critic feedback...", "critic");
     const revisionPrompt = `${baseUserPrompt}\n\n---\nPREVIOUS TREE (needs revision):\n${formatTreeForCritic(currentTree.issues, objective)}\n\n---\nMECE CRITIC FEEDBACK (iteration ${iteration + 1}):\nOverall Score: ${criticResult.overallScore}/5\nOverlap: ${criticResult.scores.overlap.score}/5 — ${criticResult.scores.overlap.details}\nCoverage: ${criticResult.scores.coverage.score}/5 — ${criticResult.scores.coverage.details}\nMixed Logics: ${criticResult.scores.mixedLogics.score}/5 — ${criticResult.scores.mixedLogics.details}\nBranch Balance: ${criticResult.scores.branchBalance.score}/5 — ${criticResult.scores.branchBalance.details}\nLabel Quality: ${criticResult.scores.labelQuality.score}/5 — ${criticResult.scores.labelQuality.details}\n\nREVISION INSTRUCTIONS:\n${criticResult.revisionInstructions}\n\nPlease produce a REVISED issues tree that addresses ALL the critic's feedback. Return the full tree in the same JSON format.`;
 
-    raw = await callLLM(generatorPrompt, revisionPrompt, generatorModel, generatorMaxTokens);
+      raw = await callLLM(
+        generatorPrompt,
+        revisionPrompt,
+        generatorSettings.model,
+        generatorSettings.maxTokens,
+        generatorSettings.retryCount,
+        {
+          temperature: generatorSettings.temperature,
+          topP: generatorSettings.topP,
+          presencePenalty: generatorSettings.presencePenalty,
+          frequencyPenalty: generatorSettings.frequencyPenalty,
+          stopSequences: generatorSettings.stopSequences,
+        }
+      );
     currentTree = extractJson(raw);
   }
 
@@ -728,11 +818,23 @@ export async function hypothesisAgent(
   const issuesList = issues.map((i) => `- [ID:${i.id}] ${i.text} (${i.priority})`).join("\n");
 
   const systemPrompt = await getAgentPrompt("hypothesis");
-  const model = await getAgentModel("hypothesis");
-  const maxTokens = await getAgentMaxTokens("hypothesis");
+  const settings = await getAgentSettings("hypothesis");
 
-  onProgress(`Calling LLM with model ${model}...`, "llm");
-  const raw = await callLLM(systemPrompt, `Issues:\n${issuesList}`, model, maxTokens);
+  onProgress(`Calling LLM with model ${settings.model}...`, "llm");
+  const raw = await callLLM(
+    systemPrompt,
+    `Issues:\n${issuesList}`,
+    settings.model,
+    settings.maxTokens,
+    settings.retryCount,
+    {
+      temperature: settings.temperature,
+      topP: settings.topP,
+      presencePenalty: settings.presencePenalty,
+      frequencyPenalty: settings.frequencyPenalty,
+      stopSequences: settings.stopSequences,
+    }
+  );
   onProgress("LLM response received, parsing output...", "llm");
   const parsed = extractJson(raw);
   onProgress("Analysis complete. Generated " + (parsed.hypotheses?.length || 0) + " hypotheses.", "status");
@@ -804,12 +906,24 @@ export async function summaryAgent(
     .join("\n\n");
 
   const systemPrompt = await getAgentPrompt("summary");
-  const model = await getAgentModel("summary");
-  const maxTokens = await getAgentMaxTokens("summary");
+  const settings = await getAgentSettings("summary");
 
-  onProgress(`Calling LLM with model ${model}...`, "llm");
+  onProgress(`Calling LLM with model ${settings.model}...`, "llm");
   const userPrompt = `Objective: ${objective}\nConstraints: ${constraints}\n\nHypotheses & Results:\n${hypList}`;
-  const summaryText = await callLLM(systemPrompt, userPrompt, model, maxTokens);
+  const summaryText = await callLLM(
+    systemPrompt,
+    userPrompt,
+    settings.model,
+    settings.maxTokens,
+    settings.retryCount,
+    {
+      temperature: settings.temperature,
+      topP: settings.topP,
+      presencePenalty: settings.presencePenalty,
+      frequencyPenalty: settings.frequencyPenalty,
+      stopSequences: settings.stopSequences,
+    }
+  );
   onProgress("LLM response received, parsing output...", "llm");
   onProgress("Analysis complete. Generated executive summary.", "status");
 
@@ -973,12 +1087,24 @@ export async function presentationAgent(
     .join("\n");
 
   const systemPrompt = await getAgentPrompt("presentation");
-  const model = await getAgentModel("presentation");
-  const maxTokens = await getAgentMaxTokens("presentation");
+  const settings = await getAgentSettings("presentation");
 
-  onProgress(`Calling LLM with model ${model}...`, "llm");
+  onProgress(`Calling LLM with model ${settings.model}...`, "llm");
   const userPrompt = `Project: ${projectName}\nObjective: ${objective}\n\nExecutive Summary:\n${summaryText}\n\nHypotheses & Results:\n${hypSummary}`;
-  const raw = await callLLM(systemPrompt, userPrompt, model, maxTokens);
+  const raw = await callLLM(
+    systemPrompt,
+    userPrompt,
+    settings.model,
+    settings.maxTokens,
+    settings.retryCount,
+    {
+      temperature: settings.temperature,
+      topP: settings.topP,
+      presencePenalty: settings.presencePenalty,
+      frequencyPenalty: settings.frequencyPenalty,
+      stopSequences: settings.stopSequences,
+    }
+  );
   onProgress("LLM response received, parsing output...", "llm");
   const parsed = extractJson(raw);
   onProgress("Analysis complete. Generated " + (parsed.slides?.length || 0) + " slides.", "status");
@@ -1000,8 +1126,7 @@ export async function refineDeliverable(
   }
 
   const systemPrompt = await getAgentPrompt(agentKey);
-  const model = await getAgentModel(agentKey);
-  const maxTokens = await getAgentMaxTokens(agentKey);
+  const settings = await getAgentSettings(agentKey);
 
   const refinementPrompt = `You previously generated the following output for this project:
 
@@ -1016,8 +1141,21 @@ The user has requested the following changes:
 
 Please regenerate the COMPLETE output incorporating the user's feedback. Return the FULL updated output in the same JSON format as before. Do not return partial updates - return the entire revised document.`;
 
-  onProgress(`Calling LLM with model ${model} to refine output...`, "llm");
-  const raw = await callLLM(systemPrompt, refinementPrompt, model, maxTokens);
+  onProgress(`Calling LLM with model ${settings.model} to refine output...`, "llm");
+  const raw = await callLLM(
+    systemPrompt,
+    refinementPrompt,
+    settings.model,
+    settings.maxTokens,
+    settings.retryCount,
+    {
+      temperature: settings.temperature,
+      topP: settings.topP,
+      presencePenalty: settings.presencePenalty,
+      frequencyPenalty: settings.frequencyPenalty,
+      stopSequences: settings.stopSequences,
+    }
+  );
   onProgress("LLM response received, parsing refined output...", "llm");
   
   const parsed = extractJson(raw);

@@ -11,6 +11,7 @@ import {
   Settings,
   MessageSquare,
   FileText,
+  Share2,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 
@@ -62,6 +63,7 @@ export default function CommandPalette() {
   const commands: CommandItem[] = [
     { id: "nav-projects", label: "All Projects", category: "Navigation", icon: <Briefcase size={16} />, action: () => navigate("/projects") },
     { id: "nav-chat", label: "Chat", category: "Navigation", icon: <MessageSquare size={16} />, action: () => navigate("/chat") },
+    { id: "nav-shared", label: "Shared", category: "Navigation", icon: <Share2 size={16} />, action: () => navigate("/shared") },
     { id: "nav-workflows", label: "Workflow Templates", category: "Navigation", icon: <GitBranch size={16} />, action: () => navigate("/global/workflows") },
     { id: "nav-agents", label: "Agents", category: "Navigation", icon: <Bot size={16} />, action: () => navigate("/global/agents") },
     { id: "nav-datasets", label: "Datasets", category: "Navigation", icon: <Database size={16} />, action: () => navigate("/datasets") },

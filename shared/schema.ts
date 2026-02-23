@@ -7,6 +7,7 @@ import {
   timestamp,
   jsonb,
   boolean,
+  real,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -154,6 +155,17 @@ export const projectTasks = pgTable("project_tasks", {
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const projectTaskAssignees = pgTable("project_task_assignees", {
+  id: serial("id").primaryKey(),
+  taskId: integer("task_id")
+    .notNull()
+    .references(() => projectTasks.id, { onDelete: "cascade" }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
 export const projectCheckpoints = pgTable("project_checkpoints", {
@@ -322,6 +334,22 @@ export const agentConfigs = pgTable("agent_configs", {
   systemPrompt: text("system_prompt").notNull(),
   model: text("model").notNull().default("gpt-5-nano"),
   maxTokens: integer("max_tokens").notNull().default(8192),
+  temperature: real("temperature").default(0.2),
+  topP: real("top_p").default(1),
+  presencePenalty: real("presence_penalty").default(0),
+  frequencyPenalty: real("frequency_penalty").default(0),
+  maxIterations: integer("max_iterations").default(4),
+  toolWhitelist: text("tool_whitelist"),
+  toolCallBudget: integer("tool_call_budget").default(6),
+  retryCount: integer("retry_count").default(1),
+  timeoutMs: integer("timeout_ms").default(60000),
+  memoryScope: text("memory_scope").default("project"),
+  outputSchema: text("output_schema"),
+  safetyRules: text("safety_rules"),
+  stopSequences: text("stop_sequences"),
+  streaming: boolean("streaming").default(false),
+  parallelism: integer("parallelism").default(1),
+  cacheTtlSeconds: integer("cache_ttl_seconds").default(0),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
@@ -485,6 +513,7 @@ export type WorkflowInstance = typeof workflowInstances.$inferSelect;
 export type WorkflowInstanceStep = typeof workflowInstanceSteps.$inferSelect;
 export type ProjectPhase = typeof projectPhases.$inferSelect;
 export type ProjectTask = typeof projectTasks.$inferSelect;
+export type ProjectTaskAssignee = typeof projectTaskAssignees.$inferSelect;
 export type ProjectCheckpoint = typeof projectCheckpoints.$inferSelect;
 export type Deliverable = typeof deliverables.$inferSelect;
 export type StepChatMessage = typeof stepChatMessages.$inferSelect;

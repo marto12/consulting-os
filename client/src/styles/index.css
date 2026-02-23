@@ -9,35 +9,37 @@ html, body, #root {
 
 @layer base {
   :root {
-    --background: 220 6% 97%;
+    --app-background: 220 8% 96%;
+    --secondary-background: 220 10% 98%;
+    --background: var(--app-background);
     --foreground: 220 10% 10%;
     --card: 0 0% 100%;
     --card-foreground: 220 10% 10%;
     --popover: 0 0% 100%;
     --popover-foreground: 220 10% 10%;
-    --primary: 220 10% 40%;
-    --primary-foreground: 0 0% 98%;
+    --primary: 209 78% 45%;
+    --primary-foreground: 210 40% 98%;
     --secondary: 220 6% 95%;
     --secondary-foreground: 220 10% 14%;
     --muted: 220 6% 95%;
     --muted-foreground: 220 5% 46%;
-    --accent: 220 6% 95%;
-    --accent-foreground: 220 10% 14%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 220 15% 18%;
     --destructive: 0 40% 50%;
     --destructive-foreground: 0 0% 98%;
     --border: 220 8% 90%;
     --input: 220 8% 90%;
-    --ring: 220 10% 40%;
+    --ring: 209 78% 45%;
     --radius: 0.5rem;
 
-    --sidebar-background: 0 0% 98%;
+    --sidebar-background: var(--app-background);
     --sidebar-foreground: 220 5% 26%;
-    --sidebar-primary: 220 5% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 220 5% 95%;
-    --sidebar-accent-foreground: 220 5% 10%;
+    --sidebar-primary: 209 78% 45%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-accent: 210 40% 96%;
+    --sidebar-accent-foreground: 220 15% 18%;
     --sidebar-border: 220 5% 91%;
-    --sidebar-ring: 220 10% 40%;
+    --sidebar-ring: 209 78% 45%;
   }
 
   * {
@@ -47,6 +49,7 @@ html, body, #root {
   body {
     @apply bg-background text-foreground antialiased;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 0.95rem;
   }
 }
 

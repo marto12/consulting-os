@@ -746,12 +746,6 @@ export default function ProjectDetail() {
                                   <Badge variant={getStatusVariant(phase.status)}>{phase.status.replace("_", " ")}</Badge>
                                 </div>
                                 <p className="text-xs text-muted-foreground mt-1">{phase.description || "No description"}</p>
-                                <div className="flex items-center gap-2 mt-3">
-                                  <Progress value={progress.total === 0 ? 0 : (progress.done / progress.total) * 100} className="flex-1 h-2" />
-                                  <span className="text-xs text-muted-foreground">
-                                    {progress.done}/{progress.total} done
-                                  </span>
-                                </div>
                               </div>
                             )}
                           </div>
@@ -795,12 +789,12 @@ export default function ProjectDetail() {
                           </div>
                         </div>
 
-                        <div className="mt-4 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs uppercase tracking-wide text-muted-foreground">Tasks</span>
-                            <Button
-                              size="sm"
-                              variant="outline"
+                          <div className="mt-4 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs uppercase tracking-wide text-muted-foreground">Tasks</span>
+                              <Button
+                                size="sm"
+                                variant="outline"
                               onClick={() => {
                                 if (!draft.title.trim()) return;
                                 createTaskMutation.mutate({
@@ -820,10 +814,20 @@ export default function ProjectDetail() {
                             >
                               <Plus size={14} />
                               Add Task
-                            </Button>
-                          </div>
+                              </Button>
+                            </div>
 
-                          <div className="grid grid-cols-1 gap-2">
+                            <div className="flex items-center gap-2">
+                              <Progress
+                                value={progress.total === 0 ? 0 : (progress.done / progress.total) * 100}
+                                className="flex-1 h-2"
+                              />
+                              <span className="text-xs text-muted-foreground">
+                                {progress.done}/{progress.total} completed
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-2">
                             {phaseTasks.map((task) => {
                               const effectiveStatus = getEffectiveTaskStatus(task);
                               const step = task.workflowStepId ? workflowStepMap.get(task.workflowStepId) : null;

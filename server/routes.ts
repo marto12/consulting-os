@@ -1,5 +1,8 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
+import { readdir, readFile } from "node:fs/promises";
+import * as path from "node:path";
+import { spawn } from "node:child_process";
 import multer from "multer";
 import OpenAI from "openai";
 import { storage } from "./storage";
@@ -22,6 +25,193 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 },
 });
+
+const PROJECT_TEMPLATE_DIR = path.resolve(process.cwd(), "templates", "projects");
+
+function formatTemplateName(slug: string): string {
+  return slug
+    .split("-")
+    .filter(Boolean)
+    .map((word) => word[0]?.toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function normalizeSpreadsheetColumns(input: any): string[] {
+  if (!Array.isArray(input)) return [];
+  const cleaned = input
+    .map((col) => String(col || "").trim())
+    .filter((col) => col.length > 0);
+  return Array.from(new Set(cleaned));
+}
+
+function normalizeSpreadsheetRows(columns: string[], rows: any[]): Array<{ rowIndex: number; data: any }> {
+  return rows.map((row, idx) => {
+    if (Array.isArray(row)) {
+      const data: Record<string, string> = {};
+      columns.forEach((col, colIdx) => {
+        data[col] = row[colIdx] == null ? "" : String(row[colIdx]);
+      });
+      return { rowIndex: idx, data };
+    }
+    if (row && typeof row === "object") {
+      return { rowIndex: idx, data: row };
+    }
+    return { rowIndex: idx, data: {} };
+  });
+}
+
+type CgeImpactRow = { industry: string; year: number; impact: string };
+
+function buildCgeSpreadsheetRows(result: any) {
+  const columns = ["Metric", "Industry", "Year", "Impact"];
+  const rows: Array<{ rowIndex: number; data: any }> = [];
+  const gdpImpacts: CgeImpactRow[] = result?.industry_impacts?.gdp ?? [];
+  const employmentImpacts: CgeImpactRow[] = result?.industry_impacts?.employment ?? [];
+
+  gdpImpacts.forEach((row, idx) => {
+    rows.push({
+      rowIndex: rows.length,
+      data: {
+        Metric: "GDP impact",
+        Industry: row.industry,
+        Year: row.year,
+        Impact: row.impact,
+      },
+    });
+  });
+
+  employmentImpacts.forEach((row) => {
+    rows.push({
+      rowIndex: rows.length,
+      data: {
+        Metric: "Employment impact",
+        Industry: row.industry,
+        Year: row.year,
+        Impact: row.impact,
+      },
+    });
+  });
+
+  return { columns, rows };
+}
+
+async function loadProjectTemplates() {
+  try {
+    const entries = await readdir(PROJECT_TEMPLATE_DIR, { withFileTypes: true });
+    const templates = await Promise.all(
+      entries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+        .map(async (entry) => {
+          const slug = entry.name.replace(/\.md$/i, "");
+          const content = await readFile(path.join(PROJECT_TEMPLATE_DIR, entry.name), "utf8");
+          return {
+            slug,
+            name: formatTemplateName(slug),
+            content,
+          };
+        })
+    );
+    return templates.sort((a, b) => a.name.localeCompare(b.name));
+  } catch (err: any) {
+    if (err?.code === "ENOENT") return [];
+    throw err;
+  }
+}
+
+type ProjectTemplatePhase = {
+  title: string;
+  tasks: Array<{ title: string; owner: string }>;
+};
+
+function parseProjectTemplate(content: string): ProjectTemplatePhase[] {
+  const phases: ProjectTemplatePhase[] = [];
+  const lines = content.split(/\r?\n/);
+  let current: ProjectTemplatePhase | null = null;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    const headingMatch = line.match(/^###\s+Phase\s+\d+\s+[–-]\s+(.+)$/);
+    if (headingMatch) {
+      if (current) phases.push(current);
+      current = { title: headingMatch[1].trim(), tasks: [] };
+      continue;
+    }
+
+    if (!current) continue;
+    if (!line.startsWith("|")) continue;
+
+    const cells = line
+      .split("|")
+      .slice(1, -1)
+      .map((cell) => cell.trim());
+
+    if (cells.length < 3) continue;
+    if (cells[0] === "-" || cells[1].toLowerCase() === "task") continue;
+
+    const title = cells[1];
+    const owner = cells[2];
+    if (!title || !owner) continue;
+    current.tasks.push({ title, owner });
+  }
+
+  if (current) phases.push(current);
+  return phases.filter((phase) => phase.title.length > 0);
+}
+
+async function seedProjectManagementFromTemplate(
+  projectId: number,
+  workflowSteps: Array<{ id: number; name: string; agentKey: string; stepOrder: number }>,
+  templateContent: string
+) {
+  const existingPhases = await storage.listProjectPhases(projectId);
+  if (existingPhases.length > 0) return;
+
+  const templatePhases = parseProjectTemplate(templateContent);
+  const phaseIds: number[] = [];
+  let phaseOrder = 0;
+  for (const phase of templatePhases) {
+    const created = await storage.createProjectPhase({
+      projectId,
+      title: phase.title,
+      description: "",
+      status: phaseOrder === 0 ? "in_progress" : "not_started",
+      sortOrder: phaseOrder,
+    });
+    phaseIds.push(created.id);
+    phaseOrder += 1;
+  }
+
+  let taskOrder = 0;
+  for (const step of workflowSteps) {
+    await storage.createProjectTask({
+      projectId,
+      phaseId: null,
+      title: step.name,
+      description: `Agent workflow step: ${step.agentKey}`,
+      ownerType: "agent",
+      workflowStepId: step.id,
+      status: "not_started",
+      sortOrder: taskOrder,
+    });
+    taskOrder += 1;
+  }
+
+  for (let phaseIndex = 0; phaseIndex < templatePhases.length; phaseIndex += 1) {
+    const phase = templatePhases[phaseIndex];
+    for (let taskIndex = 0; taskIndex < phase.tasks.length; taskIndex += 1) {
+      const task = phase.tasks[taskIndex];
+      await storage.createProjectTask({
+        projectId,
+        phaseId: phaseIds[phaseIndex] ?? null,
+        title: task.title,
+        description: `Owner: ${task.owner}`,
+        ownerType: "human",
+        status: "not_started",
+        sortOrder: taskIndex,
+      });
+    }
+  }
+}
 
 function parseCSVLine(line: string): string[] {
   const result: string[] = [];
@@ -414,11 +604,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/project-templates", async (_req: Request, res: Response) => {
+    try {
+      res.json(await loadProjectTemplates());
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/projects", async (req: Request, res: Response) => {
     try {
-      const { name, objective, constraints, workflowTemplateId } = req.body;
-      if (!name || !objective || !constraints) {
-        return res.status(400).json({ error: "name, objective, and constraints are required" });
+      const { name, objective, constraints, workflowTemplateId, projectTemplateSlug } = req.body;
+      if (!name) {
+        return res.status(400).json({ error: "name is required" });
       }
 
       const templates = await storage.listWorkflowTemplates();
@@ -426,10 +624,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const project = await storage.createProject({
         name,
-        objective,
-        constraints,
+        objective: objective ?? "",
+        constraints: constraints ?? "",
         workflowTemplateId: templateId || null,
       });
+
+      let workflowStepsForSeed: Array<{ id: number; name: string; agentKey: string; stepOrder: number }> = [];
 
       if (templateId) {
         const templateSteps = await storage.getWorkflowTemplateSteps(templateId);
@@ -447,13 +647,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const instance = await storage.getWorkflowInstance(project.id);
         if (instance) {
           const steps = await storage.getWorkflowInstanceSteps(instance.id);
-          await seedProjectManagement(project.id, steps.map((s) => ({
+          workflowStepsForSeed = steps.map((s) => ({
             id: s.id,
             name: s.name,
             agentKey: s.agentKey,
             stepOrder: s.stepOrder,
-          })));
+          }));
         }
+      }
+
+      if (projectTemplateSlug) {
+        const templates = await loadProjectTemplates();
+        const selectedTemplate = templates.find((t) => t.slug === projectTemplateSlug);
+        if (selectedTemplate) {
+          await seedProjectManagementFromTemplate(project.id, workflowStepsForSeed, selectedTemplate.content);
+        } else if (templateId) {
+          await seedProjectManagement(project.id, workflowStepsForSeed);
+        }
+      } else if (templateId) {
+        await seedProjectManagement(project.id, workflowStepsForSeed);
       }
 
       res.status(201).json(project);
@@ -481,6 +693,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.delete("/api/projects/:id", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      await storage.deleteProject(projectId);
+      res.status(204).end();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/projects/:id/workflow", async (req: Request, res: Response) => {
     try {
       const projectId = Number(req.params.id);
@@ -498,10 +720,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const projectId = Number(req.params.id);
       const phases = await storage.listProjectPhases(projectId);
       const tasks = await storage.listProjectTasks(projectId);
+      const taskAssignees = await storage.listProjectTaskAssignees(projectId);
+      const assigneesByTask = new Map<number, number[]>();
+      taskAssignees.forEach((assignee) => {
+        if (!assigneesByTask.has(assignee.taskId)) assigneesByTask.set(assignee.taskId, []);
+        assigneesByTask.get(assignee.taskId)?.push(assignee.userId);
+      });
+      const tasksWithAssignees = tasks.map((task) => ({
+        ...task,
+        assigneeIds: assigneesByTask.get(task.id) ?? (task.assigneeUserId ? [task.assigneeUserId] : []),
+      }));
       const checkpoints = await storage.listProjectCheckpoints(projectId);
       const instance = await storage.getWorkflowInstance(projectId);
       const steps = instance ? await storage.getWorkflowInstanceSteps(instance.id) : [];
-      res.json({ phases, tasks, checkpoints, workflowSteps: steps });
+      res.json({ phases, tasks: tasksWithAssignees, checkpoints, workflowSteps: steps });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/projects/:id/tasks/:taskId/assignees", async (req: Request, res: Response) => {
+    try {
+      const taskId = Number(req.params.taskId);
+      const assigneeIds: number[] = Array.isArray(req.body?.assigneeIds)
+        ? Array.from(new Set(req.body.assigneeIds.map((id: any) => Number(id)).filter((id: number) => Number.isFinite(id))))
+        : [];
+
+      if (assigneeIds.length > 3) {
+        return res.status(400).json({ error: "Maximum of 3 assignees allowed" });
+      }
+
+      await storage.setProjectTaskAssignees(taskId, assigneeIds);
+      await storage.updateProjectTask(taskId, {
+        ownerType: "human",
+        assigneeUserId: assigneeIds[0] ?? null,
+        workflowStepId: null,
+      });
+
+      res.json({ success: true, assigneeIds });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1218,6 +1474,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/run-logs", async (req: Request, res: Response) => {
+    try {
+      const limit = req.query.limit ? Number(req.query.limit) : 50;
+      const logs = await storage.listRunLogs(limit);
+      res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/workflows", async (_req: Request, res: Response) => {
     try {
       const templates = await storage.listWorkflowTemplates();
@@ -1256,6 +1522,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             name: s.name,
             agentKey: s.agentKey,
             description: s.description,
+            configJson: s.configJson,
           });
         }
       }
@@ -1440,6 +1707,106 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/models/cge/run-stream", async (req: Request, res: Response) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders?.();
+
+    let closed = false;
+    const scriptPath = path.resolve(process.cwd(), "server", "scripts", "cge_model.py");
+    const projectId = req.query.projectId ? Number(req.query.projectId) : null;
+    const python = spawn("python3", [scriptPath]);
+
+    function sendSSE(type: string, message: string) {
+      if (closed) return;
+      res.write(`event: ${type}\n`);
+      res.write(`data: ${message}\n\n`);
+    }
+
+    sendSSE("connected", "CGE model stream connected");
+
+    python.stdout.setEncoding("utf-8");
+    python.stdout.on("data", (chunk: string) => {
+      const lines = chunk.split(/\r?\n/).filter(Boolean);
+      lines.forEach((line) => {
+        const [rawType, ...rest] = line.split(":");
+        const payload = rest.join(":");
+        if (rawType === "RESULT") {
+          (async () => {
+            let parsed: any = null;
+            try {
+              parsed = JSON.parse(payload);
+            } catch {
+              parsed = { headline: "CGE run complete" };
+            }
+
+            if (projectId && Number.isFinite(projectId)) {
+              const { columns, rows } = buildCgeSpreadsheetRows(parsed);
+              if (rows.length > 0) {
+                const name = `CGE Outputs ${new Date().toISOString().slice(0, 10)}`;
+                const dataset = await storage.createDataset({
+                  projectId,
+                  name,
+                  sourceType: "spreadsheet",
+                  schemaJson: columns.map((col) => ({ name: col, type: "string" })),
+                  rowCount: rows.length,
+                });
+                await storage.insertDatasetRows(dataset.id, rows);
+                parsed.spreadsheetId = dataset.id;
+                parsed.spreadsheetName = dataset.name;
+              }
+            }
+
+            sendSSE("complete", JSON.stringify(parsed));
+            if (!closed) {
+              closed = true;
+              res.end();
+            }
+          })().catch((err) => {
+            sendSSE("error", err.message || "Failed to save CGE outputs");
+            if (!closed) {
+              closed = true;
+              res.end();
+            }
+          });
+          return;
+        }
+        if (rawType === "STATUS" || rawType === "PROGRESS") {
+          sendSSE("progress", payload.trim());
+          return;
+        }
+        sendSSE("progress", line.trim());
+      });
+    });
+
+    python.stderr.setEncoding("utf-8");
+    python.stderr.on("data", (chunk: string) => {
+      sendSSE("progress", chunk.trim());
+    });
+
+    python.on("error", (err) => {
+      sendSSE("error", err.message || "Failed to run CGE model");
+      if (!closed) {
+        closed = true;
+        res.end();
+      }
+    });
+
+    python.on("close", () => {
+      if (!closed) {
+        sendSSE("complete", JSON.stringify({ headline: "CGE run complete" }));
+        closed = true;
+        res.end();
+      }
+    });
+
+    res.on("close", () => {
+      closed = true;
+      python.kill("SIGTERM");
+    });
+  });
+
   app.post("/api/data/models", async (req: Request, res: Response) => {
     try {
       const { projectId, lastEditedByUserId, name, description, inputSchema, outputSchema, apiConfig } = req.body;
@@ -1570,10 +1937,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/agent-configs/:agentType", async (req: Request, res: Response) => {
     try {
       const agentType = req.params.agentType as string;
-      const { systemPrompt, model, maxTokens } = req.body;
+      const {
+        systemPrompt,
+        model,
+        maxTokens,
+        temperature,
+        topP,
+        presencePenalty,
+        frequencyPenalty,
+        maxIterations,
+        toolWhitelist,
+        toolCallBudget,
+        retryCount,
+        timeoutMs,
+        memoryScope,
+        outputSchema,
+        safetyRules,
+        stopSequences,
+        streaming,
+        parallelism,
+        cacheTtlSeconds,
+      } = req.body;
       if (!systemPrompt) return res.status(400).json({ error: "systemPrompt is required" });
       const config = await storage.upsertAgentConfig({
-        agentType, systemPrompt, model: model || "gpt-5-nano", maxTokens: maxTokens || 8192,
+        agentType,
+        systemPrompt,
+        model: model || "gpt-5-nano",
+        maxTokens: maxTokens || 8192,
+        temperature,
+        topP,
+        presencePenalty,
+        frequencyPenalty,
+        maxIterations,
+        toolWhitelist,
+        toolCallBudget,
+        retryCount,
+        timeoutMs,
+        memoryScope,
+        outputSchema,
+        safetyRules,
+        stopSequences,
+        streaming,
+        parallelism,
+        cacheTtlSeconds,
       });
       res.json(config);
     } catch (err: any) {
@@ -1592,6 +1998,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         systemPrompt: saved?.systemPrompt || agent.promptTemplate || (DEFAULT_PROMPTS as any)[keyParam] || "",
         configModel: saved?.model || agent.model,
         configMaxTokens: saved?.maxTokens || agent.maxTokens,
+        configTemperature: saved?.temperature ?? 0.2,
+        configTopP: saved?.topP ?? 1,
+        configPresencePenalty: saved?.presencePenalty ?? 0,
+        configFrequencyPenalty: saved?.frequencyPenalty ?? 0,
+        configMaxIterations: saved?.maxIterations ?? 4,
+        configToolWhitelist: saved?.toolWhitelist ?? "",
+        configToolCallBudget: saved?.toolCallBudget ?? 6,
+        configRetryCount: saved?.retryCount ?? 1,
+        configTimeoutMs: saved?.timeoutMs ?? 60000,
+        configMemoryScope: saved?.memoryScope ?? "project",
+        configOutputSchema: saved?.outputSchema ?? "",
+        configSafetyRules: saved?.safetyRules ?? "",
+        configStopSequences: saved?.stopSequences ?? "",
+        configStreaming: saved?.streaming ?? false,
+        configParallelism: saved?.parallelism ?? 1,
+        configCacheTtlSeconds: saved?.cacheTtlSeconds ?? 0,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1841,6 +2263,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
+  app.get("/api/spreadsheets", async (req: Request, res: Response) => {
+    try {
+      const projectId = req.query.projectId ? Number(req.query.projectId) : null;
+      const datasets = await storage.listDatasets();
+      const spreadsheets = datasets.filter((ds) => {
+        if (ds.sourceType !== "spreadsheet") return false;
+        if (projectId === null) return true;
+        return ds.projectId === projectId;
+      });
+      res.json(spreadsheets);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/spreadsheets", async (req: Request, res: Response) => {
+    try {
+      const { projectId, lastEditedByUserId, name, columns, rows } = req.body;
+      if (!name) return res.status(400).json({ error: "name is required" });
+      const columnNames = normalizeSpreadsheetColumns(columns);
+      const schemaJson = columnNames.length > 0
+        ? columnNames.map((col) => ({ name: col, type: "string" }))
+        : null;
+
+      const ds = await storage.createDataset({
+        projectId: projectId ?? null,
+        lastEditedByUserId: lastEditedByUserId ?? null,
+        name,
+        sourceType: "spreadsheet",
+        schemaJson,
+        rowCount: Array.isArray(rows) ? rows.length : 0,
+      });
+
+      if (Array.isArray(rows) && rows.length > 0) {
+        const rowData = normalizeSpreadsheetRows(columnNames, rows);
+        await storage.insertDatasetRows(ds.id, rowData);
+      }
+
+      res.status(201).json(ds);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/spreadsheets/:id", async (req: Request, res: Response) => {
+    try {
+      const id = Number(req.params.id);
+      const ds = await storage.getDataset(id);
+      if (!ds || ds.sourceType !== "spreadsheet") return res.status(404).json({ error: "Not found" });
+      res.json(ds);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/spreadsheets/:id", async (req: Request, res: Response) => {
+    try {
+      const id = Number(req.params.id);
+      const ds = await storage.getDataset(id);
+      if (!ds || ds.sourceType !== "spreadsheet") return res.status(404).json({ error: "Not found" });
+      const { name, columns, rows, lastEditedByUserId } = req.body;
+      const columnNames = normalizeSpreadsheetColumns(columns);
+      const schemaJson = columnNames.length > 0
+        ? columnNames.map((col) => ({ name: col, type: "string" }))
+        : null;
+      const rowData = Array.isArray(rows) ? normalizeSpreadsheetRows(columnNames, rows) : [];
+      await storage.insertDatasetRows(id, rowData);
+      const updated = await storage.updateDataset(id, {
+        name: name ?? ds.name,
+        schemaJson,
+        rowCount: rowData.length,
+        lastEditedByUserId: lastEditedByUserId ?? ds.lastEditedByUserId,
+      });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/spreadsheets/:id", async (req: Request, res: Response) => {
+    try {
+      const id = Number(req.params.id);
+      const ds = await storage.getDataset(id);
+      if (!ds || ds.sourceType !== "spreadsheet") return res.status(404).json({ error: "Not found" });
+      await storage.deleteDataset(id);
+      res.status(204).end();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/spreadsheets/:id/rows", async (req: Request, res: Response) => {
+    try {
+      const id = Number(req.params.id);
+      const ds = await storage.getDataset(id);
+      if (!ds || ds.sourceType !== "spreadsheet") return res.status(404).json({ error: "Not found" });
+      const rows = await storage.getDatasetRows(id, 1000, 0);
+      res.json({ rows, total: ds.rowCount });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/projects/:projectId/vault/upload", upload.single("file"), async (req: Request, res: Response) => {
     try {
       const projectId = Number(req.params.projectId);
@@ -2010,7 +2535,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const chart = await storage.getChart(Number(req.params.id));
       if (!chart) return res.status(404).json({ error: "Chart not found" });
-      if (!chart.datasetId) return res.json({ chart, rows: [] });
+      if (!chart.datasetId) {
+        const configData = (chart.chartConfig as any)?.data;
+        const rows = Array.isArray(configData) ? configData : [];
+        return res.json({ chart, rows });
+      }
 
       const limit = Number(req.query.limit) || 1000;
       const rows = await db

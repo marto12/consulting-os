@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -30,6 +30,8 @@ import {
   ChevronUp,
   ChevronDown,
   Check,
+  Upload,
+  Download,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -44,6 +46,7 @@ interface WorkflowStep {
   name: string;
   agentKey: string;
   description: string;
+  parallelGroup?: number;
 }
 
 interface WorkflowTemplate {
@@ -79,6 +82,7 @@ const STEP_COLORS = [
 function StepNodeComponent({ data }: NodeProps) {
   const color = data.color as string || "#6366F1";
   const isSelected = data.isSelected as boolean;
+  const parallelGroup = data.parallelGroup as number | undefined;
 
   return (
     <div
@@ -102,6 +106,9 @@ function StepNodeComponent({ data }: NodeProps) {
         <span className="text-xs font-semibold text-foreground truncate flex-1">
           {data.label as string}
         </span>
+        {parallelGroup && parallelGroup > 0 && (
+          <Badge variant="secondary" className="text-[10px]">P{parallelGroup}</Badge>
+        )}
       </div>
       <div className="flex items-center gap-1.5">
         <Bot size={12} className="text-muted-foreground" />
@@ -115,32 +122,60 @@ function StepNodeComponent({ data }: NodeProps) {
 const nodeTypes = { stepNode: StepNodeComponent };
 
 function buildGraphData(steps: WorkflowStep[], selectedIdx: number | null) {
-  const nodeSpacing = 160;
-  const nodes: Node[] = steps.map((step, idx) => ({
-    id: `step-${idx}`,
-    type: "stepNode",
-    position: { x: 300, y: idx * nodeSpacing },
-    data: {
-      label: step.name,
-      stepOrder: step.stepOrder,
-      agentKey: step.agentKey,
-      color: STEP_COLORS[idx % STEP_COLORS.length],
-      isSelected: idx === selectedIdx,
-    },
-    draggable: false,
-  }));
+  const rowSpacing = 170;
+  const colSpacing = 220;
 
+  const groups = new Map<string, { key: string; order: number; steps: { step: WorkflowStep; index: number }[] }>();
+  steps.forEach((step, index) => {
+    const groupId = step.parallelGroup && step.parallelGroup > 0
+      ? `p-${step.parallelGroup}`
+      : `s-${step.stepOrder}`;
+    if (!groups.has(groupId)) {
+      groups.set(groupId, { key: groupId, order: step.stepOrder, steps: [] });
+    }
+    groups.get(groupId)?.steps.push({ step, index });
+  });
+
+  const orderedGroups = Array.from(groups.values()).sort((a, b) => a.order - b.order);
+  const nodes: Node[] = [];
   const edges: Edge[] = [];
-  for (let i = 0; i < steps.length - 1; i++) {
-    edges.push({
-      id: `e-${i}-${i + 1}`,
-      source: `step-${i}`,
-      target: `step-${i + 1}`,
-      style: { stroke: "#6B7280", strokeWidth: 2 },
-      type: "smoothstep",
-      animated: true,
+
+  orderedGroups.forEach((group, rowIdx) => {
+    const offsetX = -((group.steps.length - 1) * colSpacing) / 2;
+    group.steps.forEach((entry, colIdx) => {
+      const { step, index } = entry;
+      nodes.push({
+        id: `step-${index}`,
+        type: "stepNode",
+        position: { x: 300 + offsetX + colIdx * colSpacing, y: rowIdx * rowSpacing },
+        data: {
+          label: step.name,
+          stepOrder: step.stepOrder,
+          agentKey: step.agentKey,
+          color: STEP_COLORS[index % STEP_COLORS.length],
+          isSelected: index === selectedIdx,
+          parallelGroup: step.parallelGroup || 0,
+        },
+        draggable: false,
+      });
     });
-  }
+
+    if (rowIdx > 0) {
+      const prevGroup = orderedGroups[rowIdx - 1];
+      prevGroup.steps.forEach((prev) => {
+        group.steps.forEach((current) => {
+          edges.push({
+            id: `e-${prev.index}-${current.index}`,
+            source: `step-${prev.index}`,
+            target: `step-${current.index}`,
+            style: { stroke: "#6B7280", strokeWidth: 2 },
+            type: "smoothstep",
+            animated: true,
+          });
+        });
+      });
+    }
+  });
 
   return { nodes, edges };
 }
@@ -154,6 +189,7 @@ function StepPanel({
   onDelete,
   onMoveUp,
   onMoveDown,
+  parallelGroupOptions,
 }: {
   step: WorkflowStep;
   index: number;
@@ -163,6 +199,7 @@ function StepPanel({
   onDelete: (idx: number) => void;
   onMoveUp: (idx: number) => void;
   onMoveDown: (idx: number) => void;
+  parallelGroupOptions: number[];
 }) {
   const color = STEP_COLORS[index % STEP_COLORS.length];
 
@@ -250,6 +287,22 @@ function StepPanel({
             placeholder="Optional description"
           />
         </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Parallel group</label>
+          <select
+            value={step.parallelGroup || 0}
+            onChange={(e) => onUpdate(index, { parallelGroup: Number(e.target.value) })}
+            className="w-full h-8 text-sm rounded-md border border-input bg-background px-2 text-foreground"
+          >
+            <option value={0}>Sequential</option>
+            {parallelGroupOptions.map((group) => (
+              <option key={group} value={group}>Group {group}</option>
+            ))}
+          </select>
+          <div className="mt-1 text-[11px] text-muted-foreground">
+            Steps in the same group run in parallel.
+          </div>
+        </div>
       </div>
     </Card>
   );
@@ -267,6 +320,8 @@ export default function WorkflowEditor() {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
   const [initialized, setInitialized] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: workflow, isLoading: workflowLoading } = useQuery<WorkflowTemplate>({
     queryKey: [`/api/workflows/${id}`],
@@ -282,11 +337,12 @@ export default function WorkflowEditor() {
       setName(workflow.name);
       setDescription(workflow.description);
       setSteps(
-        workflow.steps.map((s) => ({
+        workflow.steps.map((s: any) => ({
           stepOrder: s.stepOrder,
           name: s.name,
           agentKey: s.agentKey,
           description: s.description || "",
+          parallelGroup: s.configJson?.parallelGroup ?? 0,
         }))
       );
       setInitialized(true);
@@ -304,10 +360,169 @@ export default function WorkflowEditor() {
     [steps, selectedIdx]
   );
 
+  const parallelGroupOptions = useMemo(() => {
+    const existing = steps.map((step) => step.parallelGroup || 0).filter((group) => group > 0);
+    const maxGroup = existing.length > 0 ? Math.max(...existing) : 0;
+    const count = Math.max(3, maxGroup + 1);
+    return Array.from({ length: count }, (_, idx) => idx + 1);
+  }, [steps]);
+
   const onNodeClick = useCallback((_: any, node: Node) => {
     const idx = parseInt(node.id.replace("step-", ""));
     setSelectedIdx((prev) => (prev === idx ? null : idx));
   }, []);
+
+  const parseLangGraphYaml = useCallback((input: string) => {
+    const data: { name?: string; description?: string; nodes: any[]; edges: any[] } = {
+      nodes: [],
+      edges: [],
+    };
+    const lines = input.split(/\r?\n/);
+    let section: "nodes" | "edges" | null = null;
+    let currentItem: any = null;
+
+    const setValue = (obj: any, key: string, rawValue: string) => {
+      const value = rawValue.replace(/^['"]|['"]$/g, "");
+      obj[key] = value;
+    };
+
+    lines.forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) return;
+      if (trimmed.startsWith("name:")) {
+        data.name = trimmed.replace(/^name:\s*/, "");
+        return;
+      }
+      if (trimmed.startsWith("description:")) {
+        data.description = trimmed.replace(/^description:\s*/, "");
+        return;
+      }
+      if (trimmed.startsWith("nodes:")) {
+        section = "nodes";
+        currentItem = null;
+        return;
+      }
+      if (trimmed.startsWith("edges:")) {
+        section = "edges";
+        currentItem = null;
+        return;
+      }
+
+      if (section && trimmed.startsWith("-")) {
+        currentItem = {};
+        data[section].push(currentItem);
+        const inline = trimmed.replace(/^\-\s*/, "");
+        if (inline.includes(":")) {
+          const [key, ...rest] = inline.split(":");
+          setValue(currentItem, key.trim(), rest.join(":").trim());
+        }
+        return;
+      }
+
+      if (section && currentItem && trimmed.includes(":")) {
+        const [key, ...rest] = trimmed.split(":");
+        setValue(currentItem, key.trim(), rest.join(":").trim());
+      }
+    });
+
+    if (!data.nodes.length) {
+      throw new Error("No nodes found. Add a nodes: list with id/name/agent.");
+    }
+
+    const nodeMap = new Map<string, any>();
+    data.nodes.forEach((node) => {
+      if (!node.id) return;
+      nodeMap.set(String(node.id), node);
+    });
+
+    const indegree = new Map<string, number>();
+    const adjacency = new Map<string, string[]>();
+    nodeMap.forEach((_value, key) => {
+      indegree.set(key, 0);
+      adjacency.set(key, []);
+    });
+
+    data.edges.forEach((edge) => {
+      const from = edge.from || edge.source;
+      const to = edge.to || edge.target;
+      if (!from || !to) return;
+      if (!adjacency.has(from) || !indegree.has(to)) return;
+      adjacency.get(from)?.push(to);
+      indegree.set(to, (indegree.get(to) || 0) + 1);
+    });
+
+    const queue: string[] = [];
+    indegree.forEach((value, key) => {
+      if (value === 0) queue.push(key);
+    });
+
+    const orderedIds: string[] = [];
+    while (queue.length) {
+      const id = queue.shift();
+      if (!id) continue;
+      orderedIds.push(id);
+      adjacency.get(id)?.forEach((next) => {
+        indegree.set(next, (indegree.get(next) || 0) - 1);
+        if (indegree.get(next) === 0) queue.push(next);
+      });
+    }
+
+    if (orderedIds.length === 0) {
+      orderedIds.push(...Array.from(nodeMap.keys()));
+    }
+
+    const steps: WorkflowStep[] = orderedIds.map((nodeId, idx) => {
+      const node = nodeMap.get(nodeId) || {};
+      return {
+        stepOrder: idx + 1,
+        name: node.name || nodeId,
+        agentKey: node.agent || node.agentKey || "general",
+        description: node.description || "",
+      };
+    });
+
+    return { name: data.name, description: data.description, steps };
+  }, []);
+
+  const handleWorkflowUpload = useCallback(async (file: File) => {
+    try {
+      setUploadError(null);
+      const text = await file.text();
+      const parsed = parseLangGraphYaml(text);
+      if (parsed.name) setName(parsed.name);
+      if (parsed.description) setDescription(parsed.description);
+      setSteps(parsed.steps);
+      setSelectedIdx(null);
+      setHasChanges(true);
+    } catch (err: any) {
+      setUploadError(err?.message || "Failed to parse workflow file.");
+    }
+  }, [parseLangGraphYaml]);
+
+  const templateYaml = useMemo(() => (
+    `name: CGE Workflow\n` +
+    `description: Simple LangGraph workflow\n` +
+    `nodes:\n` +
+    `  - id: define\n` +
+    `    name: Project Definition\n` +
+    `    agent: project_definition\n` +
+    `  - id: issues\n` +
+    `    name: Issues Tree\n` +
+    `    agent: issues_tree\n` +
+    `edges:\n` +
+    `  - from: define\n` +
+    `    to: issues\n`
+  ), []);
+
+  const downloadTemplate = useCallback(() => {
+    const blob = new Blob([templateYaml], { type: "text/yaml" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "langgraph-workflow-template.yaml";
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [templateYaml]);
 
   const updateStep = useCallback((idx: number, updates: Partial<WorkflowStep>) => {
     setSteps((prev) => {
@@ -348,6 +563,7 @@ export default function WorkflowEditor() {
       name: `Step ${steps.length + 1}`,
       agentKey: agents[0]?.key || "project_definition",
       description: "",
+      parallelGroup: 0,
     };
     setSteps((prev) => [...prev, newStep]);
     setSelectedIdx(steps.length);
@@ -356,7 +572,14 @@ export default function WorkflowEditor() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const body = { name, description, steps };
+      const body = {
+        name,
+        description,
+        steps: steps.map((step) => ({
+          ...step,
+          configJson: { parallelGroup: step.parallelGroup || 0 },
+        })),
+      };
       if (isNew) {
         const res = await fetch("/api/workflows", {
           method: "POST",
@@ -444,6 +667,34 @@ export default function WorkflowEditor() {
               Unsaved changes
             </Badge>
           )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".yaml,.yml"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (!file) return;
+              handleWorkflowUpload(file);
+              event.currentTarget.value = "";
+            }}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload size={14} className="mr-1" />
+            Upload YAML
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={downloadTemplate}
+          >
+            <Download size={14} className="mr-1" />
+            Download Template
+          </Button>
           <Button
             size="sm"
             onClick={() => saveMutation.mutate()}
@@ -535,6 +786,7 @@ export default function WorkflowEditor() {
                   onDelete={deleteStep}
                   onMoveUp={(i) => moveStep(i, "up")}
                   onMoveDown={(i) => moveStep(i, "down")}
+                  parallelGroupOptions={parallelGroupOptions}
                 />
               ))}
               {steps.length > 0 && (

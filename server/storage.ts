@@ -21,6 +21,7 @@ import {
   workflowInstanceSteps,
   projectPhases,
   projectTasks,
+  projectTaskAssignees,
   projectCheckpoints,
   deliverables,
   stepChatMessages,
@@ -59,6 +60,7 @@ import {
   type WorkflowInstanceStep,
   type ProjectPhase,
   type ProjectTask,
+  type ProjectTaskAssignee,
   type ProjectCheckpoint,
   type Deliverable,
   type Document,
@@ -187,7 +189,10 @@ export const storage = {
     return step;
   },
 
-  async updateWorkflowTemplateStep(id: number, data: { stepOrder?: number; name?: string; agentKey?: string }): Promise<void> {
+  async updateWorkflowTemplateStep(
+    id: number,
+    data: { stepOrder?: number; name?: string; agentKey?: string; description?: string; configJson?: any }
+  ): Promise<void> {
     await db.update(workflowTemplateSteps).set(data).where(eq(workflowTemplateSteps.id, id));
   },
 
@@ -200,7 +205,10 @@ export const storage = {
     await db.delete(workflowTemplates).where(eq(workflowTemplates.id, id));
   },
 
-  async replaceWorkflowTemplateSteps(templateId: number, steps: Array<{ stepOrder: number; name: string; agentKey: string; description?: string }>): Promise<WorkflowTemplateStep[]> {
+  async replaceWorkflowTemplateSteps(
+    templateId: number,
+    steps: Array<{ stepOrder: number; name: string; agentKey: string; description?: string; configJson?: any }>
+  ): Promise<WorkflowTemplateStep[]> {
     await db.delete(workflowTemplateSteps).where(eq(workflowTemplateSteps.workflowTemplateId, templateId));
     for (const s of steps) {
       await db.insert(workflowTemplateSteps).values({
@@ -209,6 +217,7 @@ export const storage = {
         name: s.name,
         agentKey: s.agentKey,
         description: s.description || "",
+        configJson: s.configJson || null,
       });
     }
     return db.select().from(workflowTemplateSteps)
@@ -609,6 +618,33 @@ export const storage = {
       .orderBy(asc(projectTasks.sortOrder));
   },
 
+  async listProjectTaskAssignees(projectId: number): Promise<ProjectTaskAssignee[]> {
+    return db
+      .select({
+        id: projectTaskAssignees.id,
+        taskId: projectTaskAssignees.taskId,
+        userId: projectTaskAssignees.userId,
+        createdAt: projectTaskAssignees.createdAt,
+      })
+      .from(projectTaskAssignees)
+      .innerJoin(projectTasks, eq(projectTaskAssignees.taskId, projectTasks.id))
+      .where(eq(projectTasks.projectId, projectId));
+  },
+
+  async setProjectTaskAssignees(taskId: number, userIds: number[]): Promise<void> {
+    await db.transaction(async (tx) => {
+      await tx.delete(projectTaskAssignees).where(eq(projectTaskAssignees.taskId, taskId));
+      const uniqueIds = Array.from(new Set(userIds));
+      if (uniqueIds.length === 0) return;
+      await tx.insert(projectTaskAssignees).values(
+        uniqueIds.map((userId) => ({
+          taskId,
+          userId,
+        }))
+      );
+    });
+  },
+
   async createProjectTask(data: {
     projectId: number;
     phaseId?: number | null;
@@ -715,6 +751,10 @@ export const storage = {
 
   async deleteProjectCheckpoint(id: number): Promise<void> {
     await db.delete(projectCheckpoints).where(eq(projectCheckpoints.id, id));
+  },
+
+  async deleteProject(id: number): Promise<void> {
+    await db.delete(projects).where(eq(projects.id, id));
   },
 
   async createDeliverable(data: {
@@ -960,6 +1000,14 @@ export const storage = {
       .orderBy(desc(runLogs.createdAt));
   },
 
+  async listRunLogs(limit: number = 50): Promise<RunLog[]> {
+    return db
+      .select()
+      .from(runLogs)
+      .orderBy(desc(runLogs.createdAt))
+      .limit(limit);
+  },
+
   async getLatestSlideVersion(projectId: number): Promise<number> {
     const s = await db
       .select()
@@ -1120,6 +1168,22 @@ export const storage = {
     systemPrompt: string;
     model: string;
     maxTokens: number;
+    temperature?: number;
+    topP?: number;
+    presencePenalty?: number;
+    frequencyPenalty?: number;
+    maxIterations?: number;
+    toolWhitelist?: string | null;
+    toolCallBudget?: number;
+    retryCount?: number;
+    timeoutMs?: number;
+    memoryScope?: string;
+    outputSchema?: string | null;
+    safetyRules?: string | null;
+    stopSequences?: string | null;
+    streaming?: boolean;
+    parallelism?: number;
+    cacheTtlSeconds?: number;
   }): Promise<AgentConfig> {
     const existing = await this.getAgentConfig(data.agentType);
     if (existing) {
@@ -1129,6 +1193,22 @@ export const storage = {
           systemPrompt: data.systemPrompt,
           model: data.model,
           maxTokens: data.maxTokens,
+          temperature: data.temperature ?? existing.temperature,
+          topP: data.topP ?? existing.topP,
+          presencePenalty: data.presencePenalty ?? existing.presencePenalty,
+          frequencyPenalty: data.frequencyPenalty ?? existing.frequencyPenalty,
+          maxIterations: data.maxIterations ?? existing.maxIterations,
+          toolWhitelist: data.toolWhitelist ?? existing.toolWhitelist,
+          toolCallBudget: data.toolCallBudget ?? existing.toolCallBudget,
+          retryCount: data.retryCount ?? existing.retryCount,
+          timeoutMs: data.timeoutMs ?? existing.timeoutMs,
+          memoryScope: data.memoryScope ?? existing.memoryScope,
+          outputSchema: data.outputSchema ?? existing.outputSchema,
+          safetyRules: data.safetyRules ?? existing.safetyRules,
+          stopSequences: data.stopSequences ?? existing.stopSequences,
+          streaming: data.streaming ?? existing.streaming,
+          parallelism: data.parallelism ?? existing.parallelism,
+          cacheTtlSeconds: data.cacheTtlSeconds ?? existing.cacheTtlSeconds,
           updatedAt: new Date(),
         })
         .where(eq(agentConfigs.agentType, data.agentType))
@@ -1137,7 +1217,28 @@ export const storage = {
     }
     const [created] = await db
       .insert(agentConfigs)
-      .values(data)
+      .values({
+        agentType: data.agentType,
+        systemPrompt: data.systemPrompt,
+        model: data.model,
+        maxTokens: data.maxTokens,
+        temperature: data.temperature,
+        topP: data.topP,
+        presencePenalty: data.presencePenalty,
+        frequencyPenalty: data.frequencyPenalty,
+        maxIterations: data.maxIterations,
+        toolWhitelist: data.toolWhitelist,
+        toolCallBudget: data.toolCallBudget,
+        retryCount: data.retryCount,
+        timeoutMs: data.timeoutMs,
+        memoryScope: data.memoryScope,
+        outputSchema: data.outputSchema,
+        safetyRules: data.safetyRules,
+        stopSequences: data.stopSequences,
+        streaming: data.streaming,
+        parallelism: data.parallelism,
+        cacheTtlSeconds: data.cacheTtlSeconds,
+      })
       .returning();
     return created;
   },
