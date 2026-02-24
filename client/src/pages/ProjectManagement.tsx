@@ -680,8 +680,7 @@ export default function ProjectManagement() {
   const handleRunWorkflow = useCallback(
     (taskId: number, workflowId?: number | null) => {
       if (!workflowId) return;
-      fetch(`/api/projects/${projectId}/workflow/steps/${workflowId}/run`, { method: "POST" }).catch(() => null);
-      navigate(`/project/${projectId}/management/task/${taskId}`);
+      navigate(`/project/${projectId}/management/task/${taskId}?run=1`);
     },
     [navigate, projectId]
   );

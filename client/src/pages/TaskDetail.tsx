@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, FileText, Link as LinkIcon } from "lucide-react";
+import { ArrowLeft, FileText, Link as LinkIcon, Play } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -42,6 +42,12 @@ type Deliverable = {
   createdAt: string;
 };
 
+type RunMessage = {
+  type: string;
+  content: string;
+  timestamp: number;
+};
+
 const STATUS_OPTIONS: Record<ProjectTask["taskType"], Array<{ value: string; label: string }>> = {
   human: [
     { value: "not_started", label: "Not started" },
@@ -73,6 +79,7 @@ export default function TaskDetail() {
   const projectId = Number(id);
   const taskIdNumber = Number(taskId);
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { users } = useUserContext();
   const queryClient = useQueryClient();
   const [titleDraft, setTitleDraft] = useState("");
@@ -80,6 +87,10 @@ export default function TaskDetail() {
   const [statusDraft, setStatusDraft] = useState("");
   const [assigneeDraft, setAssigneeDraft] = useState("");
   const [workflowStepDraft, setWorkflowStepDraft] = useState("");
+  const [runState, setRunState] = useState<"idle" | "running" | "complete" | "error">("idle");
+  const [runMessages, setRunMessages] = useState<RunMessage[]>([]);
+  const runStartedRef = useRef(false);
+  const runStreamRef = useRef<EventSource | null>(null);
 
   const { data: managementData } = useQuery<ManagementData>({
     queryKey: ["/api/projects", projectId, "management"],
@@ -175,6 +186,71 @@ export default function TaskDetail() {
     return deliverables.filter((d) => d.stepId === task.workflowStepId);
   }, [deliverables, task?.workflowStepId]);
 
+  const startWorkflowRun = useCallback(() => {
+    if (!task?.workflowStepId || runState === "running") return;
+    runStartedRef.current = true;
+    setRunState("running");
+    setRunMessages([]);
+
+    if (runStreamRef.current) {
+      runStreamRef.current.close();
+    }
+
+    const streamUrl = `/api/projects/${projectId}/workflow/steps/${task.workflowStepId}/run-stream`;
+    const source = new EventSource(streamUrl);
+    runStreamRef.current = source;
+
+    source.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data) as RunMessage;
+        if (payload.type === "complete") {
+          setRunMessages((prev) => [...prev, payload].slice(-10));
+          setRunState("complete");
+          runStartedRef.current = false;
+          source.close();
+          queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "management"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "deliverables"] });
+          return;
+        }
+        if (payload.type === "error") {
+          setRunMessages((prev) => [...prev, payload].slice(-10));
+          setRunState("error");
+          runStartedRef.current = false;
+          source.close();
+          return;
+        }
+        setRunMessages((prev) => [...prev, payload].slice(-10));
+      } catch {
+        setRunMessages((prev) => [...prev, { type: "progress", content: String(event.data), timestamp: Date.now() }].slice(-10));
+      }
+    };
+
+    source.onerror = () => {
+      setRunMessages((prev) => [...prev, { type: "error", content: "Stream error", timestamp: Date.now() }].slice(-10));
+      setRunState("error");
+      runStartedRef.current = false;
+      source.close();
+    };
+  }, [projectId, queryClient, runState, task?.workflowStepId]);
+
+  useEffect(() => {
+    if (!task?.workflowStepId) return;
+    const shouldRun = searchParams.get("run") === "1";
+    if (!shouldRun || runStartedRef.current) return;
+    startWorkflowRun();
+    if (shouldRun) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("run");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams, startWorkflowRun, task?.workflowStepId]);
+
+  useEffect(() => {
+    return () => {
+      if (runStreamRef.current) runStreamRef.current.close();
+    };
+  }, []);
+
   if (!task) {
     return (
       <Card className="p-6">
@@ -227,8 +303,56 @@ export default function TaskDetail() {
               </div>
             </div>
           )}
+          {task.workflowStepId && (
+            <div className="md:col-span-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={startWorkflowRun}
+                disabled={runState === "running"}
+              >
+                <Play className="h-4 w-4 mr-1" />
+                {runState === "running" ? "Running" : "Run workflow"}
+              </Button>
+            </div>
+          )}
         </div>
       </Card>
+
+      {runState !== "idle" && (
+        <Card className="p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-foreground">Workflow run</div>
+              <p className="text-xs text-muted-foreground">
+                {runState === "running"
+                  ? "Running model workflow. Live updates below."
+                  : runState === "complete"
+                  ? "Run completed."
+                  : "Run failed."}
+              </p>
+            </div>
+            <Badge variant={runState === "error" ? "destructive" : "outline"} className="text-xs">
+              {runState}
+            </Badge>
+          </div>
+          <div className="mt-3 h-2 w-full rounded-full bg-muted overflow-hidden">
+            <div
+              className={`h-full rounded-full ${runState === "running" ? "animate-pulse bg-emerald-500" : runState === "complete" ? "bg-emerald-500" : "bg-rose-500"}`}
+              style={{ width: runState === "running" ? "60%" : "100%" }}
+            />
+          </div>
+          {runMessages.length > 0 && (
+            <div className="mt-4 space-y-2">
+              {runMessages.map((message, index) => (
+                <div key={`${message.timestamp}-${index}`} className="text-xs text-muted-foreground">
+                  {message.content}
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
 
       <Card className="p-5">
         <div className="flex items-center justify-between gap-3">

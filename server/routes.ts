@@ -1284,6 +1284,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })),
       });
 
+      const modelRunnerSteps = templateSteps.filter((step) => step.agentKey === "model_runner");
+      if (modelRunnerSteps.length > 0) {
+        const allModels = await storage.listModels();
+        for (const step of modelRunnerSteps) {
+          const stepConfig = (step.configJson as any) || {};
+          const modelName = stepConfig.modelName || step.name;
+          if (!modelName) continue;
+          const normalized = normalizeModelName(modelName);
+          if (!normalized) continue;
+          const matched = allModels.find((model) => normalizeModelName(model.name) === normalized)
+            || allModels.find((model) => {
+              const modelNorm = normalizeModelName(model.name);
+              return modelNorm.includes(normalized) || normalized.includes(modelNorm);
+            });
+          if (!matched) continue;
+          if (matched.projectId && matched.projectId !== projectId) continue;
+          if (!matched.projectId) {
+            await storage.linkProjectModel(projectId, matched.id);
+          }
+        }
+      }
+
       const steps = await storage.getWorkflowInstanceSteps(instance.id);
       res.status(201).json({ instance, steps });
     } catch (err: any) {
