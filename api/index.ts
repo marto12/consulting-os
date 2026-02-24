@@ -1,6 +1,7 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
-import { registerRoutes } from "../server/routes";
+// @ts-ignore - generated at build time for Vercel
+import { registerRoutes } from "../server_dist/routes.js";
 
 const app = express();
 

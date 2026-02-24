@@ -1,9 +1,9 @@
 {
-  "buildCommand": "npm run client:build",
+  "buildCommand": "npm run build",
   "outputDirectory": "dist/public",
   "functions": {
     "api/index.ts": {
-      "includeFiles": "{server/**,shared/**,templates/**}"
+      "includeFiles": "{server_dist/**,shared/**,templates/**}"
     }
   },
   "rewrites": [
