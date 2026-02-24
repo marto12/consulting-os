@@ -3,11 +3,7 @@
   "outputDirectory": "dist/public",
   "functions": {
     "api/index.ts": {
-      "includeFiles": [
-        "server/**",
-        "shared/**",
-        "templates/**"
-      ]
+      "includeFiles": "{server/**,shared/**,templates/**}"
     }
   },
   "rewrites": [
