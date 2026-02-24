@@ -94,3 +94,6 @@ The system follows a four-layer architecture: Projects → Workflows → Agents 
 - `DATABASE_URL`: PostgreSQL connection string.
 - `AI_INTEGRATIONS_OPENAI_API_KEY`: OpenAI API key.
 - `AI_INTEGRATIONS_OPENAI_BASE_URL`: OpenAI base URL.
+
+## Deployment
+- Vercel deploys from the GitHub `main` branch.
