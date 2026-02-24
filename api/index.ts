@@ -1,13 +1,14 @@
-import express from "express";
 import type { Request, Response, NextFunction } from "express";
+
+const express = require("express");
 // @ts-ignore - generated at build time for Vercel
-import { registerRoutes } from "../server_dist/routes.js";
+const { registerRoutes } = require("../server_dist/routes.js");
 
 const app = express();
 
 app.use(
   express.json({
-    verify: (req: any, _res, buf) => {
+    verify: (req: any, _res: Response, buf: Buffer) => {
       req.rawBody = buf;
     },
   })
@@ -29,7 +30,7 @@ const initPromise = registerRoutes(app).then(() => {
   });
 });
 
-export default async function handler(req: Request, res: Response) {
+module.exports = async function handler(req: Request, res: Response) {
   await initPromise;
   app(req, res);
-}
+};
