@@ -1,6 +1,15 @@
 {
   "buildCommand": "npm run client:build",
   "outputDirectory": "dist/public",
+  "functions": {
+    "api/index.ts": {
+      "includeFiles": [
+        "server/**",
+        "shared/**",
+        "templates/**"
+      ]
+    }
+  },
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/index" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
