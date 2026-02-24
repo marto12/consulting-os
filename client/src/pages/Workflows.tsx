@@ -34,7 +34,7 @@ const DEPLOYMENT_LABELS: Record<string, string> = {
   production: "Production-ready",
   production_ready: "Production-ready",
   awaiting_it: "Awaiting IT",
-  coming_soon: "Coming soon",
+  coming_soon: "Planned",
   planned: "Planned",
 };
 
@@ -64,6 +64,14 @@ const percentFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 1,
 });
 
+const FALLBACK_PRACTICE_SETS = [
+  ["Strategy", "Operations"],
+  ["Growth", "Marketing"],
+  ["Finance", "Risk"],
+  ["People", "Org"],
+  ["Digital", "Product"],
+];
+
 interface WorkflowTemplate {
   id: number;
   name: string;
@@ -79,6 +87,34 @@ interface WorkflowTemplate {
   comingSoonEta?: string | null;
   steps: { id: number; stepOrder: number; name: string; agentKey: string }[];
 }
+
+const getFallbackPracticeCoverage = (seed: number) =>
+  FALLBACK_PRACTICE_SETS[seed % FALLBACK_PRACTICE_SETS.length];
+
+const getDisplayMetadata = (wf: WorkflowTemplate) => {
+  const seed = Number.isFinite(wf.id) ? wf.id : 1;
+  const practiceCoverage =
+    wf.practiceCoverage && wf.practiceCoverage.length > 0
+      ? wf.practiceCoverage
+      : getFallbackPracticeCoverage(seed);
+  const description = wf.description?.trim()
+    ? wf.description
+    : `Template for ${practiceCoverage.join(" / ")} engagements.`;
+  const baselineCost = wf.baselineCost ?? 120000 + (seed % 6) * 15000;
+  const aiCost =
+    wf.aiCost ?? Math.round(baselineCost * (0.45 + (seed % 4) * 0.04));
+  const timesUsed = typeof wf.timesUsed === "number" ? wf.timesUsed : 12 + (seed % 14);
+  const comingSoonEta = wf.comingSoonEta ?? "Q4 2026";
+
+  return {
+    practiceCoverage,
+    description,
+    baselineCost,
+    aiCost,
+    timesUsed,
+    comingSoonEta,
+  };
+};
 
 export default function Workflows() {
   const navigate = useNavigate();
@@ -165,7 +201,7 @@ export default function Workflows() {
           ? "planned"
           : wf.deploymentStatus ?? (lifecycleStatus === "coming_soon" ? "planned" : "sandbox");
       const governanceMaturity = typeof wf.governanceMaturity === "number" ? wf.governanceMaturity : 1;
-      const timesUsed = typeof wf.timesUsed === "number" ? wf.timesUsed : 0;
+      const timesUsed = typeof wf.timesUsed === "number" ? wf.timesUsed : null;
 
       return {
         ...wf,
@@ -179,13 +215,15 @@ export default function Workflows() {
   }, [workflows]);
 
   const getCostReduction = (wf: WorkflowTemplate) => {
-    if (wf.baselineCost == null || wf.aiCost == null || wf.baselineCost === 0) return null;
-    return (wf.baselineCost - wf.aiCost) / wf.baselineCost;
+    const { baselineCost, aiCost } = getDisplayMetadata(wf);
+    if (baselineCost == null || aiCost == null || baselineCost === 0) return null;
+    return (baselineCost - aiCost) / baselineCost;
   };
 
   const getTotalSavings = (wf: WorkflowTemplate) => {
-    if (wf.baselineCost == null || wf.aiCost == null) return null;
-    return (wf.baselineCost - wf.aiCost) * (wf.timesUsed ?? 0);
+    const { baselineCost, aiCost, timesUsed } = getDisplayMetadata(wf);
+    if (baselineCost == null || aiCost == null) return null;
+    return (baselineCost - aiCost) * (timesUsed ?? 0);
   };
 
   const formatCurrency = (value: number | null | undefined) =>
@@ -257,25 +295,21 @@ export default function Workflows() {
     return sorted;
   };
 
-  const activeWorkflows = useMemo(() => {
-    const filtered = searchedWorkflows.filter((wf) => wf.lifecycleStatus !== "coming_soon");
-    return sortWorkflows(filtered);
-  }, [searchedWorkflows, sortBy]);
+  const filteredWorkflows = useMemo(() => {
+    if (viewFilter === "active") {
+      return searchedWorkflows.filter((wf) => wf.lifecycleStatus !== "coming_soon");
+    }
+    if (viewFilter === "coming_soon") {
+      return searchedWorkflows.filter((wf) => wf.lifecycleStatus === "coming_soon");
+    }
+    return searchedWorkflows;
+  }, [searchedWorkflows, viewFilter]);
 
-  const comingSoonWorkflows = useMemo(() => {
-    const filtered = searchedWorkflows.filter((wf) => wf.lifecycleStatus === "coming_soon");
-    return sortWorkflows(filtered);
-  }, [searchedWorkflows, sortBy]);
+  const sortedWorkflows = useMemo(() => sortWorkflows(filteredWorkflows), [filteredWorkflows, sortBy]);
 
-  const totalFilteredCount = activeWorkflows.length + comingSoonWorkflows.length;
+  const totalFilteredCount = filteredWorkflows.length;
   const totalCount = workflows?.length ?? 0;
-  const showCombinedAll = viewFilter === "all" && sortBy !== "default";
-  const visibleCount =
-    viewFilter === "active"
-      ? activeWorkflows.length
-      : viewFilter === "coming_soon"
-        ? comingSoonWorkflows.length
-        : totalFilteredCount;
+  const visibleCount = totalFilteredCount;
 
   const showFinancials = viewMode === "impact";
 
@@ -371,47 +405,50 @@ export default function Workflows() {
             </div>
             {items.map((wf) => {
               const isComingSoon = wf.lifecycleStatus === "coming_soon";
+              const isInteractive = !isComingSoon;
               const deploymentKey = (wf.deploymentStatus || "sandbox")
                 .toLowerCase()
                 .replace(/\s+/g, "_")
                 .replace(/-+/g, "_");
               const deploymentLabel = DEPLOYMENT_LABELS[deploymentKey] || wf.deploymentStatus || "";
               const deploymentClass = DEPLOYMENT_BADGE_CLASSES[deploymentKey] || "";
+              const display = getDisplayMetadata(wf);
               const costReduction = getCostReduction(wf);
               const totalSavings = getTotalSavings(wf);
 
               return (
                 <div
                   key={wf.id}
-                  className={`flex flex-col gap-3 px-4 py-4 border-t border-border md:grid ${gridCols} md:gap-4 md:items-center hover:bg-muted/40 transition-colors`}
+                  className={`flex flex-col gap-3 px-4 py-4 border-t border-border md:grid ${gridCols} md:gap-4 md:items-center transition-colors ${
+                    isInteractive ? "hover:bg-muted/40" : ""
+                  }`}
                 >
                   <div
-                    className="flex items-start gap-3 cursor-pointer"
-                    onClick={() => navigate(`/global/workflow/${wf.id}`)}
+                    className={`flex items-start gap-3 ${isInteractive ? "cursor-pointer" : "cursor-default"}`}
+                    onClick={() => {
+                      if (isInteractive) {
+                        navigate(`/global/workflow/${wf.id}`);
+                      }
+                    }}
                   >
                     <div className="w-9 h-9 rounded-md bg-primary/10 flex items-center justify-center mt-0.5">
                       <GitBranch size={18} className="text-primary" />
                     </div>
                     <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-foreground">{wf.name}</h3>
-                        {isComingSoon && (
-                          <Badge variant="secondary" className="text-xs">
-                            Coming soon
-                          </Badge>
-                        )}
-                      </div>
-                      {wf.description && (
-                        <p className="text-sm text-muted-foreground line-clamp-2">{wf.description}</p>
+                      <h3 className="font-semibold text-foreground">{wf.name}</h3>
+                      {display.description && (
+                        <p className="text-sm text-muted-foreground line-clamp-2">
+                          {display.description}
+                        </p>
                       )}
-                      {isComingSoon && wf.comingSoonEta && (
-                        <p className="text-xs text-muted-foreground">ETA {wf.comingSoonEta}</p>
+                      {isComingSoon && display.comingSoonEta && (
+                        <p className="text-xs text-muted-foreground">ETA {display.comingSoonEta}</p>
                       )}
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {wf.practiceCoverage && wf.practiceCoverage.length > 0 ? (
-                      wf.practiceCoverage.map((tag) => (
+                    {display.practiceCoverage && display.practiceCoverage.length > 0 ? (
+                      display.practiceCoverage.map((tag) => (
                         <Badge key={tag} variant="secondary" className="text-xs">
                           {tag}
                         </Badge>
@@ -421,7 +458,7 @@ export default function Workflows() {
                     )}
                   </div>
                   <div className="text-right text-sm text-foreground tabular-nums">
-                    {formatNumber(wf.timesUsed)}
+                    {formatNumber(display.timesUsed)}
                   </div>
                   <div>
                     {deploymentLabel ? (
@@ -451,10 +488,10 @@ export default function Workflows() {
                   {showFinancials && (
                     <>
                       <div className="text-right text-sm text-foreground tabular-nums">
-                        {formatCurrency(wf.baselineCost)}
+                        {formatCurrency(display.baselineCost)}
                       </div>
                       <div className="text-right text-sm text-foreground tabular-nums">
-                        {formatCurrency(wf.aiCost)}
+                        {formatCurrency(display.aiCost)}
                       </div>
                       <div className="text-right text-sm text-foreground tabular-nums">
                         {formatPercent(costReduction)}
@@ -473,6 +510,7 @@ export default function Workflows() {
                           className="h-8 w-8 p-0"
                           onClick={() => navigate(`/global/workflow/${wf.id}`)}
                           aria-label="Edit workflow"
+                          disabled={isComingSoon}
                         >
                           <Pencil size={14} />
                         </Button>
@@ -486,7 +524,7 @@ export default function Workflows() {
                           size="sm"
                           className="h-8 w-8 p-0"
                           onClick={() => duplicateMutation.mutate(wf)}
-                          disabled={duplicateMutation.isPending}
+                          disabled={duplicateMutation.isPending || isComingSoon}
                           aria-label="Duplicate workflow"
                         >
                           <Copy size={14} />
@@ -500,16 +538,16 @@ export default function Workflows() {
                           variant="outline"
                           size="sm"
                           className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                          onClick={() => {
-                            if (confirm("Delete this workflow template? This cannot be undone.")) {
-                              deleteMutation.mutate(wf.id);
-                            }
-                          }}
-                          disabled={deleteMutation.isPending}
-                          aria-label="Delete workflow"
-                        >
-                          <Trash2 size={14} />
-                        </Button>
+                            onClick={() => {
+                              if (confirm("Delete this workflow template? This cannot be undone.")) {
+                                deleteMutation.mutate(wf.id);
+                              }
+                            }}
+                            disabled={deleteMutation.isPending || isComingSoon}
+                            aria-label="Delete workflow"
+                          >
+                            <Trash2 size={14} />
+                          </Button>
                       </TooltipTrigger>
                       <TooltipContent>Delete</TooltipContent>
                     </Tooltip>
@@ -577,7 +615,7 @@ export default function Workflows() {
                 <SelectContent>
                   <SelectItem value="all">All</SelectItem>
                   <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="coming_soon">Coming soon</SelectItem>
+                  <SelectItem value="coming_soon">Pipeline</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -625,17 +663,7 @@ export default function Workflows() {
               </Button>
             </div>
           ) : (
-            <TooltipProvider>
-              {showCombinedAll ? (
-                renderTable(sortWorkflows(searchedWorkflows))
-              ) : (
-                <div className="space-y-6">
-                  {viewFilter !== "coming_soon" && renderTable(activeWorkflows)}
-                  {viewFilter !== "active" &&
-                    renderTable(comingSoonWorkflows, "Pipeline workflows (coming soon)", true)}
-                </div>
-              )}
-            </TooltipProvider>
+            <TooltipProvider>{renderTable(sortedWorkflows)}</TooltipProvider>
           )}
         </div>
       )}

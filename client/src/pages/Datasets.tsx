@@ -26,6 +26,7 @@ import { Textarea } from "../components/ui/textarea";
 import { Label } from "../components/ui/label";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { Skeleton } from "../components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { useUserContext } from "../lib/user-context";
 
 interface Dataset {
@@ -65,6 +66,9 @@ export default function Datasets() {
   const [showUpload, setShowUpload] = useState(false);
   const [showApiLink, setShowApiLink] = useState(false);
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null);
+  const [filterText, setFilterText] = useState("");
+  const [sortKey, setSortKey] = useState("name");
+  const [sortDir, setSortDir] = useState("asc");
 
   const [dsName, setDsName] = useState("");
   const [dsDesc, setDsDesc] = useState("");
@@ -297,6 +301,133 @@ export default function Datasets() {
     return map;
   }, [users]);
 
+  const getOwnerName = useCallback((ds: Dataset) => {
+    if (ds.lastEditedByUserId && userLookup.get(ds.lastEditedByUserId)) {
+      return userLookup.get(ds.lastEditedByUserId) as string;
+    }
+    return ds.owner || "System";
+  }, [userLookup]);
+
+  const filteredGlobalDatasets = useMemo(() => {
+    const query = filterText.trim().toLowerCase();
+    const filtered = query
+      ? globalDatasets.filter((ds) => {
+        const columns = ds.schemaJson && Array.isArray(ds.schemaJson) ? ds.schemaJson.length : 0;
+        const haystack = [
+          ds.name,
+          ds.description,
+          ds.sourceType,
+          ds.sourceUrl,
+          getOwnerName(ds),
+          String(ds.rowCount),
+          String(columns),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(query);
+      })
+      : globalDatasets;
+
+    const sorted = [...filtered].sort((a, b) => {
+      const dir = sortDir === "asc" ? 1 : -1;
+      if (sortKey === "rows") return (a.rowCount - b.rowCount) * dir;
+      if (sortKey === "columns") {
+        const aCols = a.schemaJson && Array.isArray(a.schemaJson) ? a.schemaJson.length : 0;
+        const bCols = b.schemaJson && Array.isArray(b.schemaJson) ? b.schemaJson.length : 0;
+        return (aCols - bCols) * dir;
+      }
+      if (sortKey === "owner") return getOwnerName(a).localeCompare(getOwnerName(b)) * dir;
+      if (sortKey === "source") return a.sourceType.localeCompare(b.sourceType) * dir;
+      if (sortKey === "created") {
+        return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dir;
+      }
+      return a.name.localeCompare(b.name) * dir;
+    });
+
+    return sorted;
+  }, [globalDatasets, filterText, sortKey, sortDir, getOwnerName]);
+
+  const filteredProjectDatasets = useMemo(() => {
+    const query = filterText.trim().toLowerCase();
+    const filtered = query
+      ? (datasets || []).filter((ds) => {
+        const columns = ds.schemaJson && Array.isArray(ds.schemaJson) ? ds.schemaJson.length : 0;
+        const haystack = [
+          ds.name,
+          ds.description,
+          ds.sourceType,
+          ds.sourceUrl,
+          getOwnerName(ds),
+          String(ds.rowCount),
+          String(columns),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(query);
+      })
+      : (datasets || []);
+
+    const sorted = [...filtered].sort((a, b) => {
+      const dir = sortDir === "asc" ? 1 : -1;
+      if (sortKey === "rows") return (a.rowCount - b.rowCount) * dir;
+      if (sortKey === "columns") {
+        const aCols = a.schemaJson && Array.isArray(a.schemaJson) ? a.schemaJson.length : 0;
+        const bCols = b.schemaJson && Array.isArray(b.schemaJson) ? b.schemaJson.length : 0;
+        return (aCols - bCols) * dir;
+      }
+      if (sortKey === "owner") return getOwnerName(a).localeCompare(getOwnerName(b)) * dir;
+      if (sortKey === "source") return a.sourceType.localeCompare(b.sourceType) * dir;
+      if (sortKey === "created") {
+        return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dir;
+      }
+      return a.name.localeCompare(b.name) * dir;
+    });
+
+    return sorted;
+  }, [datasets, filterText, sortKey, sortDir, getOwnerName]);
+
+  const filteredSharedDatasets = useMemo(() => {
+    const query = filterText.trim().toLowerCase();
+    const filtered = query
+      ? sharedDatasets.filter((ds) => {
+        const columns = ds.schemaJson && Array.isArray(ds.schemaJson) ? ds.schemaJson.length : 0;
+        const haystack = [
+          ds.name,
+          ds.description,
+          ds.sourceType,
+          ds.sourceUrl,
+          getOwnerName(ds),
+          String(ds.rowCount),
+          String(columns),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(query);
+      })
+      : sharedDatasets;
+
+    const sorted = [...filtered].sort((a, b) => {
+      const dir = sortDir === "asc" ? 1 : -1;
+      if (sortKey === "rows") return (a.rowCount - b.rowCount) * dir;
+      if (sortKey === "columns") {
+        const aCols = a.schemaJson && Array.isArray(a.schemaJson) ? a.schemaJson.length : 0;
+        const bCols = b.schemaJson && Array.isArray(b.schemaJson) ? b.schemaJson.length : 0;
+        return (aCols - bCols) * dir;
+      }
+      if (sortKey === "owner") return getOwnerName(a).localeCompare(getOwnerName(b)) * dir;
+      if (sortKey === "source") return a.sourceType.localeCompare(b.sourceType) * dir;
+      if (sortKey === "created") {
+        return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dir;
+      }
+      return a.name.localeCompare(b.name) * dir;
+    });
+
+    return sorted;
+  }, [sharedDatasets, filterText, sortKey, sortDir, getOwnerName]);
+
   const skeletonCards = Array.from({ length: 6 });
 
   return (
@@ -348,7 +479,7 @@ export default function Datasets() {
                 </Card>
               ))}
             </div>
-          ) : globalDatasets.length === 0 ? (
+          ) : filteredGlobalDatasets.length === 0 ? (
             <Card className="p-8 text-center">
               <p className="text-sm text-muted-foreground">No shared datasets available.</p>
             </Card>
@@ -356,63 +487,140 @@ export default function Datasets() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Shared Datasets</h2>
-                <Badge variant="secondary" className="text-[10px]">{globalDatasets.length}</Badge>
+                <Badge variant="secondary" className="text-[10px]">{filteredGlobalDatasets.length}</Badge>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {globalDatasets.map((ds) => (
-                  <Card key={ds.id} className="p-4 group hover:border-primary/30 transition-colors">
-                    <div className="flex items-center gap-2 mb-2">
-                      {sourceIcon(ds.sourceType)}
-                      <h3 className="font-semibold text-sm truncate">{ds.name}</h3>
-                      {sourceBadge(ds.sourceType)}
-                      <Badge variant="outline" className="text-[10px]">Shared</Badge>
-                    </div>
-                    <p className="text-xs text-muted-foreground line-clamp-2 min-h-[2rem]">{ds.description || "No description"}</p>
-                    <div className="flex items-center gap-3 mt-3 text-xs text-muted-foreground">
-                      <span>{ds.rowCount.toLocaleString()} rows</span>
-                      {ds.schemaJson && Array.isArray(ds.schemaJson) && (
-                        <span>{ds.schemaJson.length} columns</span>
-                      )}
-                      {ds.lastEditedByUserId && userLookup.get(ds.lastEditedByUserId) && (
-                        <span>• {userLookup.get(ds.lastEditedByUserId)}</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1 mt-3 pt-3 border-t border-border/50">
-                      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => openUpload(ds)}>
-                        <Upload size={13} className="mr-1" />
-                        CSV
-                      </Button>
-                      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => openApiLink(ds)}>
-                        <Link size={13} className="mr-1" />
-                        API
-                      </Button>
-                      {ds.rowCount > 0 && (
-                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => openPreview(ds)}>
-                          <Eye size={13} className="mr-1" />
-                          Preview
-                        </Button>
-                      )}
-                      <div className="ml-auto flex gap-1">
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(ds)}>
-                          <Pencil size={13} />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                          onClick={() => {
-                            if (confirm(`Delete "${ds.name}"? This will remove all data.`)) {
-                              deleteDataset.mutate(ds.id);
-                            }
-                          }}
-                        >
-                          <Trash2 size={13} />
-                        </Button>
-                      </div>
-                    </div>
-                  </Card>
-                ))}
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                <Input
+                  placeholder="Filter datasets"
+                  value={filterText}
+                  onChange={(e) => setFilterText(e.target.value)}
+                  className="sm:max-w-xs"
+                />
+                <Select value={sortKey} onValueChange={setSortKey}>
+                  <SelectTrigger className="w-full sm:w-44">
+                    <SelectValue placeholder="Sort by" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="name">Name</SelectItem>
+                    <SelectItem value="rows">Rows</SelectItem>
+                    <SelectItem value="columns">Columns</SelectItem>
+                    <SelectItem value="owner">Owner</SelectItem>
+                    <SelectItem value="source">Source</SelectItem>
+                    <SelectItem value="created">Created</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={sortDir} onValueChange={setSortDir}>
+                  <SelectTrigger className="w-full sm:w-40">
+                    <SelectValue placeholder="Order" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="asc">Ascending</SelectItem>
+                    <SelectItem value="desc">Descending</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
+              <Card className="p-0 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/40">
+                      <tr className="text-left text-muted-foreground">
+                        <th className="px-4 py-3 font-medium">Dataset</th>
+                        <th className="px-4 py-3 font-medium">Source</th>
+                        <th className="px-4 py-3 font-medium">Rows</th>
+                        <th className="px-4 py-3 font-medium">Columns</th>
+                        <th className="px-4 py-3 font-medium">Owner</th>
+                        <th className="px-4 py-3 font-medium text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredGlobalDatasets.map((ds) => {
+                        const editorName = ds.lastEditedByUserId ? userLookup.get(ds.lastEditedByUserId) : null;
+                        return (
+                          <tr
+                            key={ds.id}
+                            className="border-t border-border/60 hover:bg-muted/30 cursor-pointer"
+                            onClick={() => handleCardClick(ds)}
+                          >
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                {sourceIcon(ds.sourceType)}
+                                <div className="min-w-0">
+                                  <div className="font-semibold text-foreground truncate">{ds.name}</div>
+                                  <div className="text-[11px] text-muted-foreground truncate">{ds.description || "No description"}</div>
+                                </div>
+                                {sourceBadge(ds.sourceType)}
+                                <Badge variant="outline" className="text-[10px]">Shared</Badge>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground capitalize">{ds.sourceType}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{ds.rowCount.toLocaleString()}</td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {ds.schemaJson && Array.isArray(ds.schemaJson) ? ds.schemaJson.length : 0}
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {editorName || ds.owner || "System"}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center justify-end gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
+                                  onClick={(e) => { stopPropagation(e); openUpload(ds); }}
+                                >
+                                  <Upload size={13} className="mr-1" />
+                                  CSV
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
+                                  onClick={(e) => { stopPropagation(e); openApiLink(ds); }}
+                                >
+                                  <Link size={13} className="mr-1" />
+                                  API
+                                </Button>
+                                {ds.rowCount > 0 && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={(e) => { stopPropagation(e); openPreview(ds); }}
+                                  >
+                                    <Eye size={13} className="mr-1" />
+                                    Preview
+                                  </Button>
+                                )}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 w-7 p-0"
+                                  onClick={(e) => { stopPropagation(e); openEdit(ds); }}
+                                >
+                                  <Pencil size={13} />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                                  onClick={(e) => {
+                                    stopPropagation(e);
+                                    if (confirm(`Delete "${ds.name}"? This will remove all data.`)) {
+                                      deleteDataset.mutate(ds.id);
+                                    }
+                                  }}
+                                >
+                                  <Trash2 size={13} />
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
             </div>
           )}
         </>
@@ -456,9 +664,9 @@ export default function Datasets() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Project Datasets</h2>
-                  <Badge variant="secondary" className="text-[10px]">{datasets?.length || 0}</Badge>
+                  <Badge variant="secondary" className="text-[10px]">{filteredProjectDatasets.length}</Badge>
                 </div>
-                {!datasets || datasets.length === 0 ? (
+                {filteredProjectDatasets.length === 0 ? (
                   <div className="flex flex-col items-center py-12 gap-2 text-muted-foreground">
                     <Database size={40} strokeWidth={1.5} />
                     <p className="text-sm">No datasets yet</p>
@@ -478,7 +686,7 @@ export default function Datasets() {
                           </tr>
                         </thead>
                         <tbody>
-                          {datasets.map((ds) => {
+                          {filteredProjectDatasets.map((ds) => {
                             const isShared = !ds.projectId;
                             const allowEdit = !isShared;
                             const editorName = ds.lastEditedByUserId ? userLookup.get(ds.lastEditedByUserId) : null;
@@ -571,11 +779,11 @@ export default function Datasets() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Shared Datasets</h2>
-                  <Badge variant="secondary" className="text-[10px]">{sharedDatasets.length}</Badge>
+                  <Badge variant="secondary" className="text-[10px]">{filteredSharedDatasets.length}</Badge>
                 </div>
                 {loadingShared ? (
                   <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-                ) : sharedDatasets.length === 0 ? (
+                ) : filteredSharedDatasets.length === 0 ? (
                   <Card className="p-8 text-center">
                     <p className="text-sm text-muted-foreground">No shared datasets available.</p>
                   </Card>
@@ -594,7 +802,7 @@ export default function Datasets() {
                           </tr>
                         </thead>
                         <tbody>
-                          {sharedDatasets.map((ds) => {
+                          {filteredSharedDatasets.map((ds) => {
                             const editorName = ds.lastEditedByUserId ? userLookup.get(ds.lastEditedByUserId) : null;
                             return (
                               <tr

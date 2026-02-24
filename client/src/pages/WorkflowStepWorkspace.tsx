@@ -33,6 +33,8 @@ import { Skeleton } from "../components/ui/skeleton";
 import { cn } from "../lib/utils";
 import DeliverablePreview from "../components/DeliverablePreview";
 import { useNotifications } from "../components/notifications/NotificationsProvider";
+import { parseDeliverableContent } from "../lib/deliverables";
+import { formatDeliverableText } from "../lib/deliverable-format";
 
 const AGENT_COLORS: Record<string, string> = {
   project_definition: "#6B7280",
@@ -42,150 +44,8 @@ const AGENT_COLORS: Record<string, string> = {
   execution: "#6B7280",
   summary: "#9CA3AF",
   presentation: "#6B7280",
+  outcomes_report: "#0F766E",
 };
-
-function formatDeliverableText(agentKey: string, content: any): string {
-  if (!content) return "No content generated.";
-
-  try {
-    if (agentKey === "project_definition") {
-      const lines: string[] = [];
-      if (content.decision_statement) lines.push(`**Decision Statement**\n${content.decision_statement}`);
-      if (content.governing_question) lines.push(`**Governing Question**\n${content.governing_question}`);
-      if (content.decision_owner) lines.push(`**Decision Owner:** ${content.decision_owner}`);
-      if (content.decision_deadline) lines.push(`**Decision Deadline:** ${content.decision_deadline}`);
-      if (content.success_metrics?.length) {
-        lines.push(`**Success Metrics**`);
-        content.success_metrics.forEach((m: any) => {
-          lines.push(`  - ${m.metric_name}: ${m.definition} (Target: ${m.threshold_or_target})`);
-        });
-      }
-      if (content.alternatives?.length) {
-        lines.push(`**Alternatives**`);
-        content.alternatives.forEach((a: string) => lines.push(`  - ${a}`));
-      }
-      if (content.constraints) {
-        lines.push(`**Constraints**`);
-        Object.entries(content.constraints).forEach(([k, v]) => {
-          if (v) lines.push(`  - ${k.charAt(0).toUpperCase() + k.slice(1)}: ${v}`);
-        });
-      }
-      if (content.assumptions?.length) {
-        lines.push(`**Assumptions**`);
-        content.assumptions.forEach((a: string) => lines.push(`  - ${a}`));
-      }
-      if (content.initial_hypothesis) lines.push(`**Initial Hypothesis**\n${content.initial_hypothesis}`);
-      if (content.key_uncertainties?.length) {
-        lines.push(`**Key Uncertainties**`);
-        content.key_uncertainties.forEach((u: string) => lines.push(`  - ${u}`));
-      }
-      if (content.information_gaps?.length) {
-        lines.push(`**Information Gaps**`);
-        content.information_gaps.forEach((g: string) => lines.push(`  - ${g}`));
-      }
-      return lines.join("\n\n");
-    }
-
-    if (agentKey === "issues_tree") {
-      const issues = content.issues || [];
-      const criticLog = content.criticLog || [];
-      const roots = issues.filter((n: any) => !n.parentId);
-
-      function renderBranch(parentId: string | null, indent: number): string {
-        const children = issues.filter((n: any) => n.parentId === parentId);
-        return children.map((c: any) => {
-          const prefix = "  ".repeat(indent) + "- ";
-          const priority = c.priority ? ` [${c.priority}]` : "";
-          const line = `${prefix}${c.text}${priority}`;
-          const sub = renderBranch(c.id, indent + 1);
-          return sub ? `${line}\n${sub}` : line;
-        }).join("\n");
-      }
-
-      const lines: string[] = [];
-      lines.push(`**Issues Tree** (${issues.length} nodes, ${roots.length} root branches)`);
-      lines.push(renderBranch(null, 0));
-
-      if (criticLog.length > 0) {
-        const lastCritic = criticLog[criticLog.length - 1]?.critic;
-        if (lastCritic) {
-          lines.push(`\n**MECE Quality Score:** ${lastCritic.overallScore}/5 - ${lastCritic.verdict === "approved" ? "Approved" : "Needs revision"}`);
-        }
-      }
-      return lines.join("\n\n");
-    }
-
-    if (agentKey === "hypothesis") {
-      const lines: string[] = [];
-      if (content.hypotheses?.length) {
-        lines.push(`**Hypotheses** (${content.hypotheses.length} generated)`);
-        content.hypotheses.forEach((h: any, i: number) => {
-          lines.push(`${i + 1}. ${h.statement}`);
-          lines.push(`   Metric: ${h.metric} | Data Source: ${h.dataSource} | Method: ${h.method}`);
-        });
-      }
-      if (content.analysisPlan?.length) {
-        lines.push(`\n**Analysis Plan** (${content.analysisPlan.length} analyses)`);
-        content.analysisPlan.forEach((p: any, i: number) => {
-          lines.push(`${i + 1}. Method: ${p.method}`);
-          if (p.requiredDataset) lines.push(`   Required Dataset: ${p.requiredDataset}`);
-        });
-      }
-      return lines.join("\n");
-    }
-
-    if (agentKey === "execution") {
-      if (Array.isArray(content)) {
-        const lines: string[] = [`**Scenario Analysis Results** (${content.length} scenarios)`];
-        content.forEach((r: any, i: number) => {
-          lines.push(`\nScenario ${i + 1}: ${r.toolName || "Analysis"}`);
-          if (r.outputs?.summary) {
-            const s = r.outputs.summary;
-            lines.push(`  Expected NPV: $${s.expectedValue?.toLocaleString() || "N/A"}`);
-            lines.push(`  Best Case: $${s.optimisticNpv?.toLocaleString() || "N/A"}`);
-            lines.push(`  Worst Case: $${s.pessimisticNpv?.toLocaleString() || "N/A"}`);
-            lines.push(`  Risk-Adjusted Return: ${s.riskAdjustedReturn || "N/A"}%`);
-          }
-          if (r.inputs) {
-            lines.push(`  Baseline Revenue: $${r.inputs.baselineRevenue?.toLocaleString() || "N/A"}`);
-            lines.push(`  Growth Rate: ${((r.inputs.growthRate || 0) * 100).toFixed(1)}%`);
-          }
-        });
-        return lines.join("\n");
-      }
-    }
-
-    if (agentKey === "summary") {
-      if (content.summaryText) {
-        return content.summaryText;
-      }
-    }
-
-    if (agentKey === "presentation") {
-      if (content.slides?.length) {
-        const lines: string[] = [`**Presentation Deck** (${content.slides.length} slides)`];
-        content.slides.forEach((s: any) => {
-          const slideNum = (s.slideIndex ?? 0) + 1;
-          lines.push(`\nSlide ${slideNum}: ${s.title}`);
-          if (s.subtitle) lines.push(`  ${s.subtitle}`);
-          if (s.layout) lines.push(`  Layout: ${s.layout}`);
-          if (s.bodyJson?.bullets) {
-            s.bodyJson.bullets.forEach((b: string) => lines.push(`  - ${b}`));
-          }
-          if (s.bodyJson?.metrics) {
-            s.bodyJson.metrics.forEach((m: any) => lines.push(`  - ${m.label}: ${m.value} (${m.change})`));
-          }
-        });
-        return lines.join("\n");
-      }
-    }
-
-    if (typeof content === "string") return content;
-    return JSON.stringify(content, null, 2);
-  } catch {
-    return typeof content === "string" ? content : JSON.stringify(content, null, 2);
-  }
-}
 
 interface ChatMessage {
   id?: number;
@@ -651,19 +511,15 @@ export default function WorkflowStepWorkspace() {
   }
 
   function renderDeliverableInline(msg: ChatMessage) {
-    let contentJson: any;
-    try {
-      contentJson = typeof msg.content === "string" ? JSON.parse(msg.content) : msg.content;
-    } catch {
-      contentJson = msg.content;
-    }
+    const { payload, envelope } = parseDeliverableContent(msg.content);
 
     const agentKey = msg.metadata?.agentKey || step.agentKey;
-    const text = formatDeliverableText(agentKey, contentJson);
+    const text = formatDeliverableText(agentKey, payload);
     const title = msg.metadata?.title || step.name;
+    const rawContent = envelope ?? payload;
 
     const openPreview = () => {
-      setPreviewData({ agentKey, content: contentJson, title });
+      setPreviewData({ agentKey, content: payload, title });
       setPreviewOpen(true);
     };
 
@@ -688,7 +544,7 @@ export default function WorkflowStepWorkspace() {
             </Button>
           </div>
           <FormattedText text={text} />
-          {isApproved && <JsonToggle content={contentJson} />}
+          {isApproved && <JsonToggle content={rawContent} />}
         </Card>
       </div>
     );

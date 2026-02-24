@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import IssuesGraph from "./IssuesGraph";
+import { parseDeliverableContent } from "../lib/deliverables";
 
 interface DeliverablePreviewProps {
   open: boolean;
@@ -39,6 +40,7 @@ const AGENT_COLORS: Record<string, string> = {
   execution: "#6B7280",
   summary: "#9CA3AF",
   presentation: "#6B7280",
+  outcomes_report: "#0F766E",
 };
 
 function ProjectDefinitionPreview({ content }: { content: any }) {
@@ -429,6 +431,7 @@ const PREVIEW_LABELS: Record<string, string> = {
 };
 
 export default function DeliverablePreview({ open, onOpenChange, agentKey, content, title }: DeliverablePreviewProps) {
+  const { payload } = parseDeliverableContent(content);
   const color = AGENT_COLORS[agentKey] || "#6B7280";
   const label = title || PREVIEW_LABELS[agentKey] || "Preview";
 
@@ -463,7 +466,7 @@ export default function DeliverablePreview({ open, onOpenChange, agentKey, conte
           </DialogHeader>
         </div>
         <div className="p-4 sm:p-6">
-          {renderPreview(content)}
+          {renderPreview(payload)}
         </div>
       </DialogContent>
     </Dialog>

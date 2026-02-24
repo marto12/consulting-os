@@ -25,6 +25,40 @@ function getModelUsed(): string {
 }
 
 export const DEFAULT_PROMPTS: Record<string, string> = {
+  outcomes_report: `You are a consulting outcomes analyst. Given datasets, charts, and (optional) model run context, produce a concise, executive-ready outcomes report.
+
+Return ONLY valid JSON matching this schema:
+{
+  "reportTitle": "",
+  "reportText": "",
+  "keyFindings": [""],
+  "chartHighlights": [
+    { "chartId": 0, "title": "", "insight": "" }
+  ],
+  "dataNotes": [""],
+  "nextSteps": [""]
+}
+
+Guidelines:
+- Report text should be 2-4 short paragraphs, plain English.
+- Key findings should be 3-5 bullets, outcome-focused.
+- Chart highlights should reference the provided chart titles.
+- Data notes should call out data coverage limits or assumptions.
+- Next steps should be concrete and actionable (3-5 bullets).`,
+  chart_pack: `You are a data visualization specialist. Given model output tables, generate a concise chart pack plan with chart titles, intended chart types, and the core metric each chart visualizes. Focus on executive-ready charts that tell the story of the model results.
+
+Return ONLY valid JSON matching this schema:
+{
+  "charts": [
+    {
+      "title": "Chart title",
+      "chartType": "bar" | "line" | "pie" | "area" | "scatter",
+      "focusMetric": "Name of the main metric",
+      "notes": "What this chart should highlight"
+    }
+  ]
+}
+`,
   project_definition: `You are a senior consulting engagement manager. Your job is to translate vague client language into a structured, decision-based problem definition before any analysis begins.
 
 Given a raw project brief (objective, constraints, and any other context), you must produce a structured problem definition that includes:
@@ -1109,6 +1143,114 @@ export async function presentationAgent(
   const parsed = extractJson(raw);
   onProgress("Analysis complete. Generated " + (parsed.slides?.length || 0) + " slides.", "status");
   return parsed;
+}
+
+export async function outcomesReportAgent(
+  input: {
+    projectName: string;
+    objective?: string;
+    constraints?: string;
+    modelName?: string | null;
+    modelSummary?: any;
+    datasets: Array<{
+      id: number;
+      name: string;
+      description?: string | null;
+      columns: string[];
+      sampleRows: Record<string, any>[];
+    }>;
+    charts: Array<{
+      id: number;
+      name: string;
+      description?: string | null;
+      chartType?: string | null;
+      chartConfig?: any;
+    }>;
+  },
+  onProgress: ProgressCallback = noopProgress
+): Promise<{
+  reportTitle: string;
+  reportText: string;
+  keyFindings: string[];
+  chartHighlights: { chartId?: number; title: string; insight: string }[];
+  dataNotes: string[];
+  nextSteps: string[];
+}> {
+  onProgress("Starting Outcomes Report agent...", "status");
+
+  if (!openai) {
+    onProgress("Running in mock mode (no API key configured)", "status");
+    const chartHighlights = input.charts.map((chart) => ({
+      chartId: chart.id,
+      title: chart.name,
+      insight: chart.description || "Chart highlights a notable trend in the data.",
+    }));
+    return {
+      reportTitle: `${input.projectName} Outcomes Report`,
+      reportText: `This report summarizes the latest outcomes based on the available datasets and chart pack. The analysis focuses on the most recent modeled impacts and the visual evidence captured in the charts. Use the findings below to guide stakeholder discussions and align on next actions.`,
+      keyFindings: [
+        `Reviewed ${input.datasets.length} datasets and ${input.charts.length} charts.`,
+        "Key outcome signals show directional impact across the modeled dimensions.",
+        "Chart trends indicate areas where impacts are concentrated by segment or year.",
+      ],
+      chartHighlights,
+      dataNotes: [
+        "Report is based on the latest chart pack outputs and sampled dataset rows.",
+      ],
+      nextSteps: [
+        "Validate the highest-impact segments with domain stakeholders.",
+        "Stress-test assumptions driving the largest variance in outcomes.",
+        "Confirm data completeness before publishing externally.",
+      ],
+    };
+  }
+
+  const systemPrompt = await getAgentPrompt("outcomes_report");
+  const settings = await getAgentSettings("outcomes_report");
+
+  const userPrompt = `Project: ${input.projectName}
+Objective: ${input.objective || ""}
+Constraints: ${input.constraints || ""}
+
+Model Context:
+${input.modelName ? `Model: ${input.modelName}` : ""}
+${input.modelSummary ? `Model Summary: ${JSON.stringify(input.modelSummary)}` : ""}
+
+Datasets (sampled):
+${JSON.stringify(input.datasets, null, 2)}
+
+Charts:
+${JSON.stringify(input.charts, null, 2)}
+
+Return JSON only per the schema. Use the chart titles and dataset names in the report.`;
+
+  onProgress(`Calling LLM with model ${settings.model}...`, "llm");
+  const raw = await callLLM(
+    systemPrompt,
+    userPrompt,
+    settings.model,
+    settings.maxTokens,
+    settings.retryCount,
+    {
+      temperature: settings.temperature,
+      topP: settings.topP,
+      presencePenalty: settings.presencePenalty,
+      frequencyPenalty: settings.frequencyPenalty,
+      stopSequences: settings.stopSequences,
+    }
+  );
+  onProgress("LLM response received, parsing output...", "llm");
+  const parsed = extractJson(raw);
+  onProgress("Analysis complete. Outcomes report generated.", "status");
+
+  return {
+    reportTitle: parsed.reportTitle || `${input.projectName} Outcomes Report`,
+    reportText: parsed.reportText || "Outcomes report generated.",
+    keyFindings: Array.isArray(parsed.keyFindings) ? parsed.keyFindings : [],
+    chartHighlights: Array.isArray(parsed.chartHighlights) ? parsed.chartHighlights : [],
+    dataNotes: Array.isArray(parsed.dataNotes) ? parsed.dataNotes : [],
+    nextSteps: Array.isArray(parsed.nextSteps) ? parsed.nextSteps : [],
+  };
 }
 
 export async function refineDeliverable(

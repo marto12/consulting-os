@@ -113,6 +113,10 @@ export default function ModelDetail() {
   const model = modelQuery.data;
   const editedBy = model.lastEditedByUserId ? userLookup.get(model.lastEditedByUserId) : null;
   const hasApiConfig = !!model.apiConfig;
+  const inputFieldCount = Array.isArray(model.inputSchema?.fields) ? model.inputSchema.fields.length : 0;
+  const outputFieldCount = Array.isArray(model.outputSchema?.fields) ? model.outputSchema.fields.length : 0;
+  const modelScopeLabel = model.projectId ? "project" : "shared";
+  const runtimeLabel = model.apiConfig?.runtime ? String(model.apiConfig.runtime) : "not configured";
   const placeholderText = `{
   "param": "value"
  }`;
@@ -144,11 +148,68 @@ export default function ModelDetail() {
         </Button>
       </div>
 
-      <Tabs defaultValue="run" className="space-y-4">
+      <Tabs defaultValue="details" className="space-y-4">
         <TabsList>
+          <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="run">Run</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="details">
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card className="p-4 space-y-3">
+              <div className="text-sm font-semibold">Overview</div>
+              <div className="text-sm text-muted-foreground space-y-2">
+                <p>
+                  {model.description || "No description provided for this model."}
+                </p>
+                <p>
+                  This {modelScopeLabel} model exposes {inputFieldCount} input field{inputFieldCount === 1 ? "" : "s"} and {outputFieldCount} output field{outputFieldCount === 1 ? "" : "s"}.
+                  Runtime is {runtimeLabel}, and runs are {hasApiConfig ? "enabled" : "disabled"} until API config is set.
+                </p>
+              </div>
+              <div className="grid gap-2 text-xs text-muted-foreground">
+                {editedBy && (
+                  <div className="flex items-center justify-between">
+                    <span>Last edited by</span>
+                    <span className="text-foreground">{editedBy}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span>Created</span>
+                  <span className="text-foreground">{new Date(model.createdAt).toLocaleDateString()}</span>
+                </div>
+                {model.updatedAt && (
+                  <div className="flex items-center justify-between">
+                    <span>Updated</span>
+                    <span className="text-foreground">{new Date(model.updatedAt).toLocaleDateString()}</span>
+                  </div>
+                )}
+              </div>
+            </Card>
+            <Card className="p-4 space-y-3">
+              <div className="text-sm font-semibold">Inputs</div>
+              <pre className="text-xs bg-muted/40 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">
+                {formatJson(model.inputSchema)}
+              </pre>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card className="p-4 space-y-3">
+              <div className="text-sm font-semibold">Outputs</div>
+              <pre className="text-xs bg-muted/40 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">
+                {formatJson(model.outputSchema)}
+              </pre>
+            </Card>
+            <Card className="p-4 space-y-3">
+              <div className="text-sm font-semibold">API Config</div>
+              <pre className="text-xs bg-muted/40 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">
+                {formatJson(model.apiConfig)}
+              </pre>
+            </Card>
+          </div>
+        </TabsContent>
 
         <TabsContent value="run">
           <div className="grid gap-4 lg:grid-cols-2">

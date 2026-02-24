@@ -12,13 +12,19 @@ import {
   getDefaultConfigs,
   DEFAULT_PROMPTS,
   type ProgressCallback,
+  outcomesReportAgent,
 } from "./agents";
 import { runWorkflowStep, refineWithLangGraph, refineWithLangGraphStreaming } from "./agents/workflow-graph";
 import { reviewDocument, actionComment, actionAllComments, executiveReviewDocument, spotFactCheckCandidates, runFactCheck, narrativeReviewDocument } from "./agents/document-agents";
 import { processVaultFile, retrieveRelevantContext, formatRAGContext } from "./vault-rag";
 import { generateChartSpec } from "./agents/chart-agent";
+import {
+  wrapDeliverableContent,
+  unwrapDeliverableContent,
+  updateDeliverableEnvelope,
+} from "./lib/deliverables";
 import { db } from "./db";
-import { datasetRows } from "@shared/schema";
+import { datasetRows, workflowInstances, workflowInstanceSteps } from "@shared/schema";
 import { eq, asc } from "drizzle-orm";
 
 const upload = multer({
@@ -63,7 +69,7 @@ function normalizeSpreadsheetRows(columns: string[], rows: any[]): Array<{ rowIn
 type CgeImpactRow = { industry: string; year: number; impact: string };
 
 function buildCgeSpreadsheetRows(result: any) {
-  const columns = ["Metric", "Industry", "Year", "Impact"];
+  const columns = ["Metric", "Industry", "Year", "Impact", "ImpactValue"];
   const rows: Array<{ rowIndex: number; data: any }> = [];
   const gdpImpacts: CgeImpactRow[] = result?.industry_impacts?.gdp ?? [];
   const employmentImpacts: CgeImpactRow[] = result?.industry_impacts?.employment ?? [];
@@ -76,6 +82,7 @@ function buildCgeSpreadsheetRows(result: any) {
         Industry: row.industry,
         Year: row.year,
         Impact: row.impact,
+        ImpactValue: Number.parseFloat(String(row.impact ?? "").replace(/%/g, "")),
       },
     });
   });
@@ -88,6 +95,7 @@ function buildCgeSpreadsheetRows(result: any) {
         Industry: row.industry,
         Year: row.year,
         Impact: row.impact,
+        ImpactValue: Number.parseFloat(String(row.impact ?? "").replace(/%/g, "")),
       },
     });
   });
@@ -257,6 +265,13 @@ async function seedProjectManagementFromTemplate(
   const existingPhases = await storage.listProjectPhases(projectId);
   if (existingPhases.length > 0) return;
 
+  const normalizeTaskTitle = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const stepByName = new Map<string, { id: number; name: string; agentKey: string; stepOrder: number }>();
+  workflowSteps.forEach((step) => {
+    stepByName.set(normalizeTaskTitle(step.name), step);
+  });
+  const usedStepIds = new Set<number>();
+
   const templatePhases = parseProjectTemplate(templateContent);
   const phaseIds: number[] = [];
   let phaseOrder = 0;
@@ -272,8 +287,35 @@ async function seedProjectManagementFromTemplate(
     phaseOrder += 1;
   }
 
+  for (let phaseIndex = 0; phaseIndex < templatePhases.length; phaseIndex += 1) {
+    const phase = templatePhases[phaseIndex];
+    for (let taskIndex = 0; taskIndex < phase.tasks.length; taskIndex += 1) {
+      const task = phase.tasks[taskIndex];
+      const normalizedTask = normalizeTaskTitle(task.title);
+      let matchedStep = stepByName.get(normalizedTask) || null;
+      if (!matchedStep) {
+        matchedStep = workflowSteps.find((step) => {
+          const normalizedStep = normalizeTaskTitle(step.name);
+          return normalizedStep.includes(normalizedTask) || normalizedTask.includes(normalizedStep);
+        }) || null;
+      }
+      if (matchedStep) usedStepIds.add(matchedStep.id);
+      await storage.createProjectTask({
+        projectId,
+        phaseId: phaseIds[phaseIndex] ?? null,
+        title: task.title,
+        description: `Owner: ${task.owner}`,
+        ownerType: matchedStep ? "agent" : "human",
+        workflowStepId: matchedStep?.id ?? null,
+        status: "not_started",
+        sortOrder: taskIndex,
+      });
+    }
+  }
+
   let taskOrder = 0;
   for (const step of workflowSteps) {
+    if (usedStepIds.has(step.id)) continue;
     await storage.createProjectTask({
       projectId,
       phaseId: null,
@@ -285,22 +327,6 @@ async function seedProjectManagementFromTemplate(
       sortOrder: taskOrder,
     });
     taskOrder += 1;
-  }
-
-  for (let phaseIndex = 0; phaseIndex < templatePhases.length; phaseIndex += 1) {
-    const phase = templatePhases[phaseIndex];
-    for (let taskIndex = 0; taskIndex < phase.tasks.length; taskIndex += 1) {
-      const task = phase.tasks[taskIndex];
-      await storage.createProjectTask({
-        projectId,
-        phaseId: phaseIds[phaseIndex] ?? null,
-        title: task.title,
-        description: `Owner: ${task.owner}`,
-        ownerType: "human",
-        status: "not_started",
-        sortOrder: taskIndex,
-      });
-    }
   }
 }
 
@@ -386,6 +412,7 @@ const DEFAULT_AGENTS = [
   { key: "execution", name: "Execution", role: "Tool Caller", roleColor: "#059669", description: "Runs scenario analysis with calculator tool" },
   { key: "summary", name: "Summary", role: "Synthesizer", roleColor: "#D97706", description: "Synthesizes findings into executive summary" },
   { key: "presentation", name: "Presentation", role: "Designer", roleColor: "#E11D48", description: "Creates professional slide deck" },
+  { key: "outcomes_report", name: "Outcomes Report", role: "Reporter", roleColor: "#0F766E", description: "Generates an outcomes report from datasets and charts" },
   { key: "doc_ai_review", name: "AI Review", role: "Document Reviewer", roleColor: "#F59E0B", description: "Reviews document prose for clarity, conciseness, and impact. Highlights weak sections and proposes improved rewrites." },
   { key: "doc_executive_review", name: "Executive Review", role: "Document Reviewer", roleColor: "#A855F7", description: "Flags sections that dive into technical details too early without strategic framing. Checks for Missing 'So What', Technical Too Early, Buried Insight, No Action Orientation, and Audience Mismatch." },
   { key: "doc_key_narrative", name: "Key Narrative", role: "Document Reviewer", roleColor: "#14B8A6", description: "Extracts executive-level key points from technical prose. Labels each with a narrative role: Core thesis, Supporting evidence, Risk/caveat, Action driver, or Context setter. Proposes crisp executive-ready rewrites." },
@@ -721,6 +748,208 @@ const DEFAULT_DATASETS: DefaultDatasetSeed[] = [
     ],
   },
   {
+    name: "Retail Demand Signals - Q1 2026",
+    description: "Weekly retail demand indicators across regions and channels.",
+    projectId: null,
+    owner: "Insights Lab",
+    accessLevel: "shared",
+    sourceType: "csv",
+    sourceUrl: null,
+    schemaJson: [
+      { name: "week", type: "string" },
+      { name: "region", type: "string" },
+      { name: "channel", type: "string" },
+      { name: "traffic_index", type: "number" },
+      { name: "conversion_rate", type: "number" },
+      { name: "avg_order_value", type: "number" },
+    ],
+    metadata: { refreshCadence: "weekly", base: "2024=100" },
+    rows: [
+      { week: "2026-W01", region: "NA", channel: "online", traffic_index: "102", conversion_rate: "0.034", avg_order_value: "88.5" },
+      { week: "2026-W01", region: "EMEA", channel: "retail", traffic_index: "97", conversion_rate: "0.029", avg_order_value: "74.2" },
+      { week: "2026-W02", region: "APAC", channel: "online", traffic_index: "109", conversion_rate: "0.037", avg_order_value: "91.3" },
+      { week: "2026-W02", region: "NA", channel: "retail", traffic_index: "100", conversion_rate: "0.031", avg_order_value: "82.4" },
+    ],
+  },
+  {
+    name: "Logistics Cost Benchmarks 2026",
+    description: "Monthly freight and warehousing cost benchmarks by region.",
+    projectId: null,
+    owner: "Supply Chain Ops",
+    accessLevel: "shared",
+    sourceType: "api",
+    sourceUrl: "https://api.example.com/logistics/costs",
+    schemaJson: [
+      { name: "month", type: "string" },
+      { name: "region", type: "string" },
+      { name: "freight_index", type: "number" },
+      { name: "warehouse_cost_usd_sqft", type: "number" },
+      { name: "fuel_surcharge_pct", type: "number" },
+    ],
+    metadata: { refreshCadence: "monthly", currency: "USD" },
+    rows: [
+      { month: "2026-01", region: "NA", freight_index: "112", warehouse_cost_usd_sqft: "11.8", fuel_surcharge_pct: "0.14" },
+      { month: "2026-01", region: "EMEA", freight_index: "105", warehouse_cost_usd_sqft: "9.6", fuel_surcharge_pct: "0.12" },
+      { month: "2026-02", region: "APAC", freight_index: "118", warehouse_cost_usd_sqft: "8.9", fuel_surcharge_pct: "0.16" },
+      { month: "2026-02", region: "LATAM", freight_index: "121", warehouse_cost_usd_sqft: "7.5", fuel_surcharge_pct: "0.18" },
+    ],
+  },
+  {
+    name: "Enterprise SaaS Revenue Waterfall",
+    description: "Monthly ARR movement with new, churn, and expansion components.",
+    projectId: null,
+    owner: "Revenue Ops",
+    accessLevel: "shared",
+    sourceType: "manual",
+    sourceUrl: null,
+    schemaJson: [
+      { name: "month", type: "string" },
+      { name: "starting_arr_usd", type: "number" },
+      { name: "new_arr_usd", type: "number" },
+      { name: "expansion_arr_usd", type: "number" },
+      { name: "churn_arr_usd", type: "number" },
+      { name: "ending_arr_usd", type: "number" },
+    ],
+    metadata: { currency: "USD", refreshCadence: "monthly" },
+    rows: [
+      { month: "2026-01", starting_arr_usd: "12500000", new_arr_usd: "820000", expansion_arr_usd: "410000", churn_arr_usd: "-260000", ending_arr_usd: "13370000" },
+      { month: "2026-02", starting_arr_usd: "13370000", new_arr_usd: "760000", expansion_arr_usd: "520000", churn_arr_usd: "-310000", ending_arr_usd: "14140000" },
+      { month: "2026-03", starting_arr_usd: "14140000", new_arr_usd: "910000", expansion_arr_usd: "460000", churn_arr_usd: "-340000", ending_arr_usd: "14930000" },
+    ],
+  },
+  {
+    name: "Healthcare Claims Mix Q1 2026",
+    description: "Claims volume split by service line and payer type.",
+    projectId: null,
+    owner: "Healthcare Analytics",
+    accessLevel: "shared",
+    sourceType: "csv",
+    sourceUrl: null,
+    schemaJson: [
+      { name: "month", type: "string" },
+      { name: "service_line", type: "string" },
+      { name: "payer", type: "string" },
+      { name: "claim_count", type: "number" },
+      { name: "avg_claim_usd", type: "number" },
+    ],
+    metadata: { currency: "USD", refreshCadence: "monthly" },
+    rows: [
+      { month: "2026-01", service_line: "Imaging", payer: "Commercial", claim_count: "1240", avg_claim_usd: "412" },
+      { month: "2026-01", service_line: "Surgery", payer: "Medicare", claim_count: "680", avg_claim_usd: "1840" },
+      { month: "2026-02", service_line: "Primary Care", payer: "Commercial", claim_count: "2310", avg_claim_usd: "128" },
+      { month: "2026-02", service_line: "Imaging", payer: "Medicaid", claim_count: "940", avg_claim_usd: "356" },
+    ],
+  },
+  {
+    name: "Manufacturing Yield Dashboard",
+    description: "Weekly yield, scrap, and downtime metrics by plant.",
+    projectId: null,
+    owner: "Operations",
+    accessLevel: "shared",
+    sourceType: "csv",
+    sourceUrl: null,
+    schemaJson: [
+      { name: "week", type: "string" },
+      { name: "plant", type: "string" },
+      { name: "yield_pct", type: "number" },
+      { name: "scrap_pct", type: "number" },
+      { name: "downtime_hours", type: "number" },
+    ],
+    metadata: { refreshCadence: "weekly" },
+    rows: [
+      { week: "2026-W01", plant: "Plant A", yield_pct: "97.2", scrap_pct: "1.8", downtime_hours: "6.4" },
+      { week: "2026-W01", plant: "Plant B", yield_pct: "96.1", scrap_pct: "2.2", downtime_hours: "7.8" },
+      { week: "2026-W02", plant: "Plant A", yield_pct: "97.6", scrap_pct: "1.6", downtime_hours: "5.9" },
+    ],
+  },
+  {
+    name: "Marketing Funnel Performance",
+    description: "Weekly funnel conversion by channel and segment.",
+    projectId: null,
+    owner: "Growth",
+    accessLevel: "shared",
+    sourceType: "manual",
+    sourceUrl: null,
+    schemaJson: [
+      { name: "week", type: "string" },
+      { name: "channel", type: "string" },
+      { name: "segment", type: "string" },
+      { name: "visits", type: "number" },
+      { name: "mqls", type: "number" },
+      { name: "sqls", type: "number" },
+    ],
+    metadata: { refreshCadence: "weekly" },
+    rows: [
+      { week: "2026-W01", channel: "Paid Search", segment: "SMB", visits: "18200", mqls: "920", sqls: "210" },
+      { week: "2026-W01", channel: "Organic", segment: "Enterprise", visits: "9400", mqls: "610", sqls: "160" },
+      { week: "2026-W02", channel: "Partner", segment: "Midmarket", visits: "5200", mqls: "340", sqls: "92" },
+    ],
+  },
+  {
+    name: "Cybersecurity Incident Log",
+    description: "Monthly incident counts and severity distribution.",
+    projectId: null,
+    owner: "Security",
+    accessLevel: "shared",
+    sourceType: "api",
+    sourceUrl: "https://api.example.com/security/incidents",
+    schemaJson: [
+      { name: "month", type: "string" },
+      { name: "severity", type: "string" },
+      { name: "incident_count", type: "number" },
+      { name: "mean_time_to_resolve_hrs", type: "number" },
+    ],
+    metadata: { refreshCadence: "monthly" },
+    rows: [
+      { month: "2026-01", severity: "low", incident_count: "48", mean_time_to_resolve_hrs: "6.2" },
+      { month: "2026-01", severity: "high", incident_count: "6", mean_time_to_resolve_hrs: "19.4" },
+      { month: "2026-02", severity: "medium", incident_count: "22", mean_time_to_resolve_hrs: "11.7" },
+    ],
+  },
+  {
+    name: "HR Attrition Overview",
+    description: "Quarterly attrition and backfill rates by function.",
+    projectId: null,
+    owner: "People Analytics",
+    accessLevel: "shared",
+    sourceType: "manual",
+    sourceUrl: null,
+    schemaJson: [
+      { name: "quarter", type: "string" },
+      { name: "function", type: "string" },
+      { name: "attrition_pct", type: "number" },
+      { name: "backfill_time_days", type: "number" },
+    ],
+    metadata: { refreshCadence: "quarterly" },
+    rows: [
+      { quarter: "2026-Q1", function: "Engineering", attrition_pct: "7.4", backfill_time_days: "42" },
+      { quarter: "2026-Q1", function: "Sales", attrition_pct: "11.2", backfill_time_days: "35" },
+      { quarter: "2026-Q1", function: "Operations", attrition_pct: "6.1", backfill_time_days: "28" },
+    ],
+  },
+  {
+    name: "Customer Support Load",
+    description: "Weekly ticket volume and resolution rate by queue.",
+    projectId: null,
+    owner: "Customer Success",
+    accessLevel: "shared",
+    sourceType: "csv",
+    sourceUrl: null,
+    schemaJson: [
+      { name: "week", type: "string" },
+      { name: "queue", type: "string" },
+      { name: "tickets_opened", type: "number" },
+      { name: "tickets_resolved", type: "number" },
+      { name: "sla_met_pct", type: "number" },
+    ],
+    metadata: { refreshCadence: "weekly" },
+    rows: [
+      { week: "2026-W01", queue: "Tier 1", tickets_opened: "820", tickets_resolved: "780", sla_met_pct: "0.93" },
+      { week: "2026-W01", queue: "Tier 2", tickets_opened: "210", tickets_resolved: "198", sla_met_pct: "0.89" },
+      { week: "2026-W02", queue: "Tier 1", tickets_opened: "860", tickets_resolved: "812", sla_met_pct: "0.92" },
+    ],
+  },
+  {
     name: "Project 5 - Retention Cohorts",
     description: "Monthly retention by acquisition cohort for Project 5.",
     projectId: 5,
@@ -862,6 +1091,24 @@ async function ensureDefaults() {
           agentKey: "project_definition",
         });
       }
+
+      const refreshedSteps = await storage.getWorkflowTemplateSteps(template.id);
+      const modelRunnerStep = refreshedSteps.find((s) => s.agentKey === "model_runner");
+      const hasChartPack = refreshedSteps.some((s) => s.agentKey === "chart_pack");
+      if (modelRunnerStep && !hasChartPack) {
+        for (const s of refreshedSteps) {
+          if (s.stepOrder > modelRunnerStep.stepOrder) {
+            await storage.updateWorkflowTemplateStep(s.id, { stepOrder: s.stepOrder + 1 });
+          }
+        }
+        await storage.addWorkflowTemplateStep({
+          workflowTemplateId: template.id,
+          stepOrder: modelRunnerStep.stepOrder + 1,
+          name: "Chart pack of model outputs",
+          agentKey: "chart_pack",
+          description: "Generate charts from model outputs",
+        });
+      }
     }
   }
 
@@ -878,6 +1125,98 @@ async function ensureDefaults() {
         ...step,
       });
     }
+  }
+
+  const hasCGE = templates.some((t) => t.name === "CGE Model Run");
+  if (!hasCGE) {
+    const cgeTemplate = await storage.createWorkflowTemplate({
+      name: "CGE Model Run",
+      description: "Run CGE model, then generate a chart pack of outputs.",
+      practiceCoverage: ["Strategy", "Economics"],
+      timesUsed: 0,
+      deploymentStatus: "sandbox",
+      governanceMaturity: 1,
+      lifecycleStatus: "active",
+    });
+    existingTemplateNames.add(cgeTemplate.name.toLowerCase());
+    await storage.addWorkflowTemplateStep({
+      workflowTemplateId: cgeTemplate.id,
+      stepOrder: 1,
+      name: "Project Definition",
+      agentKey: "project_definition",
+    });
+    await storage.addWorkflowTemplateStep({
+      workflowTemplateId: cgeTemplate.id,
+      stepOrder: 2,
+      name: "CGE Economic Model",
+      agentKey: "model_runner",
+      description: "Run the CGE model and capture structured outputs.",
+      configJson: { modelName: "CGE Economic Model" },
+    });
+    await storage.addWorkflowTemplateStep({
+      workflowTemplateId: cgeTemplate.id,
+      stepOrder: 3,
+      name: "Chart pack of model outputs",
+      agentKey: "chart_pack",
+      description: "Generate datasets and charts from CGE outputs.",
+    });
+  }
+
+  const hasChartPack = templates.some((t) => t.name === "Chart Pack Generator");
+  if (!hasChartPack) {
+    const chartPackTemplate = await storage.createWorkflowTemplate({
+      name: "Chart Pack Generator",
+      description: "Generate charts from the latest CGE model outputs.",
+      practiceCoverage: ["Strategy", "Economics"],
+      timesUsed: 0,
+      deploymentStatus: "sandbox",
+      governanceMaturity: 1,
+      lifecycleStatus: "active",
+    });
+    existingTemplateNames.add(chartPackTemplate.name.toLowerCase());
+    await storage.addWorkflowTemplateStep({
+      workflowTemplateId: chartPackTemplate.id,
+      stepOrder: 1,
+      name: "Chart pack of model outputs",
+      agentKey: "chart_pack",
+      description: "Generate datasets and charts from CGE outputs.",
+    });
+  }
+
+  const hasOutcomesReport = templates.some((t) => t.name === "Outcomes Report (Data + Charts)");
+  if (!hasOutcomesReport) {
+    const reportTemplate = await storage.createWorkflowTemplate({
+      name: "Outcomes Report (Data + Charts)",
+      description: "Generate a structured outcomes report from model data and chart outputs.",
+      practiceCoverage: ["Strategy", "Economics"],
+      timesUsed: 0,
+      deploymentStatus: "sandbox",
+      governanceMaturity: 1,
+      lifecycleStatus: "active",
+    });
+    existingTemplateNames.add(reportTemplate.name.toLowerCase());
+    await storage.addWorkflowTemplateStep({
+      workflowTemplateId: reportTemplate.id,
+      stepOrder: 1,
+      name: "CGE Economic Model",
+      agentKey: "model_runner",
+      description: "Run the CGE model and capture structured outputs.",
+      configJson: { modelName: "CGE Economic Model" },
+    });
+    await storage.addWorkflowTemplateStep({
+      workflowTemplateId: reportTemplate.id,
+      stepOrder: 2,
+      name: "Chart pack of model outputs",
+      agentKey: "chart_pack",
+      description: "Generate datasets and charts from CGE outputs.",
+    });
+    await storage.addWorkflowTemplateStep({
+      workflowTemplateId: reportTemplate.id,
+      stepOrder: 3,
+      name: "Outcomes Report",
+      agentKey: "outcomes_report",
+      description: "Summarize outcomes using the latest chart pack outputs.",
+    });
   }
 
   for (const template of COMING_SOON_WORKFLOWS) {
@@ -906,6 +1245,58 @@ async function ensureDefaults() {
   await storage.ensureDefaultUsers();
   await seedDefaultModels();
   await seedDefaultDatasets();
+
+  const normalizedTitle = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const chartPackTemplates = await storage.listWorkflowTemplates();
+  for (const template of chartPackTemplates) {
+    const steps = await storage.getWorkflowTemplateSteps(template.id);
+    const modelRunnerStep = steps.find((s) => s.agentKey === "model_runner");
+    const chartPackStep = steps.find((s) => s.agentKey === "chart_pack");
+    if (!modelRunnerStep || !chartPackStep) continue;
+
+    const instances = await db
+      .select()
+      .from(workflowInstances)
+      .where(eq(workflowInstances.workflowTemplateId, template.id));
+
+    for (const instance of instances) {
+      const instanceSteps = await storage.getWorkflowInstanceSteps(instance.id);
+      const hasChartPack = instanceSteps.some((s) => s.agentKey === "chart_pack");
+      const instanceModelRunner = instanceSteps.find((s) => s.agentKey === "model_runner");
+      if (!instanceModelRunner || hasChartPack) continue;
+
+      const insertOrder = instanceModelRunner.stepOrder + 1;
+      for (const step of instanceSteps) {
+        if (step.stepOrder >= insertOrder) {
+          await db
+            .update(workflowInstanceSteps)
+            .set({ stepOrder: step.stepOrder + 1 })
+            .where(eq(workflowInstanceSteps.id, step.id));
+        }
+      }
+
+      const [inserted] = await db
+        .insert(workflowInstanceSteps)
+        .values({
+          workflowInstanceId: instance.id,
+          stepOrder: insertOrder,
+          name: chartPackStep.name,
+          agentKey: chartPackStep.agentKey,
+          status: "not_started",
+          configJson: chartPackStep.configJson || null,
+        })
+        .returning();
+
+      const tasks = await storage.listProjectTasks(instance.projectId);
+      const matchingTasks = tasks.filter((task) => normalizedTitle(task.title).includes("chart pack"));
+      for (const task of matchingTasks) {
+        await storage.updateProjectTask(task.id, {
+          ownerType: "agent",
+          workflowStepId: inserted.id,
+        });
+      }
+    }
+  }
 }
 
 const MANAGEMENT_PHASE_BLUEPRINT = [
@@ -1018,6 +1409,7 @@ function resolvePhaseKeyForAgent(agentKey: string): string {
   if (agentKey === "issues_tree" || agentKey === "mece_critic") return "structuring";
   if (agentKey === "hypothesis") return "hypotheses";
   if (agentKey === "execution") return "execution";
+  if (agentKey === "chart_pack") return "execution";
   if (agentKey === "summary") return "synthesis";
   if (agentKey === "presentation") return "delivery";
   return "discovery";
@@ -1202,11 +1594,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!project) return res.status(404).json({ error: "Not found" });
 
       const payload = {
+        name: req.body?.name !== undefined ? req.body.name : project.name,
         governanceControls: req.body?.governanceControls ?? project.governanceControls,
-        totalSavingsToDate: req.body?.totalSavingsToDate ?? null,
-        costReductionRealisedPct: req.body?.costReductionRealisedPct ?? null,
-        marginImpactToDate: req.body?.marginImpactToDate ?? null,
-        projectedAnnualImpact: req.body?.projectedAnnualImpact ?? null,
+        totalSavingsToDate: req.body?.totalSavingsToDate !== undefined ? req.body.totalSavingsToDate : project.totalSavingsToDate,
+        costReductionRealisedPct: req.body?.costReductionRealisedPct !== undefined ? req.body.costReductionRealisedPct : project.costReductionRealisedPct,
+        marginImpactToDate: req.body?.marginImpactToDate !== undefined ? req.body.marginImpactToDate : project.marginImpactToDate,
+        projectedAnnualImpact: req.body?.projectedAnnualImpact !== undefined ? req.body.projectedAnnualImpact : project.projectedAnnualImpact,
       };
 
       const updated = await storage.updateProject(projectId, payload);
@@ -1627,7 +2020,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           parsedOutput = { output: rawOutput };
         }
 
-        const deliverableContent = {
+        const deliverablePayload = {
           modelId: model.id,
           modelName: model.name,
           input,
@@ -1635,6 +2028,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           runAt: new Date().toISOString(),
         };
         const deliverableTitle = `${model.name} run`;
+
+        const deliverableContent = wrapDeliverableContent({
+          payload: deliverablePayload,
+          agentKey: step.agentKey,
+          stepId,
+          deliverableTitle,
+        });
 
         await storage.createDeliverable({
           projectId,
@@ -1647,7 +2047,359 @@ export async function registerRoutes(app: Express): Promise<Server> {
           status: "completed",
           outputSummary: { title: deliverableTitle, modelId: model.id },
         });
-        await storage.updateRunLog(runLog.id, deliverableContent, "success");
+        await storage.updateRunLog(runLog.id, deliverablePayload, "success");
+
+        const updatedProject = await storage.getProject(projectId);
+        const instance = await storage.getWorkflowInstance(projectId);
+        if (instance) {
+          await storage.updateWorkflowInstanceCurrentStep(instance.id, step.stepOrder);
+        }
+
+        return {
+          project: updatedProject,
+          step: await storage.getWorkflowInstanceStep(stepId),
+          deliverableTitle,
+        };
+      } catch (agentErr: any) {
+        await storage.updateWorkflowInstanceStep(stepId, { status: "failed" });
+        await storage.updateRunLog(runLog.id, null, "failed", agentErr.message);
+        throw new Error(`Agent failed: ${agentErr.message}`);
+      }
+    }
+
+    if (step.agentKey === "chart_pack") {
+      const modelUsed = getModelUsed();
+      const runLog = await storage.insertRunLog(
+        projectId,
+        step.agentKey,
+        { stepId, agentKey: step.agentKey },
+        modelUsed
+      );
+
+      try {
+        onProgress("Locating latest model run output...", "status");
+        const workflowSteps = await storage.listWorkflowInstanceStepsForProject(projectId);
+        const modelSteps = workflowSteps.filter((s) => s.agentKey === "model_runner");
+        let modelDeliverable: any = null;
+        let modelStepName = "Model run";
+
+        for (let i = modelSteps.length - 1; i >= 0; i -= 1) {
+          const candidate = modelSteps[i];
+          const deliverables = await storage.getStepDeliverables(candidate.id);
+          if (deliverables.length > 0) {
+            modelDeliverable = deliverables[0];
+            modelStepName = candidate.name || modelStepName;
+            break;
+          }
+        }
+
+        if (!modelDeliverable) {
+          throw new Error("No model run output found. Run the CGE modelling step first.");
+        }
+
+        const { payload } = unwrapDeliverableContent(modelDeliverable.contentJson);
+        let output = payload?.output ?? payload;
+
+        const parseEmbeddedResult = (value: string) => {
+          const match = value.match(/RESULT:\s*({[\s\S]*})/);
+          if (match?.[1]) {
+            return JSON.parse(match[1]);
+          }
+          const objMatch = value.match(/[{\[]([\s\S]*[}\]])/);
+          if (objMatch?.[0]) {
+            return JSON.parse(objMatch[0]);
+          }
+          return null;
+        };
+
+        if (output?.industry_impacts) {
+          onProgress("Using structured model output.", "status");
+        } else if (output?.output && typeof output.output === "string") {
+          onProgress("Parsing model output text...", "status");
+          try {
+            const parsed = parseEmbeddedResult(output.output);
+            if (parsed) output = parsed;
+          } catch (parseErr: any) {
+            throw new Error(`Failed to parse model output: ${parseErr.message}`);
+          }
+        }
+
+        const gdpImpacts = output?.industry_impacts?.gdp ?? [];
+        const employmentImpacts = output?.industry_impacts?.employment ?? [];
+
+        if ((!Array.isArray(gdpImpacts) || gdpImpacts.length === 0) && (!Array.isArray(employmentImpacts) || employmentImpacts.length === 0)) {
+          throw new Error("Model output missing industry impact data.");
+        }
+
+        const datasetIds: number[] = [];
+        const datasetNames: string[] = [];
+        const chartIds: number[] = [];
+        const chartNames: string[] = [];
+        const createdAt = new Date().toISOString().slice(0, 10);
+
+        const buildImpactDataset = async (label: string, impacts: any[]) => {
+          if (!Array.isArray(impacts) || impacts.length === 0) {
+            onProgress(`No ${label.toLowerCase()} impact rows found. Skipping dataset.`, "status");
+            return null;
+          }
+          onProgress(`Preparing ${label.toLowerCase()} impact dataset...`, "status");
+          const rows = impacts.map((row, idx) => ({
+            rowIndex: idx,
+            data: {
+              Industry: row.industry,
+              Year: row.year,
+              Impact: row.impact,
+              ImpactValue: Number.parseFloat(String(row.impact ?? "").replace(/%/g, "")),
+            },
+          }));
+          const columns = ["Industry", "Year", "Impact", "ImpactValue"];
+          const dataset = await storage.createDataset({
+            projectId,
+            name: `CGE ${label} Impacts ${createdAt}`,
+            description: `${label} impact table generated from ${modelStepName}.`,
+            sourceType: "spreadsheet",
+            schemaJson: columns.map((col) => ({ name: col, type: col === "ImpactValue" || col === "Year" ? "number" : "string" })),
+            rowCount: rows.length,
+          });
+          await storage.insertDatasetRows(dataset.id, rows);
+          onProgress(`Inserted ${rows.length} rows into ${dataset.name}.`, "status");
+          return { dataset, rows };
+        };
+
+        const gdpDataset = await buildImpactDataset("GDP", gdpImpacts);
+        const employmentDataset = await buildImpactDataset("Employment", employmentImpacts);
+
+        if (gdpDataset) {
+          datasetIds.push(gdpDataset.dataset.id);
+          datasetNames.push(gdpDataset.dataset.name);
+          onProgress(`Saved dataset: ${gdpDataset.dataset.name}`, "status");
+          const sampleRows = gdpDataset.rows.slice(0, 50).map((r) => r.data as Record<string, any>);
+          const columns = sampleRows.length > 0 ? Object.keys(sampleRows[0]) : [];
+          onProgress("Generating GDP impact chart spec...", "llm");
+          const spec = await generateChartSpec(
+            gdpDataset.dataset.name,
+            columns,
+            sampleRows,
+            "Line chart of ImpactValue by Year for each Industry."
+          );
+          onProgress(`Chart spec ready: ${spec.title || "GDP impact by industry"}`, "status");
+          const chart = await storage.createChart({
+            projectId,
+            datasetId: gdpDataset.dataset.id,
+            name: spec.title || "GDP impact by industry",
+            description: spec.description || "GDP impact by industry over time",
+            chartType: spec.chartType,
+            chartConfig: spec,
+          });
+          chartIds.push(chart.id);
+          chartNames.push(chart.name);
+          onProgress(`Created chart: ${chart.name}`, "status");
+        }
+
+        if (employmentDataset) {
+          datasetIds.push(employmentDataset.dataset.id);
+          datasetNames.push(employmentDataset.dataset.name);
+          onProgress(`Saved dataset: ${employmentDataset.dataset.name}`, "status");
+          const sampleRows = employmentDataset.rows.slice(0, 50).map((r) => r.data as Record<string, any>);
+          const columns = sampleRows.length > 0 ? Object.keys(sampleRows[0]) : [];
+          onProgress("Generating employment impact chart spec...", "llm");
+          const spec = await generateChartSpec(
+            employmentDataset.dataset.name,
+            columns,
+            sampleRows,
+            "Line chart of ImpactValue by Year for each Industry."
+          );
+          onProgress(`Chart spec ready: ${spec.title || "Employment impact by industry"}`, "status");
+          const chart = await storage.createChart({
+            projectId,
+            datasetId: employmentDataset.dataset.id,
+            name: spec.title || "Employment impact by industry",
+            description: spec.description || "Employment impact by industry over time",
+            chartType: spec.chartType,
+            chartConfig: spec,
+          });
+          chartIds.push(chart.id);
+          chartNames.push(chart.name);
+          onProgress(`Created chart: ${chart.name}`, "status");
+        }
+
+        const deliverablePayload = wrapDeliverableContent({
+          payload: {
+            datasetIds,
+            datasetNames,
+            chartIds,
+            chartNames,
+            sourceDeliverableId: modelDeliverable.id,
+          },
+          agentKey: step.agentKey,
+          stepId,
+          deliverableTitle: "Chart pack of model outputs",
+        });
+
+        const deliverableTitle = "Chart pack of model outputs";
+
+        await storage.createDeliverable({
+          projectId,
+          stepId,
+          title: deliverableTitle,
+          contentJson: deliverablePayload,
+        });
+
+        await storage.updateWorkflowInstanceStep(stepId, {
+          status: "completed",
+          outputSummary: { title: deliverableTitle, chartIds, datasetIds },
+        });
+        await storage.updateRunLog(runLog.id, deliverablePayload, "success");
+
+        const updatedProject = await storage.getProject(projectId);
+        const instance = await storage.getWorkflowInstance(projectId);
+        if (instance) {
+          await storage.updateWorkflowInstanceCurrentStep(instance.id, step.stepOrder);
+        }
+
+        return {
+          project: updatedProject,
+          step: await storage.getWorkflowInstanceStep(stepId),
+          deliverableTitle,
+        };
+      } catch (agentErr: any) {
+        await storage.updateWorkflowInstanceStep(stepId, { status: "failed" });
+        await storage.updateRunLog(runLog.id, null, "failed", agentErr.message);
+        throw new Error(`Agent failed: ${agentErr.message}`);
+      }
+    }
+
+    if (step.agentKey === "outcomes_report") {
+      const modelUsed = getModelUsed();
+      const runLog = await storage.insertRunLog(
+        projectId,
+        step.agentKey,
+        { stepId, agentKey: step.agentKey },
+        modelUsed
+      );
+
+      try {
+        onProgress("Locating latest chart pack output...", "status");
+        const workflowSteps = await storage.listWorkflowInstanceStepsForProject(projectId);
+        const chartSteps = workflowSteps.filter((s) => s.agentKey === "chart_pack");
+        let chartDeliverable: any = null;
+
+        for (let i = chartSteps.length - 1; i >= 0; i -= 1) {
+          const candidate = chartSteps[i];
+          const deliverables = await storage.getStepDeliverables(candidate.id);
+          if (deliverables.length > 0) {
+            chartDeliverable = deliverables[0];
+            break;
+          }
+        }
+
+        if (!chartDeliverable) {
+          throw new Error("No chart pack output found. Run the chart pack step first.");
+        }
+
+        const { payload: chartPayload } = unwrapDeliverableContent(chartDeliverable.contentJson);
+        const datasetIds: number[] = Array.isArray(chartPayload?.datasetIds)
+          ? chartPayload.datasetIds.map((id: any) => Number(id)).filter((id: number) => Number.isFinite(id))
+          : [];
+        const chartIds: number[] = Array.isArray(chartPayload?.chartIds)
+          ? chartPayload.chartIds.map((id: any) => Number(id)).filter((id: number) => Number.isFinite(id))
+          : [];
+
+        if (datasetIds.length === 0 && chartIds.length === 0) {
+          throw new Error("Chart pack output is missing dataset or chart references.");
+        }
+
+        const datasets: Array<{ id: number; name: string; description?: string | null; columns: string[]; sampleRows: Record<string, any>[] }> = [];
+        for (const datasetId of datasetIds) {
+          const dataset = await storage.getDataset(datasetId);
+          if (!dataset) continue;
+          const rows = await db
+            .select()
+            .from(datasetRows)
+            .where(eq(datasetRows.datasetId, datasetId))
+            .orderBy(asc(datasetRows.rowIndex))
+            .limit(25);
+          const sampleRows = rows.map((row) => row.data as Record<string, any>);
+          const columns = Array.isArray(dataset.schemaJson)
+            ? dataset.schemaJson.map((col: any) => col.name).filter(Boolean)
+            : (sampleRows[0] ? Object.keys(sampleRows[0]) : []);
+          datasets.push({
+            id: dataset.id,
+            name: dataset.name,
+            description: dataset.description,
+            columns,
+            sampleRows,
+          });
+        }
+
+        const charts: Array<{ id: number; name: string; description?: string | null; chartType?: string | null; chartConfig?: any }> = [];
+        for (const chartId of chartIds) {
+          const chart = await storage.getChart(chartId);
+          if (!chart) continue;
+          charts.push({
+            id: chart.id,
+            name: chart.name,
+            description: chart.description,
+            chartType: chart.chartType,
+            chartConfig: chart.chartConfig,
+          });
+        }
+
+        let modelName: string | null = null;
+        let modelSummary: any = null;
+        const sourceDeliverableId = Number(chartPayload?.sourceDeliverableId);
+        if (Number.isFinite(sourceDeliverableId)) {
+          const allDeliverables = await storage.getDeliverables(projectId);
+          const source = allDeliverables.find((d) => d.id === sourceDeliverableId);
+          if (source) {
+            const { payload: modelPayload } = unwrapDeliverableContent(source.contentJson);
+            modelName = modelPayload?.modelName || modelPayload?.name || null;
+            modelSummary = modelPayload?.output?.summary || modelPayload?.output || modelPayload;
+          }
+        }
+
+        const project = await storage.getProject(projectId);
+        if (!project) throw new Error("Project not found");
+
+        const report = await outcomesReportAgent(
+          {
+            projectName: project.name,
+            objective: project.objective,
+            constraints: project.constraints,
+            modelName,
+            modelSummary,
+            datasets,
+            charts,
+          },
+          onProgress
+        );
+
+        const deliverableTitle = report.reportTitle || "Outcomes Report";
+        const deliverablePayload = {
+          ...report,
+          datasetIds,
+          chartIds,
+          sourceDeliverableId: chartDeliverable.id,
+        };
+        const deliverableContent = wrapDeliverableContent({
+          payload: deliverablePayload,
+          agentKey: step.agentKey,
+          stepId,
+          deliverableTitle,
+        });
+
+        await storage.createDeliverable({
+          projectId,
+          stepId,
+          title: deliverableTitle,
+          contentJson: deliverableContent,
+        });
+
+        await storage.updateWorkflowInstanceStep(stepId, {
+          status: "completed",
+          outputSummary: { title: deliverableTitle, chartIds, datasetIds },
+        });
+        await storage.updateRunLog(runLog.id, deliverablePayload, "success");
 
         const updatedProject = await storage.getProject(projectId);
         const instance = await storage.getWorkflowInstance(projectId);
@@ -1677,16 +2429,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     try {
       const result = await runWorkflowStep(projectId, step.agentKey, onProgress, stepId);
-      const { deliverableContent, deliverableTitle, awaitingConfirmation } = result;
+      const { deliverableContent: deliverablePayload, deliverableTitle, awaitingConfirmation } = result;
 
-      await persistAgentResults(projectId, step.agentKey, deliverableContent);
+      await persistAgentResults(projectId, step.agentKey, deliverablePayload);
 
       const newStage = STAGE_MAP[step.agentKey];
       if (newStage) {
         await storage.updateProjectStage(projectId, newStage);
       }
 
-      if (deliverableContent) {
+      if (deliverablePayload) {
+        const deliverableContent = wrapDeliverableContent({
+          payload: deliverablePayload,
+          agentKey: step.agentKey,
+          stepId,
+          deliverableTitle,
+        });
         await storage.createDeliverable({
           projectId, stepId, title: deliverableTitle, contentJson: deliverableContent,
         });
@@ -1697,7 +2455,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: stepStatus,
         outputSummary: { title: deliverableTitle },
       });
-      await storage.updateRunLog(runLog.id, deliverableContent, "success");
+      await storage.updateRunLog(runLog.id, deliverablePayload, "success");
 
       const updatedProject = await storage.getProject(projectId);
       const instance = await storage.getWorkflowInstance(projectId);
@@ -1839,14 +2597,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
           sendSSE("token", token);
         };
 
-        const refined = await refineWithLangGraphStreaming(
+        const { payload: currentPayload } = unwrapDeliverableContent(currentDeliverable.contentJson);
+        const refinedPayload = await refineWithLangGraphStreaming(
           step.agentKey,
-          currentDeliverable.contentJson,
+          currentPayload,
           message,
           { objective: project.objective, constraints: project.constraints },
           onProgress,
           onToken,
         );
+
+        const refined = updateDeliverableEnvelope(currentDeliverable.contentJson, {
+          payload: refinedPayload,
+          agentKey: step.agentKey,
+          stepId,
+          deliverableTitle: currentDeliverable.title,
+        });
 
         await storage.updateDeliverable(currentDeliverable.id, { contentJson: refined });
 

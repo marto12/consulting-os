@@ -21,6 +21,7 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Bot,
+  Check,
   CheckCircle2,
   Circle,
   CircleSlash,
@@ -28,10 +29,12 @@ import {
   ChevronDown,
   ChevronRight,
   GitBranch,
+  Pencil,
   Play,
   ShieldCheck,
   Sparkles,
   User,
+  X,
   Zap,
 } from "lucide-react";
 
@@ -375,6 +378,8 @@ export default function ProjectManagement() {
   const [collapsedPhases, setCollapsedPhases] = useState<Record<number, boolean>>({});
   const [localTasks, setLocalTasks] = useState<Task[]>([]);
   const [impactShowFinancials, setImpactShowFinancials] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [projectNameDraft, setProjectNameDraft] = useState("");
   const [impactForm, setImpactForm] = useState({
     totalSavingsToDate: "",
     costReductionRealisedPct: "",
@@ -394,6 +399,11 @@ export default function ProjectManagement() {
     queryKey: ["/api/projects", projectId],
     enabled: Number.isFinite(projectId),
   });
+
+  useEffect(() => {
+    if (!project) return;
+    setProjectNameDraft(project.name);
+  }, [project]);
 
   const { data: workflowTemplate } = useQuery<{
     id: number;
@@ -437,6 +447,22 @@ export default function ProjectManagement() {
     },
     onError: () => {
       setToast({ message: "Failed to save impact settings.", type: "error" });
+    },
+  });
+
+  const saveProjectNameMutation = useMutation({
+    mutationFn: async (name: string) => {
+      const res = await apiRequest("PATCH", `/api/projects/${projectId}`, { name });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
+      setIsEditingName(false);
+      setToast({ message: "Project name updated.", type: "success" });
+    },
+    onError: () => {
+      setToast({ message: "Failed to update project name.", type: "error" });
     },
   });
 
@@ -997,7 +1023,56 @@ export default function ProjectManagement() {
           <div className="grid gap-4 md:grid-cols-[1.2fr_0.9fr_1fr_1.1fr_1.1fr_1.2fr]">
             <div className="space-y-2">
               <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Project</div>
-              <div className="text-base font-semibold text-foreground truncate">{project?.name || "Project"}</div>
+              <div className="flex items-center gap-2">
+                {isEditingName ? (
+                  <div className="flex items-center gap-2 w-full max-w-xs">
+                    <Input
+                      value={projectNameDraft}
+                      onChange={(event) => setProjectNameDraft(event.target.value)}
+                      className="h-8 text-sm"
+                      aria-label="Project name"
+                    />
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8"
+                      onClick={() => {
+                        if (!projectNameDraft.trim()) return;
+                        saveProjectNameMutation.mutate(projectNameDraft.trim());
+                      }}
+                      disabled={!projectNameDraft.trim() || saveProjectNameMutation.isPending}
+                      aria-label="Save project name"
+                    >
+                      <Check className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8"
+                      onClick={() => {
+                        setProjectNameDraft(project?.name || "");
+                        setIsEditingName(false);
+                      }}
+                      aria-label="Cancel edit"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-base font-semibold text-foreground truncate">{project?.name || "Project"}</div>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                      onClick={() => setIsEditingName(true)}
+                      aria-label="Edit project name"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                  </>
+                )}
+              </div>
             </div>
             <div className="space-y-2">
               <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Current phase</div>

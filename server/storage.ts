@@ -106,6 +106,7 @@ export const storage = {
   async updateProject(
     id: number,
     data: {
+      name?: string;
       governanceControls?: Record<string, unknown> | null;
       totalSavingsToDate?: number | null;
       costReductionRealisedPct?: number | null;
