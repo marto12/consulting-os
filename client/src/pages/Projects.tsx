@@ -428,128 +428,132 @@ export default function Projects() {
               </div>
             </Card>
           )}
-          <div className="grid grid-cols-1 gap-4">
-            {projects.map((item: any) => {
-              const variant = getStageVariant(item.stage);
-              const progress = getStageProgress(item.stage);
-              const isPending = item.stage.includes("draft") || item.stage === "execution_done";
-              const managementActivity = getManagementActivity(
-                managementByProjectId.get(item.id),
-                userLookup,
-                agentLookup
-              );
-              const activityItems = managementActivity.length > 0
-                ? managementActivity
-                : getRecentActivity(item).map((label) => ({ label, assignee: "" }));
-              const ProjectIcon = getProjectIcon(item.name, item.objective);
-              return (
-                <Card
-                  key={item.id}
-                  className="cursor-pointer hover:-translate-y-0.5 hover:shadow-md transition-all p-4"
-                  onClick={() => navigate(`/project/${item.id}`)}
-                  data-testid={`project-card-${item.id}`}
-                >
-                  <div className="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.1fr)]">
-                    <div className="min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
+          <Card className="p-0 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40">
+                  <tr className="text-left text-muted-foreground">
+                    <th className="px-4 py-3 font-medium">Project</th>
+                    <th className="px-4 py-3 font-medium">Stage</th>
+                    <th className="px-4 py-3 font-medium">Progress</th>
+                    <th className="px-4 py-3 font-medium">Current step</th>
+                    <th className="px-4 py-3 font-medium">Next steps</th>
+                    <th className="px-4 py-3 font-medium">Recent activity</th>
+                    <th className="px-4 py-3 font-medium text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {projects.map((item: any) => {
+                    const variant = getStageVariant(item.stage);
+                    const progress = getStageProgress(item.stage);
+                    const isPending = item.stage.includes("draft") || item.stage === "execution_done";
+                    const managementActivity = getManagementActivity(
+                      managementByProjectId.get(item.id),
+                      userLookup,
+                      agentLookup
+                    );
+                    const activityItems = managementActivity.length > 0
+                      ? managementActivity
+                      : getRecentActivity(item).map((label) => ({ label, assignee: "" }));
+                    const ProjectIcon = getProjectIcon(item.name, item.objective);
+                    return (
+                      <tr
+                        key={item.id}
+                        className="border-t border-border/60 hover:bg-muted/30 cursor-pointer"
+                        onClick={() => navigate(`/project/${item.id}`)}
+                        data-testid={`project-row-${item.id}`}
+                      >
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2 min-w-[220px]">
                             <div className="h-8 w-8 rounded-lg bg-muted/70 flex items-center justify-center">
                               <ProjectIcon className="h-4 w-4 text-muted-foreground" />
                             </div>
-                            <h3 className="font-semibold text-foreground truncate">{item.name}</h3>
+                            <div className="min-w-0">
+                              <div className="font-semibold text-foreground truncate">{item.name}</div>
+                              <div className="text-[11px] text-muted-foreground line-clamp-1">{item.objective}</div>
+                            </div>
                           </div>
-                          <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{item.objective}</p>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0 mt-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              if (confirm("Delete this project? This cannot be undone.")) {
-                                deleteMutation.mutate(item.id);
-                              }
-                            }}
-                            disabled={deleteMutation.isPending}
-                            aria-label="Delete project"
-                          >
-                            <Trash2 size={16} />
-                          </Button>
-                          <ChevronRight size={20} className="text-muted-foreground" />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-center gap-2">
-                        {item.stage !== "created" && (
-                          <Badge variant={variant}>
-                            {STAGE_LABELS[item.stage] || item.stage}
-                          </Badge>
-                        )}
-                        {isPending && (
-                          <Badge variant="warning">Needs Review</Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Progress value={progress} className="flex-1 h-1.5" />
-                        <span className="text-xs text-muted-foreground w-8 text-right">{Math.round(progress)}%</span>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Current step
-                      </div>
-                      <div className="mt-2 text-sm text-foreground">
-                        {getStageSteps(item.stage).currentLabel}
-                      </div>
-                      <div className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Next steps
-                      </div>
-                      {getStageSteps(item.stage).nextLabels.length > 0 ? (
-                        <div className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">
-                          {getStageSteps(item.stage).nextLabels.map((label) => (
-                            <div key={`${item.id}-${label}`} className="flex items-center gap-2">
-                              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
-                              <span>{label}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {item.stage !== "created" && (
+                              <Badge variant={variant}>
+                                {STAGE_LABELS[item.stage] || item.stage}
+                              </Badge>
+                            )}
+                            {isPending && (
+                              <Badge variant="warning">Needs Review</Badge>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2 min-w-[140px]">
+                            <Progress value={progress} className="flex-1 h-1.5" />
+                            <span className="text-[11px] text-muted-foreground w-8 text-right">{Math.round(progress)}%</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {getStageSteps(item.stage).currentLabel}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {getStageSteps(item.stage).nextLabels.length > 0 ? (
+                            <div className="flex flex-col gap-1">
+                              {getStageSteps(item.stage).nextLabels.map((label) => (
+                                <div key={`${item.id}-${label}`} className="flex items-center gap-2">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+                                  <span className="text-[11px]">{label}</span>
+                                </div>
+                              ))}
                             </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="mt-2 text-xs text-muted-foreground">No upcoming steps</div>
-                      )}
-                    </div>
-
-                    <div className="min-w-0">
-                      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Recent activity
-                      </div>
-                      {activityItems.length > 0 ? (
-                        <div className="mt-2 flex flex-col gap-1.5 text-xs text-muted-foreground">
-                          {activityItems.map((activity, idx) => (
-                            <div key={`${item.id}-activity-${idx}`} className="flex items-start gap-2">
-                              <span className="mt-1 h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
-                              <span className="leading-relaxed">
-                                {activity.label}
-                                {activity.assignee && (
-                                  <span className="text-muted-foreground/70"> — {activity.assignee}</span>
-                                )}
-                              </span>
+                          ) : (
+                            <span className="text-[11px]">No upcoming steps</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {activityItems.length > 0 ? (
+                            <div className="flex flex-col gap-1.5">
+                              {activityItems.map((activity, idx) => (
+                                <div key={`${item.id}-activity-${idx}`} className="flex items-start gap-2">
+                                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+                                  <span className="text-[11px] leading-relaxed">
+                                    {activity.label}
+                                    {activity.assignee && (
+                                      <span className="text-muted-foreground/70"> — {activity.assignee}</span>
+                                    )}
+                                  </span>
+                                </div>
+                              ))}
                             </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="mt-2 text-xs text-muted-foreground">No recent activity yet.</div>
-                      )}
-                    </div>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
+                          ) : (
+                            <span className="text-[11px]">No recent activity yet.</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                if (confirm("Delete this project? This cannot be undone.")) {
+                                  deleteMutation.mutate(item.id);
+                                }
+                              }}
+                              disabled={deleteMutation.isPending}
+                              aria-label="Delete project"
+                            >
+                              <Trash2 size={16} />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
         </div>
       )}
 
@@ -562,29 +566,46 @@ export default function Projects() {
             </div>
             <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Templates</span>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
-            {projectTemplates.map((template) => (
-              <Card key={template.slug} className="p-3 border border-dashed border-border/70 bg-muted/10">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm font-semibold text-foreground">{template.name}</h3>
-                    <p className="text-[11px] text-muted-foreground mt-1">Delivery phases, tasks, and owners.</p>
-                  </div>
-                  <Badge variant="outline" className="text-[10px]">Template</Badge>
-                </div>
-                <div className="mt-2 flex items-center gap-2">
-                  <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setTemplatePreview(template)}>
-                    Preview
-                  </Button>
-                  <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => copyTemplate(template)}>
-                    {copiedTemplateSlug === template.slug ? "Copied" : "Copy"}
-                  </Button>
-                  <Button size="sm" className="h-7 px-2 text-xs" onClick={() => applyTemplateToNewProject(template)}>
-                    Use
-                  </Button>
-                </div>
-              </Card>
-            ))}
+          <div className="mt-3">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40">
+                  <tr className="text-left text-muted-foreground">
+                    <th className="px-4 py-3 font-medium">Template</th>
+                    <th className="px-4 py-3 font-medium">Description</th>
+                    <th className="px-4 py-3 font-medium text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {projectTemplates.map((template) => (
+                    <tr key={template.slug} className="border-t border-border/60">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-foreground truncate">{template.name}</span>
+                          <Badge variant="outline" className="text-[10px]">Template</Badge>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        Delivery phases, tasks, and owners.
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setTemplatePreview(template)}>
+                            Preview
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => copyTemplate(template)}>
+                            {copiedTemplateSlug === template.slug ? "Copied" : "Copy"}
+                          </Button>
+                          <Button size="sm" className="h-7 px-2 text-xs" onClick={() => applyTemplateToNewProject(template)}>
+                            Use
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </Card>
       )}

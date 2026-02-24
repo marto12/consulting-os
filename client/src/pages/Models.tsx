@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, type MouseEvent } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "../lib/query-client";
 import { Box, Plus, Loader2 } from "lucide-react";
@@ -10,7 +10,7 @@ import { Textarea } from "../components/ui/textarea";
 import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { Skeleton } from "../components/ui/skeleton";
-import { useLocation, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useUserContext } from "../lib/user-context";
 
 interface Model {
@@ -25,6 +25,7 @@ interface Model {
 export default function Models() {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
+  const navigate = useNavigate();
   const isGlobal = location.pathname.startsWith("/global/");
   const projectId = !isGlobal && id ? Number(id) : undefined;
   const { activeUser, users } = useUserContext();
@@ -96,6 +97,19 @@ export default function Models() {
   }, [users]);
 
   const skeletonCards = Array.from({ length: 6 });
+  const handleRowClick = (modelId: number) => {
+    if (isGlobal) {
+      navigate(`/global/models/${modelId}`);
+      return;
+    }
+    if (projectId) {
+      navigate(`/project/${projectId}/models/${modelId}`);
+    }
+  };
+
+  const stopPropagation = (event: MouseEvent<HTMLElement>) => {
+    event.stopPropagation();
+  };
 
   return (
     <div>
@@ -200,36 +214,63 @@ export default function Models() {
                     <p className="text-sm">No models yet</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                    {models.map((m) => {
-                      const isShared = !m.projectId;
-                      return (
-                        <Card key={m.id} className="p-4">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Box size={16} className="text-primary" />
-                            <h3 className="font-semibold text-sm">{m.name}</h3>
-                            {isShared && <Badge variant="outline" className="text-[10px]">Shared</Badge>}
-                          </div>
-                          <p className="text-xs text-muted-foreground line-clamp-2">{m.description || "No description"}</p>
-                          {m.lastEditedByUserId && userLookup.get(m.lastEditedByUserId) && (
-                            <p className="text-[10px] text-muted-foreground mt-2">{userLookup.get(m.lastEditedByUserId)}</p>
-                          )}
-                          {isShared && (
-                            <div className="mt-3">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                                onClick={() => unlinkModel.mutate(m.id)}
+                  <Card className="p-0 overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-muted/40">
+                          <tr className="text-left text-muted-foreground">
+                            <th className="px-4 py-3 font-medium">Model</th>
+                            <th className="px-4 py-3 font-medium">Description</th>
+                            <th className="px-4 py-3 font-medium">Owner</th>
+                            <th className="px-4 py-3 font-medium text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {models.map((m) => {
+                            const isShared = !m.projectId;
+                            const editorName = m.lastEditedByUserId ? userLookup.get(m.lastEditedByUserId) : null;
+                            return (
+                              <tr
+                                key={m.id}
+                                className="border-t border-border/60 hover:bg-muted/30 cursor-pointer"
+                                onClick={() => handleRowClick(m.id)}
                               >
-                                Unlink
-                              </Button>
-                            </div>
-                          )}
-                        </Card>
-                      );
-                    })}
-                  </div>
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-2">
+                                    <Box size={16} className="text-primary" />
+                                    <div className="min-w-0">
+                                      <div className="font-semibold text-foreground truncate">{m.name}</div>
+                                    </div>
+                                    {isShared && <Badge variant="outline" className="text-[10px]">Shared</Badge>}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-muted-foreground">
+                                  <span className="line-clamp-2">{m.description || "No description"}</span>
+                                </td>
+                                <td className="px-4 py-3 text-muted-foreground">
+                                  {editorName || "System"}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center justify-end gap-1">
+                                    {isShared && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                                        onClick={(e) => { stopPropagation(e); unlinkModel.mutate(m.id); }}
+                                      >
+                                        Unlink
+                                      </Button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
                 )}
               </div>
 
@@ -257,31 +298,60 @@ export default function Models() {
                     <p className="text-sm text-muted-foreground">No shared models available.</p>
                   </Card>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                    {sharedModels.map((m) => (
-                      <Card key={m.id} className="p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Box size={16} className="text-primary" />
-                          <h3 className="font-semibold text-sm">{m.name}</h3>
-                          <Badge variant="outline" className="text-[10px]">Shared</Badge>
-                        </div>
-                        <p className="text-xs text-muted-foreground line-clamp-2">{m.description || "No description"}</p>
-                        {m.lastEditedByUserId && userLookup.get(m.lastEditedByUserId) && (
-                          <p className="text-[10px] text-muted-foreground mt-2">{userLookup.get(m.lastEditedByUserId)}</p>
-                        )}
-                        <div className="mt-3">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 px-2 text-xs"
-                            onClick={() => linkModel.mutate(m.id)}
-                          >
-                            Use in project
-                          </Button>
-                        </div>
-                      </Card>
-                    ))}
-                  </div>
+                  <Card className="p-0 overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-muted/40">
+                          <tr className="text-left text-muted-foreground">
+                            <th className="px-4 py-3 font-medium">Model</th>
+                            <th className="px-4 py-3 font-medium">Description</th>
+                            <th className="px-4 py-3 font-medium">Owner</th>
+                            <th className="px-4 py-3 font-medium text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sharedModels.map((m) => {
+                            const editorName = m.lastEditedByUserId ? userLookup.get(m.lastEditedByUserId) : null;
+                            return (
+                              <tr
+                                key={m.id}
+                                className="border-t border-border/60 hover:bg-muted/30 cursor-pointer"
+                                onClick={() => handleRowClick(m.id)}
+                              >
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-2">
+                                    <Box size={16} className="text-primary" />
+                                    <div className="min-w-0">
+                                      <div className="font-semibold text-foreground truncate">{m.name}</div>
+                                    </div>
+                                    <Badge variant="outline" className="text-[10px]">Shared</Badge>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-muted-foreground">
+                                  <span className="line-clamp-2">{m.description || "No description"}</span>
+                                </td>
+                                <td className="px-4 py-3 text-muted-foreground">
+                                  {editorName || "System"}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center justify-end gap-1">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 px-2 text-xs"
+                                      onClick={(e) => { stopPropagation(e); linkModel.mutate(m.id); }}
+                                    >
+                                      Use in project
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
                 )}
               </div>
             </div>

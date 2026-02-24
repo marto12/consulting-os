@@ -103,6 +103,24 @@ export const storage = {
     return project;
   },
 
+  async updateProject(
+    id: number,
+    data: {
+      governanceControls?: Record<string, unknown> | null;
+      totalSavingsToDate?: number | null;
+      costReductionRealisedPct?: number | null;
+      marginImpactToDate?: number | null;
+      projectedAnnualImpact?: number | null;
+    }
+  ): Promise<Project> {
+    const [project] = await db
+      .update(projects)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(projects.id, id))
+      .returning();
+    return project;
+  },
+
   async listUsers(): Promise<User[]> {
     return db.select().from(users).orderBy(desc(users.updatedAt));
   },
@@ -130,10 +148,32 @@ export const storage = {
     ]);
   },
 
-  async createWorkflowTemplate(data: { name: string; description?: string }): Promise<WorkflowTemplate> {
+  async createWorkflowTemplate(data: {
+    name: string;
+    description?: string;
+    practiceCoverage?: string[];
+    timesUsed?: number;
+    deploymentStatus?: string;
+    governanceMaturity?: number;
+    baselineCost?: number | null;
+    aiCost?: number | null;
+    lifecycleStatus?: string;
+    comingSoonEta?: string | null;
+  }): Promise<WorkflowTemplate> {
     const [template] = await db
       .insert(workflowTemplates)
-      .values({ name: data.name, description: data.description || "" })
+      .values({
+        name: data.name,
+        description: data.description || "",
+        practiceCoverage: data.practiceCoverage ?? [],
+        timesUsed: data.timesUsed ?? 0,
+        deploymentStatus: data.deploymentStatus ?? "sandbox",
+        governanceMaturity: data.governanceMaturity ?? 1,
+        baselineCost: data.baselineCost ?? null,
+        aiCost: data.aiCost ?? null,
+        lifecycleStatus: data.lifecycleStatus ?? "active",
+        comingSoonEta: data.comingSoonEta ?? null,
+      })
       .returning();
     return template;
   },
@@ -150,7 +190,18 @@ export const storage = {
     return template;
   },
 
-  async updateWorkflowTemplate(id: number, data: { name?: string; description?: string }): Promise<WorkflowTemplate> {
+  async updateWorkflowTemplate(id: number, data: {
+    name?: string;
+    description?: string;
+    practiceCoverage?: string[];
+    timesUsed?: number;
+    deploymentStatus?: string;
+    governanceMaturity?: number;
+    baselineCost?: number | null;
+    aiCost?: number | null;
+    lifecycleStatus?: string;
+    comingSoonEta?: string | null;
+  }): Promise<WorkflowTemplate> {
     const [template] = await db
       .update(workflowTemplates)
       .set({ ...data, updatedAt: new Date() })

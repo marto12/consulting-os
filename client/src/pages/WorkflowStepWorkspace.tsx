@@ -32,6 +32,7 @@ import { Separator } from "../components/ui/separator";
 import { Skeleton } from "../components/ui/skeleton";
 import { cn } from "../lib/utils";
 import DeliverablePreview from "../components/DeliverablePreview";
+import { useNotifications } from "../components/notifications/NotificationsProvider";
 
 const AGENT_COLORS: Record<string, string> = {
   project_definition: "#6B7280",
@@ -304,6 +305,7 @@ export default function WorkflowStepWorkspace() {
   const [confirmInitialized, setConfirmInitialized] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { notify } = useNotifications();
 
   const { data: project } = useQuery<any>({
     queryKey: ["/api/projects", projectId],
@@ -374,6 +376,11 @@ export default function WorkflowStepWorkspace() {
           ]);
           setIsStreaming(false);
           eventSource.close();
+          notify({
+            title: `${stepData?.step?.name || "Workflow step"} complete`,
+            message: "Agent finished running this step.",
+            variant: "success",
+          });
           queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum] });
           queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId] });
           queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum, "chat"] });
@@ -407,7 +414,7 @@ export default function WorkflowStepWorkspace() {
     return () => {
       eventSource.close();
     };
-  }, [projectId, stepIdNum]);
+  }, [notify, projectId, stepData?.step?.name, stepIdNum]);
 
   useEffect(() => {
     if (searchParams.get("autorun") === "true" && !autorunTriggered && !isStreaming && stepData) {
@@ -479,6 +486,11 @@ export default function WorkflowStepWorkspace() {
                 ...prev,
                 { role: "assistant", content: "Refinement complete.", messageType: "complete" },
               ]);
+              notify({
+                title: `${stepData?.step?.name || "Agent"} refinement complete`,
+                message: "Agent finished refining this step.",
+                variant: "success",
+              });
               queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum, "chat"] });
               queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum] });
             } else if (data.type === "error") {
@@ -505,7 +517,7 @@ export default function WorkflowStepWorkspace() {
     setChatStreaming(false);
     queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum, "chat"] });
     queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "workflow", "steps", stepIdNum] });
-  }, [projectId, stepIdNum]);
+  }, [notify, projectId, stepData?.step?.name, stepIdNum]);
 
   const approveStepMutation = useMutation({
     mutationFn: async () => {

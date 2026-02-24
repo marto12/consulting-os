@@ -8,6 +8,7 @@ import { Badge } from "../components/ui/badge";
 import { Progress } from "../components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, LineChart, Line, CartesianGrid } from "recharts";
+import { useNotifications } from "../components/notifications/NotificationsProvider";
 
 type CGEResult = {
   headline: string;
@@ -34,7 +35,9 @@ export default function CGEModel() {
   const [uploadName, setUploadName] = useState<string | null>(null);
   const [savedChartId, setSavedChartId] = useState<number | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const hasCompletedRef = useRef(false);
   const queryClient = useQueryClient();
+  const { notify } = useNotifications();
 
   const inputOptions = [
     { value: "baseline-2024", label: "Baseline 2024 (national accounts)" },
@@ -133,6 +136,7 @@ export default function CGEModel() {
     setProgress(5);
     setResult(null);
     setShowResults(false);
+    hasCompletedRef.current = false;
 
     const source = new EventSource(`/api/models/cge/run-stream?projectId=${selectedProject}`);
     eventSourceRef.current = source;
@@ -189,11 +193,23 @@ export default function CGEModel() {
       }
       setProgress(100);
       setStatus("complete");
+      hasCompletedRef.current = true;
+      notify({
+        title: "CGE simulation complete",
+        message: "Scenario run finished successfully.",
+        variant: "success",
+      });
       source.close();
     });
 
     source.addEventListener("error", () => {
+      if (hasCompletedRef.current) return;
       setStatus("error");
+      notify({
+        title: "CGE simulation failed",
+        message: "The run ended unexpectedly. Please try again.",
+        variant: "error",
+      });
       source.close();
     });
   };

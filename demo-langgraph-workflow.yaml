@@ -1,0 +1,65 @@
+version: "0.2"
+kind: "langchain_workflow"
+
+workflow:
+  id: "demo_policy_brief"
+  name: "Policy brief demo"
+  description: "Demo LangGraph workflow for upload/import testing"
+
+runtime:
+  model_defaults:
+    provider: "openai"
+    model: "gpt-5"
+    temperature: 0.2
+    max_tokens: 1200
+
+agents:
+  researcher_v1:
+    model:
+      provider: "openai"
+      model: "gpt-5"
+      temperature: 0.1
+      max_tokens: 1600
+    system_prompt: |
+      You are a research agent. Gather evidence and citations.
+
+  drafter_v1:
+    model:
+      provider: "openai"
+      model: "gpt-5"
+      temperature: 0.2
+      max_tokens: 1800
+    system_prompt: |
+      You are a drafting agent. Write concise, evidence-led prose.
+
+nodes:
+  outline_block:
+    type: "llm.chain"
+    prompt: |
+      Generate a short outline for a two-page brief.
+
+  research_scan:
+    type: "agent"
+    agent_ref: "agents.researcher_v1"
+    prompt: |
+      Collect evidence for each outline section.
+
+  draft_sections:
+    type: "agent"
+    agent_ref: "agents.drafter_v1"
+    prompt: |
+      Draft each section using the evidence bank.
+
+  human_review:
+    type: "human_gate"
+    instructions: |
+      Review for factual accuracy and tone.
+
+edges:
+  sequence:
+    - from: "outline_block"
+      to: "research_scan"
+    - from: "research_scan"
+      to: "draft_sections"
+    - from: "draft_sections"
+      to: "human_review"

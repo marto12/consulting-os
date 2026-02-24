@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import yaml from "js-yaml";
 import {
   ReactFlow,
   Background,
@@ -321,6 +322,7 @@ export default function WorkflowEditor() {
   const [hasChanges, setHasChanges] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [importedWorkflowId, setImportedWorkflowId] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: workflow, isLoading: workflowLoading } = useQuery<WorkflowTemplate>({
@@ -484,20 +486,152 @@ export default function WorkflowEditor() {
     return { name: data.name, description: data.description, steps };
   }, []);
 
-  const handleWorkflowUpload = useCallback(async (file: File) => {
-    try {
-      setUploadError(null);
+  const importMutation = useMutation({
+    mutationFn: async (file: File) => {
       const text = await file.text();
-      const parsed = parseLangGraphYaml(text);
-      if (parsed.name) setName(parsed.name);
-      if (parsed.description) setDescription(parsed.description);
-      setSteps(parsed.steps);
-      setSelectedIdx(null);
-      setHasChanges(true);
-    } catch (err: any) {
-      setUploadError(err?.message || "Failed to parse workflow file.");
-    }
-  }, [parseLangGraphYaml]);
+      const spec = yaml.load(text) as any;
+      if (!spec || typeof spec !== "object") {
+        throw new Error("Invalid YAML file.");
+      }
+      if (spec.kind !== "langchain_workflow") {
+        throw new Error("Unsupported spec kind. Expected langchain_workflow.");
+      }
+
+      const workflow = spec.workflow || {};
+      const runtimeDefaults = spec.runtime?.model_defaults || {};
+      const agentDefs = spec.agents || {};
+      const nodes = spec.nodes || {};
+      const edges = spec.edges || {};
+
+      const agentsToCreate: Record<string, any> = {};
+
+      Object.entries(agentDefs).forEach(([key, agent]: any) => {
+        const model = agent.model?.model || runtimeDefaults.model || "gpt-5";
+        const temperature = agent.model?.temperature ?? runtimeDefaults.temperature ?? 0.2;
+        const maxTokens = agent.model?.max_tokens ?? runtimeDefaults.max_tokens ?? 1800;
+        agentsToCreate[key] = {
+          key,
+          name: key.replace(/_/g, " "),
+          description: agent.description || agent.system_prompt || "Imported agent",
+          role: key,
+          roleColor: "#3B82F6",
+          promptTemplate: agent.system_prompt || "",
+          model,
+          maxTokens,
+          inputSchema: agent.input_schema || null,
+          outputSchema: agent.output_schema || null,
+          toolRefs: agent.tool_pack_ref ? [agent.tool_pack_ref] : [],
+        };
+      });
+
+      const sequence = edges.sequence || [];
+      const orderedNodeIds: string[] = [];
+      sequence.forEach((edge: any) => {
+        if (edge.from && !orderedNodeIds.includes(edge.from)) orderedNodeIds.push(edge.from);
+        if (edge.to && !orderedNodeIds.includes(edge.to)) orderedNodeIds.push(edge.to);
+      });
+      if (orderedNodeIds.length === 0) {
+        orderedNodeIds.push(...Object.keys(nodes));
+      }
+
+      const steps: WorkflowStep[] = orderedNodeIds.map((nodeId, idx) => {
+        const node = nodes[nodeId] || {};
+        let agentKey = "general";
+        if (node.type === "agent" && node.agent_ref) {
+          agentKey = String(node.agent_ref).split(".").pop() || node.agent_ref;
+        } else if (node.type === "map" && node.child?.agent_ref) {
+          agentKey = String(node.child.agent_ref).split(".").pop() || node.child.agent_ref;
+        } else if (node.type?.startsWith("llm")) {
+          agentKey = `chain_${nodeId}`;
+          if (!agentsToCreate[agentKey]) {
+            agentsToCreate[agentKey] = {
+              key: agentKey,
+              name: nodeId.replace(/_/g, " "),
+              description: node.prompt || "LLM chain node",
+              role: "LLM Chain",
+              roleColor: "#8B5CF6",
+              promptTemplate: node.prompt || "",
+              model: runtimeDefaults.model || "gpt-5",
+              maxTokens: runtimeDefaults.max_tokens || 1800,
+            };
+          }
+        } else if (node.type === "human_gate") {
+          agentKey = "human_gate";
+          if (!agentsToCreate[agentKey]) {
+            agentsToCreate[agentKey] = {
+              key: agentKey,
+              name: "Human gate",
+              description: node.instructions || "Human review gate",
+              role: "Human",
+              roleColor: "#F59E0B",
+              promptTemplate: node.instructions || "",
+              model: runtimeDefaults.model || "gpt-5",
+              maxTokens: runtimeDefaults.max_tokens || 1800,
+            };
+          }
+        }
+
+        return {
+          stepOrder: idx + 1,
+          name: node.name || nodeId,
+          agentKey,
+          description: node.description || node.prompt || "",
+        };
+      });
+
+      await Promise.all(
+        Object.values(agentsToCreate).map((agent: any) =>
+          fetch(`/api/agents/${agent.key}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(agent),
+          })
+        )
+      );
+
+      const res = await fetch("/api/workflows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: workflow.name || "Imported workflow",
+          description: workflow.description || "",
+          steps: steps.map((step, index) => ({
+            stepOrder: step.stepOrder || index + 1,
+            name: step.name,
+            agentKey: step.agentKey,
+            description: step.description || "",
+          })),
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/workflows"] });
+      if (data?.id) {
+        setImportedWorkflowId(data.id);
+        if (data.name) setName(data.name);
+        if (data.description) setDescription(data.description);
+        if (Array.isArray(data.steps)) {
+          setSteps(
+            data.steps.map((s: any) => ({
+              stepOrder: s.stepOrder,
+              name: s.name,
+              agentKey: s.agentKey,
+              description: s.description || "",
+              parallelGroup: s.configJson?.parallelGroup ?? 0,
+            }))
+          );
+        }
+        setSelectedIdx(null);
+        setHasChanges(false);
+        setInitialized(true);
+      }
+    },
+    onError: (err: any) => {
+      setUploadError(err?.message || "Failed to import workflow file.");
+    },
+  });
 
   const templateYaml = useMemo(() => (
     `name: CGE Workflow\n` +
@@ -675,7 +809,8 @@ export default function WorkflowEditor() {
             onChange={(event) => {
               const file = event.target.files?.[0];
               if (!file) return;
-              handleWorkflowUpload(file);
+              setUploadError(null);
+              importMutation.mutate(file);
               event.currentTarget.value = "";
             }}
           />
@@ -683,9 +818,10 @@ export default function WorkflowEditor() {
             size="sm"
             variant="outline"
             onClick={() => fileInputRef.current?.click()}
+            disabled={importMutation.isPending}
           >
             <Upload size={14} className="mr-1" />
-            Upload YAML
+            {importMutation.isPending ? "Importing..." : "Upload YAML"}
           </Button>
           <Button
             size="sm"
@@ -695,18 +831,27 @@ export default function WorkflowEditor() {
             <Download size={14} className="mr-1" />
             Download Template
           </Button>
-          <Button
-            size="sm"
-            onClick={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending || !name.trim()}
-          >
-            {saveMutation.isPending ? (
-              <Loader2 size={14} className="mr-1 animate-spin" />
-            ) : (
-              <Save size={14} className="mr-1" />
-            )}
-            {isNew ? "Create" : "Save"}
-          </Button>
+          {importedWorkflowId && isNew ? (
+            <Button
+              size="sm"
+              onClick={() => navigate(`/global/workflow/${importedWorkflowId}`)}
+            >
+              Open workflow
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending || !name.trim()}
+            >
+              {saveMutation.isPending ? (
+                <Loader2 size={14} className="mr-1 animate-spin" />
+              ) : (
+                <Save size={14} className="mr-1" />
+              )}
+              {isNew ? "Create" : "Save"}
+            </Button>
+          )}
         </div>
       </div>
 

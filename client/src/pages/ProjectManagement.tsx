@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "../lib/utils";
 import { useUserContext } from "../lib/user-context";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
+import { Badge } from "../components/ui/badge";
+import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { apiRequest } from "../lib/query-client";
 import {
   Sheet,
   SheetContent,
@@ -16,11 +20,19 @@ import {
 import {
   AlertTriangle,
   ArrowUpRight,
+  Bot,
   CheckCircle2,
   Circle,
+  CircleSlash,
   CircleDot,
+  ChevronDown,
+  ChevronRight,
   FileText,
-  Lock,
+  Play,
+  ShieldCheck,
+  Sparkles,
+  Terminal,
+  User,
   Zap,
 } from "lucide-react";
 
@@ -40,12 +52,17 @@ type ProjectTask = {
   projectId: number;
   phaseId: number | null;
   title: string;
+  subtitle?: string | null;
   description: string;
+  taskType?: string | null;
   ownerType: string;
   assigneeUserId?: number | null;
   assigneeIds?: number[];
   workflowStepId: number | null;
   status: string;
+  dependsOn?: number[] | null;
+  gateJson?: Record<string, unknown> | null;
+  executionJson?: Record<string, unknown> | null;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -64,7 +81,98 @@ type ManagementData = {
   workflowSteps: WorkflowStep[];
 };
 
-function getStatusStyles(status: string) {
+type GovernanceControls = {
+  promptsLocked?: boolean;
+  auditLogEnabled?: boolean;
+  humanSignoffRequired?: boolean;
+  evalMonitoringEnabled?: boolean;
+  accessControlEnabled?: boolean;
+};
+
+type ProjectDetail = {
+  id: number;
+  name: string;
+  workflowTemplateId?: number | null;
+  governanceControls?: GovernanceControls | null;
+  totalSavingsToDate?: number | null;
+  costReductionRealisedPct?: number | null;
+  marginImpactToDate?: number | null;
+  projectedAnnualImpact?: number | null;
+};
+
+type TaskType = "human" | "agent" | "client";
+
+type TaskStatus =
+  | "not_started"
+  | "in_progress"
+  | "blocked"
+  | "awaiting_client"
+  | "running"
+  | "under_review"
+  | "complete"
+  | "rework_required";
+
+type ExecutionState = "idle" | "running" | "failed" | "succeeded";
+
+type ExecutionHistory = {
+  id: string;
+  state: ExecutionState;
+  startedAt: string;
+  finishedAt?: string;
+  summary?: string;
+  output?: {
+    id: string;
+    title: string;
+    type: string;
+    size?: string;
+  };
+};
+
+type TaskExecution = {
+  state: ExecutionState;
+  lastRunAt?: string;
+  lastResult?: string;
+  history: ExecutionHistory[];
+};
+
+type TaskGate = {
+  gateType?: string;
+  clientOwner?: string;
+  dueDate?: string;
+};
+
+type Task = {
+  id: number;
+  title: string;
+  subtitle?: string;
+  description: string;
+  phaseId: number | null;
+  taskType: TaskType;
+  status: TaskStatus;
+  responsibleId?: number | null;
+  dependsOn: number[];
+  workflowId?: number | null;
+  execution?: TaskExecution;
+  gate?: TaskGate;
+  sortOrder: number;
+};
+
+type Phase = {
+  id: number;
+  name: string;
+  order: number;
+};
+
+type ProjectSummary = {
+  currentPhaseId: number | null;
+  progressPercent: number;
+  gateSummary: string;
+  bottleneckLabel: string;
+  bottleneckDetail: string;
+  recommendedAction: string;
+};
+
+function getStatusStyles(status: TaskStatus) {
   switch (status) {
     case "complete":
       return {
@@ -76,15 +184,30 @@ function getStatusStyles(status: string) {
         card: "border-blue-200 bg-blue-50",
         chip: "border-blue-200 text-blue-700",
       };
-    case "needs_review":
+    case "running":
+      return {
+        card: "border-indigo-200 bg-indigo-50",
+        chip: "border-indigo-200 text-indigo-700",
+      };
+    case "under_review":
       return {
         card: "border-amber-200 bg-amber-50",
         chip: "border-amber-200 text-amber-700",
+      };
+    case "awaiting_client":
+      return {
+        card: "border-sky-200 bg-sky-50",
+        chip: "border-sky-200 text-sky-700",
       };
     case "blocked":
       return {
         card: "border-rose-200 bg-rose-50",
         chip: "border-rose-200 text-rose-700",
+      };
+    case "rework_required":
+      return {
+        card: "border-orange-200 bg-orange-50",
+        chip: "border-orange-200 text-orange-700",
       };
     default:
       return {
@@ -94,37 +217,235 @@ function getStatusStyles(status: string) {
   }
 }
 
-function getStatusMeta(status: string) {
+function getStatusMeta(status: TaskStatus) {
   switch (status) {
     case "complete":
       return { label: "Complete", Icon: CheckCircle2 };
     case "in_progress":
       return { label: "In progress", Icon: CircleDot };
-    case "needs_review":
-      return { label: "Needs review", Icon: AlertTriangle };
+    case "running":
+      return { label: "Running", Icon: Zap };
+    case "under_review":
+      return { label: "Under review", Icon: AlertTriangle };
+    case "awaiting_client":
+      return { label: "Awaiting client", Icon: Circle };
     case "blocked":
       return { label: "Blocked", Icon: AlertTriangle };
+    case "rework_required":
+      return { label: "Rework required", Icon: CircleSlash };
     default:
       return { label: "Not started", Icon: Circle };
   }
 }
 
-const TASK_STATUS_OPTIONS = [
-  { value: "not_started", label: "Not Started" },
-  { value: "in_progress", label: "In Progress" },
+const TASK_STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
+  { value: "not_started", label: "Not started" },
+  { value: "in_progress", label: "In progress" },
   { value: "blocked", label: "Blocked" },
-  { value: "needs_review", label: "Needs Review" },
+  { value: "awaiting_client", label: "Awaiting client" },
+  { value: "running", label: "Running" },
+  { value: "under_review", label: "Under review" },
+  { value: "rework_required", label: "Rework required" },
   { value: "complete", label: "Complete" },
 ];
+
+const TASK_TYPE_META: Record<
+  TaskType,
+  { label: string; Icon: typeof User; badge: string; tint: string }
+> = {
+  human: { label: "Human", Icon: User, badge: "bg-emerald-100 text-emerald-700", tint: "border-emerald-200" },
+  agent: { label: "Agent", Icon: Bot, badge: "bg-indigo-100 text-indigo-700", tint: "border-indigo-200" },
+  client: { label: "Client", Icon: ShieldCheck, badge: "bg-sky-100 text-sky-700", tint: "border-sky-200" },
+};
+
+const STATUS_BY_TYPE: Record<TaskType, TaskStatus[]> = {
+  human: ["not_started", "in_progress", "blocked", "under_review", "rework_required", "complete"],
+  agent: ["not_started", "running", "blocked", "under_review", "rework_required", "complete"],
+  client: ["not_started", "awaiting_client", "under_review", "rework_required", "complete"],
+};
+
+const EXECUTION_LABELS: Record<ExecutionState, string> = {
+  idle: "Idle",
+  running: "Running",
+  failed: "Failed",
+  succeeded: "Succeeded",
+};
+
+const TASK_STATUS_SET = new Set<TaskStatus>(TASK_STATUS_OPTIONS.map((option) => option.value));
+
+function normalizeTaskStatus(status: string): TaskStatus {
+  if (status === "needs_review") return "under_review";
+  if (status === "completed" || status === "complete") return "complete";
+  if (TASK_STATUS_SET.has(status as TaskStatus)) return status as TaskStatus;
+  return "not_started";
+}
+
+function normalizeTaskType(ownerType: string): TaskType {
+  if (ownerType === "agent") return "agent";
+  if (ownerType === "client") return "client";
+  return "human";
+}
+
+function buildExecution(status: TaskStatus): TaskExecution {
+  if (status === "running") {
+    return { state: "running", lastRunAt: new Date().toISOString(), lastResult: "Running", history: [] };
+  }
+  return { state: "idle", history: [] };
+}
+
+function getBlockingDependencies(task: Task, taskMap: Map<number, Task>): number[] {
+  return task.dependsOn.filter((depId) => {
+    const dep = taskMap.get(depId);
+    return !dep || dep.status !== "complete";
+  });
+}
+
+function sortTasksByDependencies<T extends Task>(tasks: T[]): T[] {
+  const taskMap = new Map<number, T>();
+  tasks.forEach((task) => taskMap.set(task.id, task));
+
+  const inDegree = new Map<number, number>();
+  const dependents = new Map<number, number[]>();
+  tasks.forEach((task) => {
+    inDegree.set(task.id, 0);
+    dependents.set(task.id, []);
+  });
+
+  tasks.forEach((task) => {
+    task.dependsOn.forEach((depId) => {
+      if (!taskMap.has(depId)) return;
+      inDegree.set(task.id, (inDegree.get(task.id) || 0) + 1);
+      dependents.get(depId)?.push(task.id);
+    });
+  });
+
+  const queue = tasks
+    .filter((task) => (inDegree.get(task.id) || 0) === 0)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+  const result: T[] = [];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) break;
+    result.push(current);
+    (dependents.get(current.id) || []).forEach((nextId) => {
+      const nextDegree = (inDegree.get(nextId) || 0) - 1;
+      inDegree.set(nextId, nextDegree);
+      if (nextDegree === 0) {
+        const nextTask = taskMap.get(nextId);
+        if (nextTask) {
+          queue.push(nextTask);
+          queue.sort((a, b) => a.sortOrder - b.sortOrder);
+        }
+      }
+    });
+  }
+
+  if (result.length !== tasks.length) {
+    const remaining = tasks
+      .filter((task) => !result.find((item) => item.id === task.id))
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    result.push(...remaining);
+  }
+
+  return result;
+}
 
 export default function ProjectManagement() {
   const { id } = useParams<{ id: string }>();
   const projectId = id ? Number(id) : NaN;
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { users } = useUserContext();
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
+  const [drawerTab, setDrawerTab] = useState<"details" | "outputs" | "logs">("details");
+  const [overviewView, setOverviewView] = useState<"operations" | "impact">("operations");
   const [view, setView] = useState<"list" | "board" | "timeline">("list");
   const [dragOverStatus, setDragOverStatus] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<TaskType | "all">("all");
+  const [phaseFilter, setPhaseFilter] = useState<number | "all" | "unassigned">("all");
+  const [showCompleted, setShowCompleted] = useState(true);
+  const [showBlockedOnly, setShowBlockedOnly] = useState(false);
+  const [collapsedPhases, setCollapsedPhases] = useState<Record<number, boolean>>({});
+  const [localTasks, setLocalTasks] = useState<Task[]>([]);
+  const [impactShowFinancials, setImpactShowFinancials] = useState(false);
+  const [impactForm, setImpactForm] = useState({
+    totalSavingsToDate: "",
+    costReductionRealisedPct: "",
+    marginImpactToDate: "",
+    projectedAnnualImpact: "",
+    governanceControls: {
+      promptsLocked: false,
+      auditLogEnabled: false,
+      humanSignoffRequired: false,
+      evalMonitoringEnabled: false,
+      accessControlEnabled: false,
+    } as Required<GovernanceControls>,
+  });
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  const { data: project } = useQuery<ProjectDetail>({
+    queryKey: ["/api/projects", projectId],
+    enabled: Number.isFinite(projectId),
+  });
+
+  const { data: workflowTemplate } = useQuery<{
+    id: number;
+    name: string;
+    timesUsed?: number | null;
+    governanceMaturity?: number | null;
+    deploymentStatus?: string | null;
+    baselineCost?: number | null;
+    aiCost?: number | null;
+  }>({
+    queryKey: ["/api/workflows", project?.workflowTemplateId],
+    enabled: Number.isFinite(project?.workflowTemplateId),
+  });
+
+  const saveImpactMutation = useMutation({
+    mutationFn: async () => {
+      const parseNumber = (value: string) => {
+        const cleaned = value.replace(/[^0-9.-]/g, "");
+        if (!cleaned) return null;
+        const parsed = Number(cleaned);
+        return Number.isFinite(parsed) ? parsed : null;
+      };
+      const payload = {
+        governanceControls: impactForm.governanceControls,
+        totalSavingsToDate: parseNumber(impactForm.totalSavingsToDate),
+        costReductionRealisedPct: parseNumber(impactForm.costReductionRealisedPct),
+        marginImpactToDate: parseNumber(impactForm.marginImpactToDate),
+        projectedAnnualImpact: parseNumber(impactForm.projectedAnnualImpact),
+      };
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId] });
+      setToast({ message: "Impact settings saved.", type: "success" });
+    },
+    onError: () => {
+      setToast({ message: "Failed to save impact settings.", type: "error" });
+    },
+  });
+
+  const updateTaskMutation = useMutation({
+    mutationFn: async ({ taskId, payload }: { taskId: number; payload: Record<string, unknown> }) => {
+      const res = await apiRequest("PATCH", `/api/projects/${projectId}/tasks/${taskId}`, payload);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "management"] });
+    },
+    onError: () => {
+      setToast({ message: "Failed to update task.", type: "error" });
+    },
+  });
 
   const { data: managementData, isLoading } = useQuery<ManagementData>({
     queryKey: ["/api/projects", projectId, "management"],
@@ -138,480 +459,1365 @@ export default function ProjectManagement() {
     enabled: Number.isFinite(projectId),
   });
 
-  const updateTaskMutation = useMutation({
-    mutationFn: async ({ taskId, payload }: { taskId: number; payload: Record<string, unknown> }) => {
-      const res = await fetch(`/api/projects/${projectId}/tasks/${taskId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "management"] });
-    },
-  });
-
-  const phases = useMemo(() => {
-    return [...(managementData?.phases || [])].sort((a, b) => a.sortOrder - b.sortOrder);
+  const phases = useMemo<Phase[]>(() => {
+    return (managementData?.phases || [])
+      .map((phase) => ({ id: phase.id, name: phase.title, order: phase.sortOrder }))
+      .sort((a, b) => a.order - b.order);
   }, [managementData?.phases]);
 
+  const workflowSteps = useMemo(() => managementData?.workflowSteps || [], [managementData?.workflowSteps]);
+  const workflowStepMap = useMemo(() => {
+    const map = new Map<number, WorkflowStep>();
+    workflowSteps.forEach((step) => map.set(step.id, step));
+    return map;
+  }, [workflowSteps]);
+
+  useEffect(() => {
+    if (!managementData?.tasks) return;
+    setLocalTasks((prev) => {
+      const previousMap = new Map(prev.map((task) => [task.id, task]));
+      return managementData.tasks
+        .map((task) => {
+          const baseTask: Task = {
+            id: task.id,
+            title: task.title,
+            subtitle: task.subtitle || task.description || undefined,
+            description: task.description || "",
+            phaseId: task.phaseId ?? null,
+            taskType: task.taskType ? normalizeTaskType(task.taskType) : normalizeTaskType(task.ownerType),
+            status: normalizeTaskStatus(task.status),
+            responsibleId: task.assigneeUserId ?? null,
+            dependsOn: Array.isArray(task.dependsOn)
+              ? task.dependsOn.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+              : [],
+            workflowId: task.workflowStepId ?? null,
+            execution: (task.ownerType === "agent" || task.taskType === "agent")
+              ? buildExecution(normalizeTaskStatus(task.status))
+              : undefined,
+            gate: task.gateJson
+              ? (task.gateJson as Record<string, unknown>)
+              : (task.ownerType === "client" || task.taskType === "client")
+                ? { gateType: "approval" }
+                : undefined,
+            sortOrder: task.sortOrder,
+          };
+          const previous = previousMap.get(task.id);
+          if (!previous) return baseTask;
+          return {
+            ...baseTask,
+            ...previous,
+            title: baseTask.title,
+            sortOrder: baseTask.sortOrder,
+          };
+        })
+        .sort((a, b) => a.sortOrder - b.sortOrder);
+    });
+  }, [managementData?.tasks]);
+
+  const taskMap = useMemo(() => {
+    return new Map(localTasks.map((task) => [task.id, task]));
+  }, [localTasks]);
+
+  type ComputedTask = Task & { isBlocked: boolean; blockedByIds: number[]; blockedByLabels: string[] };
+
+  const computedTasks = useMemo<ComputedTask[]>(() => {
+    return localTasks.map((task) => {
+      const blockedByIds = getBlockingDependencies(task, taskMap);
+      const blockedByLabels = blockedByIds.map((id) => taskMap.get(id)?.title || "Missing task");
+      return {
+        ...task,
+        isBlocked: blockedByIds.length > 0,
+        blockedByIds,
+        blockedByLabels,
+      };
+    });
+  }, [localTasks, taskMap]);
+
+  const computedTaskById = useMemo(() => {
+    const map = new Map<number, ComputedTask>();
+    computedTasks.forEach((task) => map.set(task.id, task));
+    return map;
+  }, [computedTasks]);
+
+  const selectedTask = selectedTaskId ? computedTaskById.get(selectedTaskId) ?? null : null;
+  const selectedDeliverables = useMemo(() => {
+    if (!selectedTask?.workflowId) return [];
+    return deliverables.filter((d) => d.stepId === selectedTask.workflowId);
+  }, [deliverables, selectedTask?.workflowId]);
+
+  const phaseLookup = useMemo(() => {
+    const map = new Map<number, string>();
+    phases.forEach((phase) => map.set(phase.id, phase.name));
+    return map;
+  }, [phases]);
+
+  const phaseOrderMap = useMemo(() => {
+    const map = new Map<number, number>();
+    phases.forEach((phase) => map.set(phase.id, phase.order));
+    return map;
+  }, [phases]);
+
   const tasksByPhase = useMemo(() => {
-    const map = new Map<number | null, ProjectTask[]>();
-    (managementData?.tasks || []).forEach((task) => {
+    const map = new Map<number | null, ComputedTask[]>();
+    computedTasks.forEach((task) => {
       const key = task.phaseId ?? null;
       if (!map.has(key)) map.set(key, []);
       map.get(key)?.push(task);
     });
-    map.forEach((tasks) => tasks.sort((a, b) => a.sortOrder - b.sortOrder));
+    map.forEach((tasks, key) => {
+      map.set(key, sortTasksByDependencies(tasks));
+    });
     return map;
-  }, [managementData?.tasks]);
+  }, [computedTasks]);
 
-  const taskById = useMemo(() => {
-    const map = new Map<number, ProjectTask>();
-    (managementData?.tasks || []).forEach((task) => map.set(task.id, task));
+  const phaseCounts = useMemo(() => {
+    const map = new Map<number | null, { done: number; total: number }>();
+    computedTasks.forEach((task) => {
+      const key = task.phaseId ?? null;
+      if (!map.has(key)) map.set(key, { done: 0, total: 0 });
+      const entry = map.get(key);
+      if (!entry) return;
+      entry.total += 1;
+      if (task.status === "complete") entry.done += 1;
+    });
     return map;
-  }, [managementData?.tasks]);
+  }, [computedTasks]);
 
-  const selectedTask = selectedTaskId ? taskById.get(selectedTaskId) ?? null : null;
-  const selectedDeliverables = useMemo(() => {
-    if (!selectedTask?.workflowStepId) return [];
-    return deliverables.filter((d) => d.stepId === selectedTask.workflowStepId);
-  }, [deliverables, selectedTask?.workflowStepId]);
-
-  const selectedLocked = selectedTask?.status === "complete";
-
-  const [notes, setNotes] = useState("");
-  const [notesDirty, setNotesDirty] = useState(false);
+  const currentPhaseId = useMemo(() => {
+    if (phases.length === 0) return null;
+    for (const phase of phases) {
+      const tasks = tasksByPhase.get(phase.id) || [];
+      if (tasks.some((task) => task.status !== "complete")) return phase.id;
+    }
+    return phases[phases.length - 1]?.id ?? null;
+  }, [phases, tasksByPhase]);
 
   useEffect(() => {
-    if (!selectedTask) {
-      setNotes("");
-      setNotesDirty(false);
-      return;
-    }
-    setNotes(selectedTask.description || "");
-    setNotesDirty(false);
-  }, [selectedTask?.id]);
-
-  const saveNotes = useCallback(() => {
-    if (!selectedTask || !notesDirty) return;
-    updateTaskMutation.mutate({
-      taskId: selectedTask.id,
-      payload: { description: notes },
+    if (Object.keys(collapsedPhases).length > 0 || phases.length === 0) return;
+    const next: Record<number, boolean> = {};
+    phases.forEach((phase) => {
+      next[phase.id] = false;
     });
-    setNotesDirty(false);
-  }, [notes, notesDirty, selectedTask, updateTaskMutation]);
+    setCollapsedPhases(next);
+  }, [phases, collapsedPhases]);
 
-  const allTasks = useMemo(() => {
-    return [...(managementData?.tasks || [])].sort((a, b) => a.sortOrder - b.sortOrder);
-  }, [managementData?.tasks]);
-
-  const assigneeOptions = useMemo(() => {
-    const humanOptions = users.map((user) => ({ value: `human:${user.id}`, label: user.name, group: "Humans" }));
-    const workflowOptions = (managementData?.workflowSteps || []).map((step) => ({
-      value: `workflow:${step.id}`,
-      label: step.name,
-      group: "Agentic workflows",
-    }));
-    return [...humanOptions, ...workflowOptions];
-  }, [managementData?.workflowSteps, users]);
-
-  const groupedAssigneeOptions = useMemo(() => {
-    const groups = new Map<string, { value: string; label: string }[]>();
-    assigneeOptions.forEach((option) => {
-      if (!groups.has(option.group)) groups.set(option.group, []);
-      groups.get(option.group)?.push({ value: option.value, label: option.label });
-    });
-    return Array.from(groups.entries());
-  }, [assigneeOptions]);
-
-  const getAssigneeValue = useCallback((task: ProjectTask) => {
-    if (task.ownerType === "human") {
-      return task.assigneeUserId ? `human:${task.assigneeUserId}` : "unassigned";
-    }
-    if (task.ownerType === "agent") {
-      return task.workflowStepId ? `workflow:${task.workflowStepId}` : "unassigned";
-    }
-    return "unassigned";
-  }, []);
-
-  const getAssigneeLabel = useCallback(
-    (value: string) => {
-      if (value === "unassigned") return "Unassigned";
-      const found = assigneeOptions.find((option) => option.value === value);
-      return found?.label ?? "Unassigned";
+  const getResponsibleLabel = useCallback(
+    (task: Task) => {
+      if (task.taskType === "human") {
+        const user = users.find((item) => item.id === task.responsibleId);
+        return user?.name || "Unassigned";
+      }
+      if (task.taskType === "agent") {
+        const workflow = task.workflowId ? workflowStepMap.get(task.workflowId) : null;
+        return workflow?.name || "Unassigned";
+      }
+      return task.gate?.clientOwner || "Client";
     },
-    [assigneeOptions]
+    [users, workflowStepMap]
   );
 
-  const getOwnerLabel = useCallback((task: ProjectTask) => {
-    return task.ownerType === "agent" ? "Agent" : "Human";
+  const updateTask = useCallback((taskId: number, updater: (task: Task) => Task) => {
+    setLocalTasks((prev) => prev.map((task) => (task.id === taskId ? updater(task) : task)));
   }, []);
-
-  const handleAssigneeChange = useCallback(
-    (taskId: number, value: string) => {
-      if (value === "unassigned") {
-        updateTaskMutation.mutate({
-          taskId,
-          payload: { assigneeUserId: null, workflowStepId: null },
-        });
-        return;
-      }
-      if (value.startsWith("human:")) {
-        updateTaskMutation.mutate({
-          taskId,
-          payload: { ownerType: "human", assigneeUserId: Number(value.split(":")[1]), workflowStepId: null },
-        });
-        return;
-      }
-      if (value.startsWith("workflow:")) {
-        updateTaskMutation.mutate({
-          taskId,
-          payload: { ownerType: "agent", workflowStepId: Number(value.split(":")[1]), assigneeUserId: null },
-        });
-      }
-    },
-    [updateTaskMutation]
-  );
 
   const handleStatusChange = useCallback(
-    (taskId: number, status: string) => {
-      updateTaskMutation.mutate({ taskId, payload: { status } });
+    (taskId: number, nextStatus: TaskStatus) => {
+      setLocalTasks((prev) => {
+        const map = new Map(prev.map((task) => [task.id, task]));
+        return prev.map((task) => {
+          if (task.id !== taskId) return task;
+          if (!STATUS_BY_TYPE[task.taskType].includes(nextStatus)) return task;
+          const blockedByIds = getBlockingDependencies(task, map);
+          if ((nextStatus === "in_progress" || nextStatus === "running") && blockedByIds.length > 0) {
+            return { ...task, status: "blocked" };
+          }
+          return { ...task, status: nextStatus };
+        });
+      });
     },
-    [updateTaskMutation]
+    []
   );
 
   const handleStatusDrop = useCallback(
-    (taskId: number, status: string) => {
-      updateTaskMutation.mutate({ taskId, payload: { status } });
+    (taskId: number, nextStatus: TaskStatus) => {
+      handleStatusChange(taskId, nextStatus);
     },
-    [updateTaskMutation]
+    [handleStatusChange]
   );
 
+  const handleRunTask = useCallback(
+    (taskId: number) => {
+      const startedAt = new Date().toISOString();
+      setLocalTasks((prev) =>
+        prev.map((task) => {
+          if (task.id !== taskId || task.taskType !== "agent") return task;
+          const nextEntry: ExecutionHistory = {
+            id: `${task.id}-${Date.now()}`,
+            state: "running",
+            startedAt,
+            summary: "Run started",
+            output: { id: `${task.id}-out-${Date.now()}`, title: `${task.title} output`, type: "artifact" },
+          };
+          const history = [nextEntry, ...(task.execution?.history || [])];
+          return {
+            ...task,
+            status: "running",
+            execution: {
+              state: "running",
+              lastRunAt: startedAt,
+              lastResult: "Running",
+              history,
+            },
+          };
+        })
+      );
+      fetch(`/api/projects/${projectId}/tasks/${taskId}/run`, { method: "POST" }).catch(() => null);
+    },
+    [projectId]
+  );
+
+  const openTaskDrawer = useCallback((taskId: number, _tab: "details" | "outputs" | "logs" = "details") => {
+    setSelectedTaskId(null);
+    setDrawerTab("details");
+    if (!Number.isFinite(projectId)) return;
+    navigate(`/project/${projectId}/management/task/${taskId}`);
+  }, [navigate, projectId]);
+
+  const handleDependencyAdd = useCallback((taskId: number, depId: number) => {
+    updateTask(taskId, (task) => {
+      if (task.dependsOn.includes(depId) || task.id === depId) return task;
+      return { ...task, dependsOn: [...task.dependsOn, depId] };
+    });
+  }, [updateTask]);
+
+  const handleDependencyRemove = useCallback((taskId: number, depId: number) => {
+    updateTask(taskId, (task) => ({ ...task, dependsOn: task.dependsOn.filter((id) => id !== depId) }));
+  }, [updateTask]);
 
   const tasksByStatus = useMemo(() => {
-    const map = new Map<string, ProjectTask[]>();
+    const map = new Map<TaskStatus, ComputedTask[]>();
     TASK_STATUS_OPTIONS.forEach((option) => map.set(option.value, []));
-    allTasks.forEach((task) => {
+    computedTasks.forEach((task) => {
       if (!map.has(task.status)) map.set(task.status, []);
       map.get(task.status)?.push(task);
     });
     return map;
-  }, [allTasks]);
+  }, [computedTasks]);
 
-  const phaseLookup = useMemo(() => {
-    const map = new Map<number, string>();
-    phases.forEach((phase) => map.set(phase.id, phase.title));
+  const projectSummary = useMemo<ProjectSummary>(() => {
+    const totalTasks = computedTasks.length;
+    const completedTasks = computedTasks.filter((task) => task.status === "complete").length;
+    const progressPercent = totalTasks === 0 ? 0 : Math.round((completedTasks / totalTasks) * 100);
+
+    const gateTasks = computedTasks.filter((task) => task.taskType === "client");
+    const awaitingClient = gateTasks.filter((task) => task.status === "awaiting_client").length;
+    const underReview = gateTasks.filter((task) => task.status === "under_review").length;
+    const reworkRequired = gateTasks.filter((task) => task.status === "rework_required").length;
+    const gateSummaryParts = [
+      awaitingClient ? `${awaitingClient} awaiting client` : null,
+      underReview ? `${underReview} under review` : null,
+      reworkRequired ? `${reworkRequired} rework requested` : null,
+    ].filter(Boolean);
+    const gateSummary = gateSummaryParts.length > 0 ? gateSummaryParts.join(" · ") : "No pending client gates";
+
+    const sortedByPriority = [...computedTasks].sort((a, b) => {
+      const phaseOrderA = a.phaseId ? phaseOrderMap.get(a.phaseId) ?? 999 : 999;
+      const phaseOrderB = b.phaseId ? phaseOrderMap.get(b.phaseId) ?? 999 : 999;
+      return phaseOrderA - phaseOrderB || a.sortOrder - b.sortOrder;
+    });
+
+    const blockedTask = sortedByPriority.find((task) => task.isBlocked);
+    const currentPhaseTasks = currentPhaseId ? tasksByPhase.get(currentPhaseId) || [] : [];
+    const nextTask = currentPhaseTasks.find((task) => task.status !== "complete");
+
+    let bottleneckLabel = "No blockers";
+    let bottleneckDetail = "Ready to execute next task.";
+    let recommendedAction = "Keep executing the current phase.";
+
+    if (blockedTask) {
+      bottleneckLabel = "Blocked";
+      bottleneckDetail = `Blocked by: ${blockedTask.blockedByLabels.join(", ")}`;
+      recommendedAction = `Unblock ${blockedTask.title}`;
+    } else if (awaitingClient > 0) {
+      bottleneckLabel = "Awaiting client";
+      bottleneckDetail = gateSummary;
+      const nextGate = gateTasks.find((task) => task.status === "awaiting_client");
+      recommendedAction = nextGate ? `Follow up on ${nextGate.title}` : "Follow up on client approvals";
+    } else if (nextTask) {
+      bottleneckLabel = "Next up";
+      bottleneckDetail = nextTask.title;
+      recommendedAction = `Start ${nextTask.title}`;
+    } else {
+      bottleneckLabel = "All clear";
+      bottleneckDetail = "No remaining tasks in current phase.";
+      recommendedAction = "Review final outputs and close the project.";
+    }
+
+    return {
+      currentPhaseId,
+      progressPercent,
+      gateSummary,
+      bottleneckLabel,
+      bottleneckDetail,
+      recommendedAction,
+    };
+  }, [computedTasks, currentPhaseId, phaseOrderMap, tasksByPhase]);
+
+  const filteredTasksByPhase = useMemo(() => {
+    const map = new Map<number | null, ComputedTask[]>();
+    computedTasks.forEach((task) => {
+      if (typeFilter !== "all" && task.taskType !== typeFilter) return;
+      if (phaseFilter === "unassigned" && task.phaseId !== null) return;
+      if (phaseFilter !== "all" && phaseFilter !== "unassigned" && task.phaseId !== phaseFilter) return;
+      if (!showCompleted && task.status === "complete") return;
+      if (showBlockedOnly && !task.isBlocked) return;
+      const key = task.phaseId ?? null;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)?.push(task);
+    });
+    map.forEach((tasks, key) => {
+      map.set(key, sortTasksByDependencies(tasks));
+    });
     return map;
-  }, [phases]);
+  }, [computedTasks, phaseFilter, showBlockedOnly, showCompleted, typeFilter]);
 
-  const unassignedTasks = tasksByPhase.get(null) || [];
+  const unassignedTasks = filteredTasksByPhase.get(null) || [];
 
-  const ganttWeeks = 10;
-  const ganttWeekWidth = 72;
+  const [notesDraft, setNotesDraft] = useState("");
 
-  const getDummyDuration = useCallback((task: ProjectTask) => {
-    return 1 + (task.id % 3);
+  useEffect(() => {
+    if (!selectedTask) {
+      setNotesDraft("");
+      return;
+    }
+    setNotesDraft(selectedTask.description || "");
+  }, [selectedTask?.id]);
+
+  const currentPhaseName = projectSummary.currentPhaseId
+    ? phaseLookup.get(projectSummary.currentPhaseId) || "Current phase"
+    : "Complete";
+
+  useEffect(() => {
+    const storedView = localStorage.getItem("project-management-view");
+    if (storedView === "impact") setOverviewView("impact");
   }, []);
 
-  const buildGanttSchedule = useCallback((tasks: ProjectTask[]) => {
-    const sorted = [...tasks].sort((a, b) => a.sortOrder - b.sortOrder);
-    let cursor = 0;
-    return sorted.map((task) => {
-      const duration = getDummyDuration(task);
-      const start = cursor;
-      cursor += duration;
-      return {
-        task,
-        start,
-        duration,
-        end: cursor,
-      };
-    });
-  }, [getDummyDuration]);
+  useEffect(() => {
+    localStorage.setItem("project-management-view", overviewView);
+  }, [overviewView]);
 
-  const ganttByPhase = useMemo(() => {
-    const entries = phases.map((phase) => ({
-      phase,
-      schedule: buildGanttSchedule(tasksByPhase.get(phase.id) || []),
-    }));
-    if (unassignedTasks.length > 0) {
-      entries.push({
-        phase: { id: -1, title: "Unassigned" } as ProjectPhase,
-        schedule: buildGanttSchedule(unassignedTasks),
-      });
+  useEffect(() => {
+    const storedFinancials = localStorage.getItem("project-impact-show-financials");
+    if (storedFinancials === "true") setImpactShowFinancials(true);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("project-impact-show-financials", `${impactShowFinancials}`);
+  }, [impactShowFinancials]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+
+  const currencyFormatter = useMemo(() => new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }), []);
+
+  const percentFormatter = useMemo(() => new Intl.NumberFormat("en-US", {
+    style: "percent",
+    maximumFractionDigits: 1,
+  }), []);
+
+  const stripNumber = useCallback((value: string) => value.replace(/[^0-9.-]/g, ""), []);
+  const formatCurrencyInput = useCallback(
+    (value: string) => {
+      const cleaned = stripNumber(value);
+      if (!cleaned) return "";
+      const parsed = Number(cleaned);
+      if (!Number.isFinite(parsed)) return "";
+      return currencyFormatter.format(parsed);
+    },
+    [currencyFormatter, stripNumber]
+  );
+  const formatPercentInput = useCallback(
+    (value: string) => {
+      const cleaned = stripNumber(value);
+      if (!cleaned) return "";
+      let parsed = Number(cleaned);
+      if (!Number.isFinite(parsed)) return "";
+      if (parsed > 1) parsed = parsed / 100;
+      return percentFormatter.format(parsed);
+    },
+    [percentFormatter, stripNumber]
+  );
+
+  useEffect(() => {
+    if (!project) return;
+    setImpactForm({
+      totalSavingsToDate:
+        project.totalSavingsToDate != null ? formatCurrencyInput(String(project.totalSavingsToDate)) : "",
+      costReductionRealisedPct:
+        project.costReductionRealisedPct != null ? formatPercentInput(String(project.costReductionRealisedPct)) : "",
+      marginImpactToDate:
+        project.marginImpactToDate != null ? formatCurrencyInput(String(project.marginImpactToDate)) : "",
+      projectedAnnualImpact:
+        project.projectedAnnualImpact != null ? formatCurrencyInput(String(project.projectedAnnualImpact)) : "",
+      governanceControls: {
+        promptsLocked: Boolean(project.governanceControls?.promptsLocked),
+        auditLogEnabled: Boolean(project.governanceControls?.auditLogEnabled),
+        humanSignoffRequired: Boolean(project.governanceControls?.humanSignoffRequired),
+        evalMonitoringEnabled: Boolean(project.governanceControls?.evalMonitoringEnabled),
+        accessControlEnabled: Boolean(project.governanceControls?.accessControlEnabled),
+      },
+    });
+  }, [formatCurrencyInput, formatPercentInput, project]);
+
+  const governanceControls = project?.governanceControls || {};
+  const agentCompleted = computedTasks.filter((task) => task.taskType === "agent" && task.status === "complete").length;
+  const humanCompleted = computedTasks.filter((task) => task.taskType === "human" && task.status === "complete").length;
+
+  const impactSummaryItems = useMemo(() => {
+    const items: Array<{ label: string; value: string }> = [];
+    if (typeof project?.totalSavingsToDate === "number") {
+      items.push({ label: "Total savings to date", value: currencyFormatter.format(project.totalSavingsToDate) });
     }
-    return entries;
-  }, [phases, tasksByPhase, buildGanttSchedule, unassignedTasks]);
+    if (typeof project?.costReductionRealisedPct === "number") {
+      items.push({ label: "Cost reduction realised", value: percentFormatter.format(project.costReductionRealisedPct) });
+    }
+    if (typeof project?.marginImpactToDate === "number") {
+      items.push({ label: "Margin impact to date", value: currencyFormatter.format(project.marginImpactToDate) });
+    }
+    items.push({ label: "AI workflows executed", value: String(agentCompleted) });
+    items.push({ label: "Human tasks executed", value: String(humanCompleted) });
+    items.push({
+      label: "Governance maturity",
+      value: `Level ${workflowTemplate?.governanceMaturity ?? 1}`,
+    });
+    items.push({
+      label: "Deployment status",
+      value: workflowTemplate?.deploymentStatus || "sandbox",
+    });
+    if (typeof project?.projectedAnnualImpact === "number") {
+      items.push({ label: "Projected annual impact", value: currencyFormatter.format(project.projectedAnnualImpact) });
+    }
+    return items;
+  }, [agentCompleted, currencyFormatter, humanCompleted, percentFormatter, project, workflowTemplate?.deploymentStatus, workflowTemplate?.governanceMaturity]);
+
+  const impactWorkflowRows = useMemo(() => {
+    if (!workflowTemplate) return [];
+    return [
+      {
+        id: workflowTemplate.id,
+        name: workflowTemplate.name,
+        timesUsed: workflowTemplate.timesUsed ?? 0,
+        governanceMaturity: workflowTemplate.governanceMaturity ?? 1,
+        baselineCost: workflowTemplate.baselineCost ?? null,
+        aiCost: workflowTemplate.aiCost ?? null,
+      },
+    ];
+  }, [workflowTemplate]);
 
   return (
     <div className="min-w-0 w-full space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-foreground">Project Management</h2>
-          <p className="text-sm text-muted-foreground">Track tasks across list, board, and timeline views.</p>
+          <p className="text-sm text-muted-foreground">Orchestrate phases, agents, and client gates.</p>
         </div>
-        <div className="flex items-center gap-2 rounded-full border border-border bg-background p-1">
-          {[
-            { value: "list", label: "List" },
-            { value: "board", label: "Board" },
-            { value: "timeline", label: "Timeline" },
-          ].map((tab) => (
-            <button
-              key={tab.value}
-              onClick={() => setView(tab.value as "list" | "board" | "timeline")}
-              className={cn(
-                "px-3 py-1.5 text-xs font-semibold rounded-full transition-colors",
-                view === tab.value
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 rounded-full border border-border bg-background px-2 py-1 text-xs font-semibold text-muted-foreground">
+            <span>View:</span>
+            <div className="flex items-center gap-1 rounded-full bg-muted p-0.5">
+              {[
+                { value: "operations", label: "Operations" },
+                { value: "impact", label: "Impact" },
+              ].map((tab) => (
+                <button
+                  key={tab.value}
+                  onClick={() => setOverviewView(tab.value as "operations" | "impact")}
+                  className={cn(
+                    "px-3 py-1 text-xs font-semibold rounded-full transition-colors",
+                    overviewView === tab.value
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {overviewView === "operations" && (
+            <div className="flex items-center gap-2 rounded-full border border-border bg-background p-1">
+              {[
+                { value: "list", label: "List" },
+                { value: "board", label: "Board" },
+                { value: "timeline", label: "Timeline" },
+              ].map((tab) => (
+                <button
+                  key={tab.value}
+                  onClick={() => setView(tab.value as "list" | "board" | "timeline")}
+                  className={cn(
+                    "px-3 py-1.5 text-xs font-semibold rounded-full transition-colors",
+                    view === tab.value
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {isLoading ? (
-        <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-          Loading tasks...
+      {toast && (
+        <div
+          className={cn(
+            "fixed right-4 top-4 z-50 rounded-lg border px-4 py-2 text-sm shadow-lg",
+            toast.type === "success"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border-rose-200 bg-rose-50 text-rose-700"
+          )}
+        >
+          {toast.message}
         </div>
-      ) : allTasks.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-          Add tasks to get started.
-        </div>
-      ) : view === "list" ? (
-        <div className="rounded-xl border border-border bg-background overflow-x-auto">
-          <div className="min-w-[900px]">
-            <div className="grid grid-cols-[minmax(220px,2fr)_140px_200px_120px_160px_60px] gap-3 px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-border">
-              <div>Task</div>
-              <div>Status</div>
-              <div>Assignee</div>
-              <div>Owner</div>
-              <div>Phase</div>
-              <div></div>
+      )}
+
+      {overviewView === "operations" ? (
+        <Card className="p-4 bg-gradient-to-br from-muted/40 via-background to-background border-border/80">
+          <div className="grid gap-4 md:grid-cols-[1.2fr_0.9fr_1fr_1.1fr_1.1fr_1.2fr]">
+            <div className="space-y-2">
+              <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Project</div>
+              <div className="text-base font-semibold text-foreground truncate">{project?.name || "Project"}</div>
             </div>
-            {allTasks.map((task) => {
-              const statusMeta = getStatusMeta(task.status);
-              const statusStyles = getStatusStyles(task.status);
-              return (
-                <div
-                  key={task.id}
-                  className="grid grid-cols-[minmax(220px,2fr)_140px_200px_120px_160px_60px] gap-3 px-4 py-3 text-sm border-b border-border hover:bg-muted/30 cursor-pointer"
-                  onClick={() => setSelectedTaskId(task.id)}
-                >
-                  <div className="min-w-0">
-                    <div className="font-semibold text-foreground truncate">{task.title}</div>
-                    <div className="text-xs text-muted-foreground truncate">{task.description || "No description"}</div>
-                  </div>
-                  <div>
-                    <div className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${statusStyles.chip}`}>
-                      <statusMeta.Icon className="h-3 w-3" />
-                      {statusMeta.label}
-                    </div>
-                  </div>
-                  <div>
-                    <select
-                      value={getAssigneeValue(task)}
-                      onChange={(event) => handleAssigneeChange(task.id, event.target.value)}
-                      className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <option value="unassigned">Unassigned</option>
-                      {groupedAssigneeOptions.map(([group, options]) => (
-                        <optgroup key={group} label={group}>
-                          {options.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="text-xs text-muted-foreground">{getOwnerLabel(task)}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {task.phaseId ? phaseLookup.get(task.phaseId) : "Unassigned"}
-                  </div>
-                  <div className="flex justify-end">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setSelectedTaskId(task.id);
-                      }}
-                    >
-                      <ArrowUpRight className="h-4 w-4" />
-                    </Button>
-                  </div>
+            <div className="space-y-2">
+              <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Current phase</div>
+              <div className="text-sm font-semibold text-foreground truncate">{currentPhaseName}</div>
+              <div className="text-xs text-muted-foreground">Derived from remaining tasks</div>
+            </div>
+            <div className="space-y-2">
+              <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Progress</div>
+              <div className="flex items-center gap-2">
+                <div className="h-2 w-full rounded-full bg-muted">
+                  <div
+                    className="h-2 rounded-full bg-emerald-500"
+                    style={{ width: `${projectSummary.progressPercent}%` }}
+                  />
                 </div>
-              );
-            })}
+                <span className="text-[11px] font-semibold text-muted-foreground">{projectSummary.progressPercent}%</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Gate status</div>
+              <div className="text-sm text-foreground">{projectSummary.gateSummary}</div>
+              <div className="text-xs text-muted-foreground">Client approvals and review gates</div>
+            </div>
+            <div className="space-y-2">
+              <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Bottleneck</div>
+              <div className="text-sm font-semibold text-foreground">{projectSummary.bottleneckLabel}</div>
+              <div className="text-xs text-muted-foreground line-clamp-2">{projectSummary.bottleneckDetail}</div>
+            </div>
+            <div className="space-y-2">
+              <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Recommended next action</div>
+              <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-sm font-semibold text-foreground">
+                {projectSummary.recommendedAction}
+              </div>
+            </div>
           </div>
-        </div>
-      ) : view === "board" ? (
-        <div className="grid gap-4 lg:grid-cols-5">
-          {TASK_STATUS_OPTIONS.map((column) => {
-            const columnTasks = tasksByStatus.get(column.value) || [];
-            return (
-              <div
-                key={column.value}
-                className={cn(
-                  "rounded-xl border border-border bg-muted/30 p-3 transition-colors",
-                  dragOverStatus === column.value && "border-primary/60 bg-primary/5"
-                )}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  setDragOverStatus(column.value);
-                }}
-                onDragLeave={() => setDragOverStatus((current) => (current === column.value ? null : current))}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  const raw = event.dataTransfer.getData("text/plain");
-                  const taskId = Number(raw);
-                  if (Number.isFinite(taskId)) {
-                    handleStatusDrop(taskId, column.value);
-                  }
-                  setDragOverStatus(null);
-                }}
-              >
-                <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <span>{column.label}</span>
-                  <span>{columnTasks.length}</span>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          <Card className="p-4 bg-gradient-to-br from-muted/40 via-background to-background border-border/80">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {impactSummaryItems.map((item) => (
+                <div key={item.label} className="rounded-lg border border-border/60 bg-background/80 px-3 py-3">
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">{item.label}</div>
+                  <div className="mt-2 text-base font-semibold text-foreground">{item.value}</div>
                 </div>
-                <div className="mt-3 space-y-2">
-                  {columnTasks.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
-                      No tasks
-                    </div>
-                  ) : (
-                    columnTasks.map((task) => {
-                      const statusStyles = getStatusStyles(task.status);
-                      return (
-                        <div
-                          key={task.id}
-                          draggable
-                          onDragStart={(event) => {
-                            event.dataTransfer.setData("text/plain", String(task.id));
-                            event.dataTransfer.effectAllowed = "move";
-                          }}
-                          className={cn(
-                            "rounded-lg border px-3 py-2 bg-background cursor-pointer hover:shadow-sm transition-shadow",
-                            statusStyles.card
-                          )}
-                          onClick={() => setSelectedTaskId(task.id)}
-                        >
-                          <div className="text-sm font-semibold text-foreground truncate">{task.title}</div>
-                          <div className="mt-1 text-[11px] text-muted-foreground truncate">
-                            {getAssigneeLabel(getAssigneeValue(task))}
+              ))}
+            </div>
+          </Card>
+
+          <Card className="p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-foreground">Governance controls</div>
+                <div className="text-xs text-muted-foreground">Controls tied to compliance and review requirements.</div>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => saveImpactMutation.mutate()}>
+                Save governance + impact
+              </Button>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {[
+                { key: "promptsLocked", label: "Prompts locked & versioned" },
+                { key: "auditLogEnabled", label: "Input/output audit log enabled" },
+                { key: "humanSignoffRequired", label: "Human sign-off required" },
+                { key: "evalMonitoringEnabled", label: "Evaluation monitoring enabled" },
+                { key: "accessControlEnabled", label: "Access control enabled" },
+              ].map((control) => {
+                const enabled = Boolean(impactForm.governanceControls[control.key as keyof GovernanceControls]);
+                return (
+                  <div key={control.key} className="flex items-center gap-3 rounded-lg border border-border px-3 py-2">
+                    {enabled ? (
+                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                    ) : (
+                      <Circle className="h-4 w-4 text-muted-foreground" />
+                    )}
+                    <span className="text-sm text-foreground">{control.label}</span>
+                    <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={impactForm.governanceControls[control.key as keyof GovernanceControls] as boolean}
+                        onChange={(event) =>
+                          setImpactForm((prev) => ({
+                            ...prev,
+                            governanceControls: {
+                              ...prev.governanceControls,
+                              [control.key]: event.target.checked,
+                            },
+                          }))
+                        }
+                      />
+                      Enabled
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Total savings to date</div>
+                <Input
+                  inputMode="decimal"
+                  value={impactForm.totalSavingsToDate}
+                  onChange={(event) =>
+                    setImpactForm((prev) => ({ ...prev, totalSavingsToDate: event.target.value }))
+                  }
+                  onFocus={(event) =>
+                    setImpactForm((prev) => ({ ...prev, totalSavingsToDate: stripNumber(event.target.value) }))
+                  }
+                  onBlur={(event) =>
+                    setImpactForm((prev) => ({ ...prev, totalSavingsToDate: formatCurrencyInput(event.target.value) }))
+                  }
+                  placeholder="Optional"
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cost reduction realised %</div>
+                <Input
+                  inputMode="decimal"
+                  value={impactForm.costReductionRealisedPct}
+                  onChange={(event) =>
+                    setImpactForm((prev) => ({ ...prev, costReductionRealisedPct: event.target.value }))
+                  }
+                  onFocus={(event) =>
+                    setImpactForm((prev) => ({ ...prev, costReductionRealisedPct: stripNumber(event.target.value) }))
+                  }
+                  onBlur={(event) =>
+                    setImpactForm((prev) => ({ ...prev, costReductionRealisedPct: formatPercentInput(event.target.value) }))
+                  }
+                  placeholder="Optional"
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Margin impact to date</div>
+                <Input
+                  inputMode="decimal"
+                  value={impactForm.marginImpactToDate}
+                  onChange={(event) =>
+                    setImpactForm((prev) => ({ ...prev, marginImpactToDate: event.target.value }))
+                  }
+                  onFocus={(event) =>
+                    setImpactForm((prev) => ({ ...prev, marginImpactToDate: stripNumber(event.target.value) }))
+                  }
+                  onBlur={(event) =>
+                    setImpactForm((prev) => ({ ...prev, marginImpactToDate: formatCurrencyInput(event.target.value) }))
+                  }
+                  placeholder="Optional"
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Projected annual impact</div>
+                <Input
+                  inputMode="decimal"
+                  value={impactForm.projectedAnnualImpact}
+                  onChange={(event) =>
+                    setImpactForm((prev) => ({ ...prev, projectedAnnualImpact: event.target.value }))
+                  }
+                  onFocus={(event) =>
+                    setImpactForm((prev) => ({ ...prev, projectedAnnualImpact: stripNumber(event.target.value) }))
+                  }
+                  onBlur={(event) =>
+                    setImpactForm((prev) => ({ ...prev, projectedAnnualImpact: formatCurrencyInput(event.target.value) }))
+                  }
+                  placeholder="Optional"
+                />
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-foreground">Workflow impact</div>
+                <div className="text-xs text-muted-foreground">Operating leverage and governance by workflow.</div>
+              </div>
+              <label className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={impactShowFinancials}
+                  onChange={(event) => setImpactShowFinancials(event.target.checked)}
+                />
+                Show financials
+              </label>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              <div
+                className={cn(
+                  "grid items-center gap-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground",
+                  impactShowFinancials
+                    ? "grid-cols-[1.6fr_120px_180px_140px_140px_160px]"
+                    : "grid-cols-[2fr_140px_200px]"
+                )}
+              >
+                <div>Workflow</div>
+                <div>Times used</div>
+                <div>Governance maturity</div>
+                {impactShowFinancials && (
+                  <>
+                    <div>Baseline cost</div>
+                    <div>AI-enabled cost</div>
+                    <div>Savings to date</div>
+                  </>
+                )}
+              </div>
+
+              {impactWorkflowRows.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                  No workflows available for this project.
+                </div>
+              ) : (
+                impactWorkflowRows.map((row) => {
+                  const baselineCost = typeof row.baselineCost === "number" ? row.baselineCost! : null;
+                  const aiCost = typeof row.aiCost === "number" ? row.aiCost! : null;
+                  const savingsPerRun = baselineCost != null && aiCost != null ? baselineCost - aiCost : null;
+                  const savingsToDate = savingsPerRun != null ? savingsPerRun * row.timesUsed : null;
+                  return (
+                    <div
+                      key={row.id}
+                      className={cn(
+                        "grid items-center gap-3 rounded-lg border border-border px-4 py-3 text-sm",
+                        impactShowFinancials
+                          ? "grid-cols-[1.6fr_120px_180px_140px_140px_160px]"
+                          : "grid-cols-[2fr_140px_200px]"
+                      )}
+                    >
+                      <div className="font-semibold text-foreground truncate">{row.name}</div>
+                      <div className="text-sm text-foreground">{row.timesUsed}</div>
+                      <div className="text-sm text-foreground">Level {row.governanceMaturity}</div>
+                      {impactShowFinancials && (
+                        <>
+                          <div className="text-sm text-foreground">
+                            {baselineCost == null ? "" : currencyFormatter.format(baselineCost)}
                           </div>
-                          <div className="mt-1 text-[10px] text-muted-foreground flex items-center gap-2">
-                            <span>{getOwnerLabel(task)}</span>
-                            {task.ownerType === "agent" && <Zap className="h-3 w-3 text-primary" />}
-                            {task.status === "complete" && <Lock className="h-3 w-3" />}
+                          <div className="text-sm text-foreground">
+                            {aiCost == null ? "" : currencyFormatter.format(aiCost)}
+                          </div>
+                          <div className="text-sm text-foreground">
+                            {savingsToDate == null ? "" : currencyFormatter.format(savingsToDate)}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {overviewView === "operations" && (
+        <>
+          <Card className="p-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Type</div>
+                <select
+                  value={typeFilter}
+                  onChange={(event) => setTypeFilter(event.target.value as TaskType | "all")}
+                  className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                >
+                  <option value="all">All</option>
+                  <option value="human">Human</option>
+                  <option value="agent">Agent</option>
+                  <option value="client">Client</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Phase</div>
+                <select
+                  value={phaseFilter}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (value === "all") {
+                      setPhaseFilter("all");
+                      return;
+                    }
+                    if (value === "unassigned") {
+                      setPhaseFilter("unassigned");
+                      return;
+                    }
+                    setPhaseFilter(Number(value));
+                  }}
+                  className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                >
+                  <option value="all">All phases</option>
+                  {phases.map((phase) => (
+                    <option key={phase.id} value={phase.id}>
+                      {phase.name}
+                    </option>
+                  ))}
+                  <option value="unassigned">Unassigned</option>
+                </select>
+              </div>
+              <label className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={showCompleted}
+                  onChange={(event) => setShowCompleted(event.target.checked)}
+                />
+                Show completed
+              </label>
+              <label className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={showBlockedOnly}
+                  onChange={(event) => setShowBlockedOnly(event.target.checked)}
+                />
+                Blocked only
+              </label>
+            </div>
+          </Card>
+
+          {isLoading ? (
+            <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+              Loading tasks...
+            </div>
+          ) : computedTasks.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+              Add tasks to get started.
+            </div>
+          ) : view !== "list" ? (
+            <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+              {view === "board" ? "Board view will reuse this data model next." : "Timeline view will reuse this data model next."}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-[minmax(220px,2.1fr)_140px_160px_180px_220px] gap-3 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <div>Task</div>
+                <div>Type</div>
+                <div>Status</div>
+                <div>Responsible</div>
+                <div>Actions</div>
+              </div>
+
+              {phases.map((phase) => {
+                const tasks = filteredTasksByPhase.get(phase.id) || [];
+                const counts = phaseCounts.get(phase.id) || { done: 0, total: 0 };
+                const isCollapsed = collapsedPhases[phase.id];
+                const isCurrent = phase.id === currentPhaseId;
+                if (tasks.length === 0) return null;
+                return (
+                  <Card key={phase.id} className="p-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCollapsedPhases((prev) => ({ ...prev, [phase.id]: !prev[phase.id] }))
+                      }
+                      className="flex w-full items-center justify-between gap-3 border-b border-border px-4 py-3 text-left"
+                    >
+                      <div className="flex items-center gap-2">
+                        {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        <div>
+                          <div className="text-sm font-semibold text-foreground">{phase.name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {counts.done}/{counts.total} complete {isCurrent && "· Current phase"}
                           </div>
                         </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="rounded-xl border border-border bg-background overflow-x-auto">
-          <div className="min-w-[980px]">
-            <div className="grid grid-cols-[220px_1fr] border-b border-border">
-              <div className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Phase</div>
-              <div className="px-4 py-3">
-                <div className="grid" style={{ gridTemplateColumns: `repeat(${ganttWeeks}, ${ganttWeekWidth}px)` }}>
-                  {Array.from({ length: ganttWeeks }, (_, idx) => (
-                    <div key={idx} className="text-[10px] text-muted-foreground text-center">
-                      W{idx + 1}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {ganttByPhase.map(({ phase, schedule }) => (
-              <div key={phase.id} className="grid grid-cols-[220px_1fr] border-b border-border">
-                <div className="px-4 py-4">
-                  <div className="text-xs font-semibold text-foreground truncate">{phase.title}</div>
-                  <div className="text-[10px] text-muted-foreground">{schedule.length} tasks</div>
-                </div>
-                <div className="relative px-4 py-3">
-                  <div
-                    className="grid absolute inset-y-0 left-4 right-4"
-                    style={{ gridTemplateColumns: `repeat(${ganttWeeks}, ${ganttWeekWidth}px)` }}
-                  >
-                    {Array.from({ length: ganttWeeks }, (_, idx) => (
-                      <div key={idx} className="border-l border-dashed border-border/60" />
-                    ))}
-                  </div>
-
-                  <div className="relative">
-                    {schedule.length === 0 ? (
-                      <div className="text-xs text-muted-foreground">No tasks</div>
-                    ) : (
-                      schedule.map((item, index) => {
-                        const statusStyles = getStatusStyles(item.task.status);
-                        const left = item.start * ganttWeekWidth;
-                        const width = Math.max(item.duration * ganttWeekWidth - 8, 48);
-                        const top = index * 32;
-                        return (
-                          <button
-                            key={item.task.id}
-                            className={cn(
-                              "absolute rounded-md border px-2 py-1 text-left text-[10px] font-semibold hover:shadow-sm",
-                              statusStyles.card
-                            )}
-                            style={{ left, top, width }}
-                            onClick={() => setSelectedTaskId(item.task.id)}
-                          >
-                            <div className="truncate">{item.task.title}</div>
-                          </button>
-                        );
-                      })
-                    )}
-
-                    {schedule.length > 1 && (
-                      <svg
-                        className="absolute left-0 top-0"
-                        width={ganttWeeks * ganttWeekWidth}
-                        height={schedule.length * 32}
-                      >
-                        {schedule.map((item, index) => {
-                          if (index === schedule.length - 1) return null;
-                          const next = schedule[index + 1];
-                          const x1 = item.start * ganttWeekWidth + item.duration * ganttWeekWidth - 6;
-                          const y1 = index * 32 + 12;
-                          const x2 = next.start * ganttWeekWidth + 4;
-                          const y2 = (index + 1) * 32 + 12;
+                      </div>
+                      <Badge variant="outline" className="text-xs">
+                        {counts.done}/{counts.total}
+                      </Badge>
+                    </button>
+                    {!isCollapsed && (
+                      <div className="divide-y divide-border">
+                        {tasks.map((task) => {
+                          const typeMeta = TASK_TYPE_META[task.taskType];
+                          const statusMeta = getStatusMeta(task.status);
+                          const statusStyles = getStatusStyles(task.status);
                           return (
-                            <path
-                              key={`${item.task.id}-link`}
-                              d={`M ${x1} ${y1} L ${x2} ${y2}`}
-                              stroke="#94A3B8"
-                              strokeWidth="1.5"
-                              fill="none"
-                            />
+                            <div
+                              key={task.id}
+                              className={cn(
+                                "grid grid-cols-[minmax(220px,2.1fr)_140px_160px_180px_220px] gap-3 px-4 py-3 text-sm hover:bg-muted/30 cursor-pointer transition",
+                                task.status === "complete" && "opacity-50"
+                              )}
+                              onClick={() => openTaskDrawer(task.id)}
+                            >
+                              <div className="min-w-0 space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <div className={cn("font-semibold text-foreground truncate", task.status === "complete" && "line-through")}>{task.title}</div>
+                                  {task.taskType === "agent" && task.workflowId && (
+                                    <Badge variant="outline" className="text-[10px]">
+                                      workflow: {workflowStepMap.get(task.workflowId)?.name || `Step ${task.workflowId}`}
+                                    </Badge>
+                                  )}
+                                  {task.isBlocked && (
+                                    <Badge variant="destructive" className="text-[10px]">Blocked</Badge>
+                                  )}
+                                </div>
+                                <div className="text-xs text-muted-foreground truncate">
+                                  {task.subtitle || task.description || "No description"}
+                                </div>
+                                {task.isBlocked && (
+                                  <div className="text-[11px] text-rose-600">Blocked by: {task.blockedByLabels.join(", ")}</div>
+                                )}
+                              </div>
+                              <div>
+                                <div className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]", typeMeta.badge)}>
+                                  <typeMeta.Icon className="h-3 w-3" />
+                                  {typeMeta.label}
+                                </div>
+                              </div>
+                              <div
+                                onClick={(event) => event.stopPropagation()}
+                                onPointerDown={(event) => event.stopPropagation()}
+                              >
+                                <Select
+                                  value={task.status}
+                                  onValueChange={(value: TaskStatus) => {
+                                    handleStatusChange(task.id, value);
+                                    updateTaskMutation.mutate({ taskId: task.id, payload: { status: value } });
+                                  }}
+                                >
+                                  <SelectTrigger
+                                    className={cn(
+                                      "h-7 w-full min-w-[130px] rounded-full border px-2 py-0 text-[11px]",
+                                      statusStyles.chip
+                                    )}
+                                  >
+                                    <SelectValue placeholder={statusMeta.label} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {STATUS_BY_TYPE[task.taskType].map((status) => {
+                                      const meta = getStatusMeta(status);
+                                      return (
+                                        <SelectItem key={status} value={status}>
+                                          <div className="flex items-center gap-2">
+                                            <meta.Icon className="h-3.5 w-3.5" />
+                                            <span>{meta.label}</span>
+                                          </div>
+                                        </SelectItem>
+                                      );
+                                    })}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div
+                                onClick={(event) => event.stopPropagation()}
+                                onPointerDown={(event) => event.stopPropagation()}
+                              >
+                                {task.taskType === "human" && (
+                                  <Select
+                                    value={task.responsibleId ? String(task.responsibleId) : ""}
+                                    onValueChange={(value: string) => {
+                                      updateTask(task.id, (prev) => ({
+                                        ...prev,
+                                        responsibleId: value ? Number(value) : null,
+                                        workflowId: null,
+                                        gate: prev.gate,
+                                      }));
+                                      updateTaskMutation.mutate({
+                                        taskId: task.id,
+                                        payload: {
+                                          ownerType: "human",
+                                          assigneeUserId: value ? Number(value) : null,
+                                          workflowStepId: null,
+                                        },
+                                      });
+                                    }}
+                                  >
+                                    <SelectTrigger className="h-7 w-full min-w-[150px] rounded-full border px-2 py-0 text-[11px]">
+                                      <SelectValue placeholder="Unassigned" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {users.map((user) => (
+                                        <SelectItem key={user.id} value={String(user.id)}>
+                                          <div className="flex items-center gap-2">
+                                            <User className="h-3.5 w-3.5" />
+                                            <span>{user.name}</span>
+                                          </div>
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                )}
+                                {task.taskType === "agent" && (
+                                  <Select
+                                    value={task.workflowId ? String(task.workflowId) : ""}
+                                    onValueChange={(value: string) => {
+                                      updateTask(task.id, (prev) => ({
+                                        ...prev,
+                                        workflowId: value ? Number(value) : null,
+                                        responsibleId: null,
+                                        gate: prev.gate,
+                                      }));
+                                      updateTaskMutation.mutate({
+                                        taskId: task.id,
+                                        payload: {
+                                          ownerType: "agent",
+                                          workflowStepId: value ? Number(value) : null,
+                                          assigneeUserId: null,
+                                        },
+                                      });
+                                    }}
+                                  >
+                                    <SelectTrigger className="h-7 w-full min-w-[150px] rounded-full border px-2 py-0 text-[11px]">
+                                      <SelectValue placeholder="Unassigned" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {workflowSteps.map((step) => (
+                                        <SelectItem key={step.id} value={String(step.id)}>
+                                          <div className="flex items-center gap-2">
+                                            <Bot className="h-3.5 w-3.5" />
+                                            <span>{step.name}</span>
+                                          </div>
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                )}
+                                {task.taskType === "client" && (
+                                  <Select
+                                    value={String(task.gate?.clientOwner || "Client")}
+                                    onValueChange={(value: string) => {
+                                      updateTask(task.id, (prev) => ({
+                                        ...prev,
+                                        gate: { ...(prev.gate ?? {}), clientOwner: value },
+                                      }));
+                                      updateTaskMutation.mutate({
+                                        taskId: task.id,
+                                        payload: {
+                                          ownerType: "client",
+                                          gateJson: { ...(task.gate ?? {}), clientOwner: value },
+                                          assigneeUserId: null,
+                                          workflowStepId: null,
+                                        },
+                                      });
+                                    }}
+                                  >
+                                    <SelectTrigger className="h-7 w-full min-w-[150px] rounded-full border px-2 py-0 text-[11px]">
+                                      <SelectValue placeholder="Client" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Client">
+                                        <div className="flex items-center gap-2">
+                                          <ShieldCheck className="h-3.5 w-3.5" />
+                                          <span>Client</span>
+                                        </div>
+                                      </SelectItem>
+                                      {users.map((user) => (
+                                        <SelectItem key={user.id} value={user.name}>
+                                          <div className="flex items-center gap-2">
+                                            <User className="h-3.5 w-3.5" />
+                                            <span>{user.name}</span>
+                                          </div>
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                {task.taskType === "agent" ? (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        handleRunTask(task.id);
+                                      }}
+                                      disabled={task.isBlocked}
+                                    >
+                                      <Play className="h-3.5 w-3.5" />
+                                      Run
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        openTaskDrawer(task.id, "outputs");
+                                      }}
+                                    >
+                                      <FileText className="h-3.5 w-3.5" />
+                                      Outputs
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        openTaskDrawer(task.id, "logs");
+                                      }}
+                                    >
+                                      <Terminal className="h-3.5 w-3.5" />
+                                      Logs
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      openTaskDrawer(task.id);
+                                    }}
+                                    aria-label="Open task"
+                                  >
+                                    <ArrowUpRight className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
                           );
                         })}
-                      </svg>
+                      </div>
                     )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+                  </Card>
+                );
+              })}
+
+              {unassignedTasks.length > 0 && (
+                <Card className="p-0">
+                  <button
+                    type="button"
+                    onClick={() => setCollapsedPhases((prev) => ({ ...prev, [-1]: !prev[-1] }))}
+                    className="flex w-full items-center justify-between gap-3 border-b border-border px-4 py-3 text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      {collapsedPhases[-1] ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      <div>
+                        <div className="text-sm font-semibold text-foreground">Unassigned</div>
+                        <div className="text-xs text-muted-foreground">{unassignedTasks.length} tasks</div>
+                      </div>
+                    </div>
+                  </button>
+                  {!collapsedPhases[-1] && (
+                    <div className="divide-y divide-border">
+                      {unassignedTasks.map((task) => {
+                        const typeMeta = TASK_TYPE_META[task.taskType];
+                        const statusMeta = getStatusMeta(task.status);
+                        const statusStyles = getStatusStyles(task.status);
+                        return (
+                          <div
+                            key={task.id}
+                            className="grid grid-cols-[minmax(220px,2.1fr)_140px_160px_180px_220px] gap-3 px-4 py-3 text-sm hover:bg-muted/30 cursor-pointer"
+                            onClick={() => openTaskDrawer(task.id)}
+                          >
+                            <div className="min-w-0">
+                              <div className="font-semibold text-foreground truncate">{task.title}</div>
+                              <div className="text-xs text-muted-foreground truncate">{task.subtitle || task.description || "No description"}</div>
+                            </div>
+                            <div>
+                              <div className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]", typeMeta.badge)}>
+                                <typeMeta.Icon className="h-3 w-3" />
+                                {typeMeta.label}
+                              </div>
+                            </div>
+                            <div
+                              onClick={(event) => event.stopPropagation()}
+                              onPointerDown={(event) => event.stopPropagation()}
+                            >
+                              <Select
+                                value={task.status}
+                                onValueChange={(value: TaskStatus) => {
+                                  handleStatusChange(task.id, value);
+                                  updateTaskMutation.mutate({ taskId: task.id, payload: { status: value } });
+                                }}
+                              >
+                                <SelectTrigger
+                                  className={cn(
+                                    "h-7 w-full min-w-[130px] rounded-full border px-2 py-0 text-[11px]",
+                                    statusStyles.chip
+                                  )}
+                                >
+                                  <SelectValue placeholder={statusMeta.label} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {STATUS_BY_TYPE[task.taskType].map((status) => {
+                                    const meta = getStatusMeta(status);
+                                    return (
+                                      <SelectItem key={status} value={status}>
+                                        <div className="flex items-center gap-2">
+                                          <meta.Icon className="h-3.5 w-3.5" />
+                                          <span>{meta.label}</span>
+                                        </div>
+                                      </SelectItem>
+                                    );
+                                  })}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div
+                              onClick={(event) => event.stopPropagation()}
+                              onPointerDown={(event) => event.stopPropagation()}
+                            >
+                              {task.taskType === "human" && (
+                                <Select
+                                  value={task.responsibleId ? String(task.responsibleId) : ""}
+                                  onValueChange={(value: string) => {
+                                    updateTask(task.id, (prev) => ({
+                                      ...prev,
+                                      responsibleId: value ? Number(value) : null,
+                                      workflowId: null,
+                                      gate: prev.gate,
+                                    }));
+                                    updateTaskMutation.mutate({
+                                      taskId: task.id,
+                                      payload: {
+                                        ownerType: "human",
+                                        assigneeUserId: value ? Number(value) : null,
+                                        workflowStepId: null,
+                                      },
+                                    });
+                                  }}
+                                >
+                                  <SelectTrigger className="h-7 w-full min-w-[150px] rounded-full border px-2 py-0 text-[11px]">
+                                    <SelectValue placeholder="Unassigned" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {users.map((user) => (
+                                        <SelectItem key={user.id} value={String(user.id)}>
+                                          <div className="flex items-center gap-2">
+                                            <User className="h-3.5 w-3.5" />
+                                            <span>{user.name}</span>
+                                          </div>
+                                        </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                              {task.taskType === "agent" && (
+                                <Select
+                                  value={task.workflowId ? String(task.workflowId) : ""}
+                                  onValueChange={(value: string) => {
+                                    updateTask(task.id, (prev) => ({
+                                      ...prev,
+                                      workflowId: value ? Number(value) : null,
+                                      responsibleId: null,
+                                      gate: prev.gate,
+                                    }));
+                                    updateTaskMutation.mutate({
+                                      taskId: task.id,
+                                      payload: {
+                                        ownerType: "agent",
+                                        workflowStepId: value ? Number(value) : null,
+                                        assigneeUserId: null,
+                                      },
+                                    });
+                                  }}
+                                >
+                                  <SelectTrigger className="h-7 w-full min-w-[150px] rounded-full border px-2 py-0 text-[11px]">
+                                    <SelectValue placeholder="Unassigned" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {workflowSteps.map((step) => (
+                                      <SelectItem key={step.id} value={String(step.id)}>
+                                        <div className="flex items-center gap-2">
+                                          <Bot className="h-3.5 w-3.5" />
+                                          <span>{step.name}</span>
+                                        </div>
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                              {task.taskType === "client" && (
+                                <Select
+                                  value={String(task.gate?.clientOwner || "Client")}
+                                  onValueChange={(value: string) => {
+                                    updateTask(task.id, (prev) => ({
+                                      ...prev,
+                                      gate: { ...(prev.gate ?? {}), clientOwner: value },
+                                    }));
+                                    updateTaskMutation.mutate({
+                                      taskId: task.id,
+                                      payload: {
+                                        ownerType: "client",
+                                        gateJson: { ...(task.gate ?? {}), clientOwner: value },
+                                        assigneeUserId: null,
+                                        workflowStepId: null,
+                                      },
+                                    });
+                                  }}
+                                >
+                                  <SelectTrigger className="h-7 w-full min-w-[150px] rounded-full border px-2 py-0 text-[11px]">
+                                    <SelectValue placeholder="Client" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="Client">
+                                      <div className="flex items-center gap-2">
+                                        <ShieldCheck className="h-3.5 w-3.5" />
+                                        <span>Client</span>
+                                      </div>
+                                    </SelectItem>
+                                    {users.map((user) => (
+                                      <SelectItem key={user.id} value={user.name}>
+                                        <div className="flex items-center gap-2">
+                                          <User className="h-3.5 w-3.5" />
+                                          <span>{user.name}</span>
+                                        </div>
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openTaskDrawer(task.id);
+                                }}
+                                aria-label="Open task"
+                              >
+                                <ArrowUpRight className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </Card>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       <Sheet open={Boolean(selectedTaskId)} onOpenChange={(open) => !open && setSelectedTaskId(null)}>
@@ -620,110 +1826,247 @@ export default function ProjectManagement() {
             <div className="space-y-6">
               <SheetHeader>
                 <SheetTitle>{selectedTask.title}</SheetTitle>
-                <SheetDescription>
-                  {selectedTask.description || "No description provided."}
-                </SheetDescription>
-                {selectedLocked && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Lock className="h-3.5 w-3.5" />
-                    Locked: completed tasks are read-only.
-                  </div>
-                )}
+                <SheetDescription>{selectedTask.subtitle || selectedTask.description || "No description provided."}</SheetDescription>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs">{TASK_TYPE_META[selectedTask.taskType].label}</Badge>
+                  <Badge variant="outline" className="text-xs">{getStatusMeta(selectedTask.status).label}</Badge>
+                  {selectedTask.taskType === "agent" && (
+                    <Badge variant="secondary" className="text-xs">
+                      {EXECUTION_LABELS[selectedTask.execution?.state || "idle"]}
+                    </Badge>
+                  )}
+                </div>
               </SheetHeader>
 
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</div>
-                  <select
-                    value={selectedTask.status}
-                    onChange={(event) => handleStatusChange(selectedTask.id, event.target.value)}
-                    disabled={selectedLocked}
-                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              <div className="flex items-center gap-2 border-b border-border pb-2 text-xs">
+                {([
+                  { key: "details", label: "Details", Icon: Sparkles },
+                  { key: "outputs", label: "Outputs", Icon: FileText },
+                  { key: "logs", label: "Logs", Icon: Terminal },
+                ] as const).map((tab) => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setDrawerTab(tab.key)}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-full border px-3 py-1",
+                      drawerTab === tab.key ? "border-primary text-primary" : "border-border text-muted-foreground"
+                    )}
                   >
-                    {TASK_STATUS_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                    <tab.Icon className="h-3.5 w-3.5" />
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
 
-                <div className="space-y-2">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Assignee</div>
-                  <select
-                    value={getAssigneeValue(selectedTask)}
-                    onChange={(event) => handleAssigneeChange(selectedTask.id, event.target.value)}
-                    disabled={selectedLocked}
-                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  >
-                    <option value="unassigned">Unassigned</option>
-                    {groupedAssigneeOptions.map(([group, options]) => (
-                      <optgroup key={group} label={group}>
-                        {options.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
+              {drawerTab === "details" ? (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Responsible</div>
+                    {selectedTask.taskType === "human" && (
+                      <select
+                        value={selectedTask.responsibleId ?? ""}
+                        onChange={(event) =>
+                          updateTask(selectedTask.id, (task) => ({
+                            ...task,
+                            responsibleId: event.target.value ? Number(event.target.value) : null,
+                          }))
+                        }
+                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      >
+                        <option value="">Unassigned</option>
+                        {users.map((user) => (
+                          <option key={user.id} value={user.id}>
+                            {user.name}
                           </option>
                         ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Owner</div>
-                  <div className="text-sm font-semibold text-foreground">
-                    {getOwnerLabel(selectedTask)}
+                      </select>
+                    )}
+                    {selectedTask.taskType === "agent" && (
+                      <select
+                        value={selectedTask.workflowId ?? ""}
+                        onChange={(event) =>
+                          updateTask(selectedTask.id, (task) => ({
+                            ...task,
+                            workflowId: event.target.value ? Number(event.target.value) : null,
+                          }))
+                        }
+                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      >
+                        <option value="">Unassigned</option>
+                        {workflowSteps.map((step) => (
+                          <option key={step.id} value={step.id}>
+                            {step.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {selectedTask.taskType === "client" && (
+                      <Input
+                        value={selectedTask.gate?.clientOwner || ""}
+                        onChange={(event) =>
+                          updateTask(selectedTask.id, (task) => ({
+                            ...task,
+                            gate: { ...task.gate, clientOwner: event.target.value },
+                          }))
+                        }
+                        placeholder="Client owner"
+                      />
+                    )}
                   </div>
-                </div>
-              </div>
 
-              <div className="space-y-2">
-                <div className="text-sm font-semibold text-foreground">Notes</div>
-                <Textarea
-                  value={notes}
-                  onChange={(event) => {
-                    setNotes(event.target.value);
-                    setNotesDirty(true);
-                  }}
-                  onBlur={saveNotes}
-                  rows={5}
-                  disabled={selectedLocked}
-                />
-                <div className="flex justify-end">
-                  <Button variant="outline" size="sm" onClick={saveNotes} disabled={selectedLocked || !notesDirty}>
-                    Save notes
-                  </Button>
-                </div>
-              </div>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Phase</div>
+                      <select
+                        value={selectedTask.phaseId ?? ""}
+                        onChange={(event) =>
+                          updateTask(selectedTask.id, (task) => ({
+                            ...task,
+                            phaseId: event.target.value ? Number(event.target.value) : null,
+                          }))
+                        }
+                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      >
+                        <option value="">Unassigned</option>
+                        {phases.map((phase) => (
+                          <option key={phase.id} value={phase.id}>
+                            {phase.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</div>
+                      <select
+                        value={selectedTask.status}
+                        onChange={(event) => handleStatusChange(selectedTask.id, event.target.value as TaskStatus)}
+                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      >
+                        {STATUS_BY_TYPE[selectedTask.taskType].map((status) => (
+                          <option key={status} value={status}>
+                            {getStatusMeta(status).label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
 
-              <div className="space-y-3">
-                <div className="text-sm font-semibold text-foreground">Linked outputs</div>
-                {selectedDeliverables.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">No deliverables yet.</div>
-                ) : (
-                  <div className="grid grid-cols-1 gap-3">
-                    {selectedDeliverables.map((deliverable) => (
-                      <Card key={deliverable.id} className="p-3">
-                        <div className="flex items-start gap-2">
-                          <FileText className="h-4 w-4 text-primary" />
-                          <div className="min-w-0">
-                            <div className="text-sm font-semibold text-foreground truncate">{deliverable.title}</div>
-                            <div className="text-xs text-muted-foreground">v{deliverable.version}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {new Date(deliverable.createdAt).toLocaleString()}
+                  <div className="space-y-2">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Dependencies</div>
+                    <select
+                      value=""
+                      onChange={(event) =>
+                        event.target.value && handleDependencyAdd(selectedTask.id, Number(event.target.value))
+                      }
+                      className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      <option value="">Add dependency</option>
+                      {computedTasks
+                        .filter((task) => task.id !== selectedTask.id)
+                        .map((task) => (
+                          <option key={task.id} value={task.id}>
+                            {task.title}
+                          </option>
+                        ))}
+                    </select>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedTask.dependsOn.length === 0 ? (
+                        <span className="text-xs text-muted-foreground">No dependencies</span>
+                      ) : (
+                        selectedTask.dependsOn.map((depId) => (
+                          <Badge key={depId} variant="outline" className="flex items-center gap-1 text-xs">
+                            {taskMap.get(depId)?.title || "Missing task"}
+                            <button
+                              type="button"
+                              onClick={() => handleDependencyRemove(selectedTask.id, depId)}
+                              className="text-muted-foreground"
+                            >
+                              ×
+                            </button>
+                          </Badge>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-sm font-semibold text-foreground">Notes</div>
+                    <Textarea
+                      value={notesDraft}
+                      onChange={(event) => setNotesDraft(event.target.value)}
+                      rows={5}
+                    />
+                    <div className="flex justify-end">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          updateTask(selectedTask.id, (task) => ({
+                            ...task,
+                            description: notesDraft,
+                            subtitle: notesDraft,
+                          }))
+                        }
+                      >
+                        Save notes
+                      </Button>
+                    </div>
+                  </div>
+
+                  {selectedTask.taskType === "agent" && (
+                    <div className="space-y-2">
+                      <div className="text-sm font-semibold text-foreground">Inputs mapping</div>
+                      <Textarea rows={3} placeholder="Map inputs to workflow variables" />
+                    </div>
+                  )}
+                </div>
+              ) : drawerTab === "outputs" ? (
+                <div className="space-y-3">
+                  <div className="text-sm font-semibold text-foreground">Latest outputs</div>
+                  {selectedDeliverables.length === 0 ? (
+                    <div className="text-sm text-muted-foreground">No outputs yet.</div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-3">
+                      {selectedDeliverables.map((deliverable) => (
+                        <Card key={deliverable.id} className="p-3">
+                          <div className="flex items-start gap-2">
+                            <FileText className="h-4 w-4 text-primary" />
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-foreground truncate">{deliverable.title}</div>
+                              <div className="text-xs text-muted-foreground">v{deliverable.version}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {new Date(deliverable.createdAt).toLocaleString()}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <div className="text-sm font-semibold text-foreground">Dependencies</div>
-                <div className="text-sm text-muted-foreground">No dependencies configured.</div>
-              </div>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="text-sm font-semibold text-foreground">Run history</div>
+                  {selectedTask.execution?.history?.length ? (
+                    <div className="space-y-2">
+                      {selectedTask.execution.history.map((entry) => (
+                        <Card key={entry.id} className="p-3">
+                          <div className="flex items-center justify-between">
+                            <div className="text-sm font-semibold text-foreground">{entry.summary || "Run"}</div>
+                            <Badge variant="outline" className="text-xs">{EXECUTION_LABELS[entry.state]}</Badge>
+                          </div>
+                          <div className="text-xs text-muted-foreground">Started {new Date(entry.startedAt).toLocaleString()}</div>
+                          {entry.output && (
+                            <div className="text-xs text-muted-foreground">Output: {entry.output.title}</div>
+                          )}
+                        </Card>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">No runs yet.</div>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-sm text-muted-foreground">Loading task details...</div>

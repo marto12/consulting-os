@@ -1,8 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { GitBranch, Database, Box, Package, Activity } from "lucide-react";
+import { Activity, GitBranch, Database, Package, Trash2 } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
+import { apiRequest, queryClient } from "../lib/query-client";
 
 type Workflow = {
   id: number;
@@ -12,15 +13,10 @@ type Workflow = {
 
 type Dataset = {
   id: number;
+  projectId?: number | null;
   name: string;
   description: string;
   rowCount: number;
-};
-
-type Model = {
-  id: number;
-  name: string;
-  description: string;
 };
 
 export default function Assets() {
@@ -31,8 +27,16 @@ export default function Assets() {
   const { data: datasets = [], isLoading: datasetsLoading } = useQuery<Dataset[]>({
     queryKey: ["/api/data/datasets"],
   });
-  const { data: models = [], isLoading: modelsLoading } = useQuery<Model[]>({
-    queryKey: ["/api/data/models"],
+
+  const globalDatasets = datasets.filter((dataset) => !dataset.projectId);
+
+  const deleteDataset = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/data/datasets/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/data/datasets"] });
+    },
   });
 
   return (
@@ -65,28 +69,79 @@ export default function Assets() {
         ) : workflows.length === 0 ? (
           <Card className="p-4 text-sm text-muted-foreground">No workflows available.</Card>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {workflows.map((workflow) => (
-              <Card
-                key={workflow.id}
-                className="p-4 cursor-pointer hover:-translate-y-0.5 hover:shadow-md transition-all"
-                onClick={() => navigate(`/global/workflow/${workflow.id}`)}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                    <GitBranch className="size-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-foreground">{workflow.name}</div>
-                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                      {workflow.description || "No description"}
-                    </p>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
+          <Card className="p-0 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40">
+                  <tr className="text-left text-muted-foreground">
+                    <th className="px-4 py-3 font-medium">Workflow</th>
+                    <th className="px-4 py-3 font-medium">Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {workflows.map((workflow) => (
+                    <tr
+                      key={workflow.id}
+                      className="border-t border-border/60 hover:bg-muted/30 cursor-pointer"
+                      onClick={() => navigate(`/global/workflow/${workflow.id}`)}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <GitBranch className="size-4 text-primary" />
+                          <span className="font-semibold text-foreground truncate">{workflow.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        <span className="line-clamp-2">{workflow.description || "No description"}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
         )}
+      </section>
+
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Models</h2>
+            <p className="text-sm text-muted-foreground">Reusable analytical models for simulations.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted-foreground">1 featured</span>
+            <Button size="sm" variant="outline" onClick={() => navigate("/global/models")}>Library</Button>
+          </div>
+        </div>
+        <Card className="p-0 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/40">
+                <tr className="text-left text-muted-foreground">
+                  <th className="px-4 py-3 font-medium">Model</th>
+                  <th className="px-4 py-3 font-medium">Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  className="border-t border-border/60 hover:bg-muted/30 cursor-pointer"
+                  onClick={() => navigate("/shared/cge-model")}
+                >
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <Activity className="size-4 text-primary" />
+                      <span className="font-semibold text-foreground truncate">CGE Economic Model</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    <span className="line-clamp-2">Run computable general equilibrium simulations and export results.</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </Card>
       </section>
 
       <section className="space-y-3">
@@ -96,94 +151,69 @@ export default function Assets() {
             <p className="text-sm text-muted-foreground">Shared data sources available for analysis.</p>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-muted-foreground">{datasets.length} total</span>
+            <span className="text-xs text-muted-foreground">{globalDatasets.length} total</span>
             <Button size="sm" variant="outline" onClick={() => navigate("/global/datasets")}>New</Button>
           </div>
         </div>
         {datasetsLoading ? (
           <Card className="p-4 text-sm text-muted-foreground">Loading datasets...</Card>
-        ) : datasets.length === 0 ? (
+        ) : globalDatasets.length === 0 ? (
           <Card className="p-4 text-sm text-muted-foreground">No datasets available.</Card>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {datasets.map((dataset) => (
-              <Card
-                key={dataset.id}
-                className="p-4 cursor-pointer hover:-translate-y-0.5 hover:shadow-md transition-all"
-                onClick={() => navigate(`/global/datasets`)}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                    <Database className="size-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-foreground">{dataset.name}</div>
-                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                      {dataset.description || "No description"}
-                    </p>
-                    <div className="mt-1 text-[11px] text-muted-foreground">{dataset.rowCount} rows</div>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
+          <Card className="p-0 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40">
+                  <tr className="text-left text-muted-foreground">
+                    <th className="px-4 py-3 font-medium">Dataset</th>
+                    <th className="px-4 py-3 font-medium">Description</th>
+                    <th className="px-4 py-3 font-medium">Rows</th>
+                    <th className="px-4 py-3 font-medium text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {globalDatasets.map((dataset) => (
+                    <tr
+                      key={dataset.id}
+                      className="border-t border-border/60 hover:bg-muted/30 cursor-pointer"
+                      onClick={() => navigate(`/global/datasets/${dataset.id}`)}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <Database className="size-4 text-primary" />
+                          <span className="font-semibold text-foreground truncate">{dataset.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        <span className="line-clamp-2">{dataset.description || "No description"}</span>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{dataset.rowCount}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex justify-end">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (confirm(`Delete "${dataset.name}"? This will remove all data.`)) {
+                                deleteDataset.mutate(dataset.id);
+                              }
+                            }}
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
         )}
       </section>
 
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-foreground">Models</h2>
-            <p className="text-sm text-muted-foreground">Reusable model definitions and configs.</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-muted-foreground">{models.length} total</span>
-            <Button size="sm" variant="outline" onClick={() => navigate("/global/models")}>New</Button>
-          </div>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <Card
-            className="p-4 cursor-pointer hover:-translate-y-0.5 hover:shadow-md transition-all"
-            onClick={() => navigate("/shared/cge-model")}
-          >
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <Activity className="size-5" />
-              </div>
-              <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-foreground">CGE Model Runner</div>
-                <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                  Run a computable general equilibrium demo workflow.
-                </p>
-                <div className="mt-2 text-[11px] text-muted-foreground">Demo run</div>
-              </div>
-            </div>
-          </Card>
-        </div>
-        {modelsLoading ? (
-          <Card className="p-4 text-sm text-muted-foreground">Loading models...</Card>
-        ) : models.length === 0 ? (
-          <Card className="p-4 text-sm text-muted-foreground">No models available.</Card>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {models.map((model) => (
-              <Card key={model.id} className="p-4">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                    <Box className="size-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-foreground">{model.name}</div>
-                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                      {model.description || "No description"}
-                    </p>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        )}
-      </section>
     </div>
   );
 }

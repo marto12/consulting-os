@@ -8,13 +8,13 @@ def emit(event, payload):
 
 if __name__ == "__main__":
     emit("STATUS", "Booting CGE model")
-    time.sleep(0.6)
+    time.sleep(2.0)
     emit("PROGRESS", "Loading baseline dataset")
-    time.sleep(0.7)
+    time.sleep(2.0)
     emit("PROGRESS", "Solving equilibrium conditions")
-    time.sleep(0.8)
+    time.sleep(2.0)
     emit("PROGRESS", "Running policy shock scenarios")
-    time.sleep(0.6)
+    time.sleep(2.0)
 
     industries = ["Agriculture", "Mining", "Manufacturing", "Construction", "Utilities", "Transport", "Services"]
     years = [2024, 2025, 2026, 2027, 2028]

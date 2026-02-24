@@ -21,7 +21,6 @@ import {
   Home,
   ListChecks,
   Users,
-  Package,
   FileText,
   BarChart3,
   Presentation,
@@ -67,7 +66,9 @@ import Workflows from "./pages/Workflows";
 import Agents from "./pages/Agents";
 import AgentDetail from "./pages/AgentDetail";
 import Datasets from "./pages/Datasets";
+import DatasetDetail from "./pages/DatasetDetail";
 import Models from "./pages/Models";
+import ModelDetail from "./pages/ModelDetail";
 import ExecSummaryTemplate from "./pages/ExecSummaryTemplate";
 import DocumentEditor from "./pages/DocumentEditor";
 import Documents from "./pages/Documents";
@@ -90,6 +91,8 @@ import SettingsPage from "./pages/Settings";
 import CommandPalette from "./components/CommandPalette";
 import { ProjectProvider, useProjectContext } from "./lib/project-context";
 import { UserProvider, useUserContext } from "./lib/user-context";
+import { NotificationsProvider } from "./components/notifications/NotificationsProvider";
+import NotificationsBell from "./components/notifications/NotificationsBell";
 
 type NavItem = {
   path: string;
@@ -103,8 +106,11 @@ type NavItem = {
 const APP_NAV_ITEMS: NavItem[] = [
   { path: "/home", icon: Home, label: "Home" },
   { path: "/projects", icon: Briefcase, label: "Projects" },
-  { path: "/global/workforce", icon: Users, label: "Workforce" },
-  { path: "/global/assets", icon: Package, label: "Assets" },
+  { path: "/global/workforce", icon: Users, label: "Team" },
+  { path: "/global/agents", icon: Bot, label: "Agents" },
+  { path: "/global/workflows", icon: GitBranch, label: "Workflows" },
+  { path: "/global/models", icon: Box, label: "Models" },
+  { path: "/global/datasets", icon: Database, label: "Datasets" },
 ];
 
 const HOME_STORAGE_KEY = "consulting-os:home-seen";
@@ -155,7 +161,6 @@ function AppSidebar() {
     (item.path === "/global/workflows" &&
       (location.pathname.startsWith("/global/workflow/") || location.pathname.startsWith("/workflow/"))) ||
     (item.path === "/global/workforce" && location.pathname.startsWith("/global/workforce")) ||
-    (item.path === "/global/assets" && location.pathname.startsWith("/global/assets")) ||
     (item.path === "/global/datasets" && location.pathname.startsWith("/global/datasets")) ||
     (item.path === "/global/models" && location.pathname.startsWith("/global/models")) ||
     (item.path === "/documents" && location.pathname.includes("/documents")) ||
@@ -528,10 +533,12 @@ function Breadcrumbs() {
         if (path.includes("/datasets")) {
           parts.push({ label: "Artefacts" });
           parts.push({ label: "Datasets" });
+          if (path.includes("/datasets/") && !path.endsWith("/datasets")) parts.push({ label: "Detail" });
         }
         if (path.includes("/models")) {
           parts.push({ label: "Artefacts" });
           parts.push({ label: "Models" });
+          if (path.includes("/models/") && !path.endsWith("/models")) parts.push({ label: "Detail" });
         }
       }
     } else if (path === "/chat") {
@@ -579,8 +586,14 @@ function Breadcrumbs() {
         if (path.startsWith("/global/agent/")) parts.push({ label: "Detail" });
       } else if (path === "/global/datasets") {
         parts.push({ label: "Datasets" });
+      } else if (path.startsWith("/global/datasets/")) {
+        parts.push({ label: "Datasets", to: "/global/datasets" });
+        parts.push({ label: "Detail" });
       } else if (path === "/global/models") {
         parts.push({ label: "Models" });
+      } else if (path.startsWith("/global/models/")) {
+        parts.push({ label: "Models", to: "/global/models" });
+        parts.push({ label: "Detail" });
       }
     }
 
@@ -631,6 +644,7 @@ function TopBar() {
       <Separator orientation="vertical" className="mr-2 h-4" />
       <Breadcrumbs />
       <div className="flex-1" />
+      <NotificationsBell />
       <button
         className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground px-2 py-1 border rounded-md transition-colors"
         onClick={() => document.dispatchEvent(new CustomEvent("open-command-palette"))}
@@ -720,58 +734,64 @@ export default function App() {
     <BrowserRouter>
       <UserProvider>
         <ProjectProvider>
-          <HomeRedirect />
-          <CommandPalette />
-          <Routes>
-            <Route path="/chat" element={<FullWidthLayout><Chat /></FullWidthLayout>} />
-            <Route path="/home" element={<AppLayout><HomePage /></AppLayout>} />
-            <Route path="/tour" element={<Navigate to="/home" replace />} />
-            <Route path="/projects" element={<AppLayout><Projects /></AppLayout>} />
-            <Route path="/shared" element={<AppLayout><Shared /></AppLayout>} />
-            <Route path="/shared/cge-model" element={<AppLayout><CGEModel /></AppLayout>} />
-            <Route path="/global/workforce" element={<AppLayout><Workforce /></AppLayout>} />
-            <Route path="/global/workforce/:id" element={<AppLayout><WorkerDetail /></AppLayout>} />
-            <Route path="/global/assets" element={<AppLayout><Assets /></AppLayout>} />
-            <Route path="/project/:id" element={<RedirectToProjectManagement />} />
-            <Route path="/project/:id/management" element={<AppLayout><ProjectManagement /></AppLayout>} />
-            <Route path="/project/:id/documents" element={<AppLayout><Documents /></AppLayout>} />
-            <Route path="/project/:id/spreadsheets" element={<AppLayout><Spreadsheets /></AppLayout>} />
-            <Route path="/project/:id/presentations" element={<AppLayout><Presentations /></AppLayout>} />
-            <Route path="/project/:id/charts" element={<AppLayout><Charts /></AppLayout>} />
-            <Route path="/project/:projectId/charts/:id" element={<FullWidthLayout><ChartDetail /></FullWidthLayout>} />
-            <Route path="/project/:id/datasets" element={<AppLayout><Datasets /></AppLayout>} />
-            <Route path="/project/:id/models" element={<AppLayout><Models /></AppLayout>} />
-            <Route path="/project/:id/workflow/:stepId" element={<FullWidthLayout><WorkflowStepWorkspace /></FullWidthLayout>} />
-            <Route path="/project/:id/management/task/:taskId" element={<AppLayout><TaskDetail /></AppLayout>} />
-            <Route path="/global/workflows" element={<AppLayout><Workflows /></AppLayout>} />
-            <Route path="/global/workflow/new" element={<FullWidthLayout><WorkflowEditor /></FullWidthLayout>} />
-            <Route path="/global/workflow/:id" element={<FullWidthLayout><WorkflowEditor /></FullWidthLayout>} />
-            <Route path="/global/agents" element={<AppLayout><Agents /></AppLayout>} />
-            <Route path="/global/agent/:key" element={<AppLayout><AgentDetail /></AppLayout>} />
-            <Route path="/global/datasets" element={<AppLayout><Datasets /></AppLayout>} />
-            <Route path="/global/models" element={<AppLayout><Models /></AppLayout>} />
-            <Route path="/workflows" element={<Navigate to="/global/workflows" replace />} />
-            <Route path="/workflow/new" element={<Navigate to="/global/workflow/new" replace />} />
-            <Route path="/workflow/:id" element={<RedirectToGlobalWorkflow />} />
-            <Route path="/agents" element={<Navigate to="/global/agents" replace />} />
-            <Route path="/agent/:key" element={<RedirectToGlobalAgent />} />
-            <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
-            <Route path="/datasets" element={<ProjectScopedRedirect path="/datasets" />} />
-            <Route path="/models" element={<ProjectScopedRedirect path="/models" />} />
-            <Route path="/data" element={<ProjectScopedRedirect path="/datasets" />} />
-            <Route path="/charts" element={<ProjectScopedRedirect path="/charts" />} />
-            <Route path="/charts/:id" element={<FullWidthLayout><ChartDetail /></FullWidthLayout>} />
-            <Route path="/exec-summary-template" element={<AppLayout><ExecSummaryTemplate /></AppLayout>} />
-            <Route path="/documents" element={<ProjectScopedRedirect path="/documents" />} />
-            <Route path="/spreadsheets" element={<ProjectScopedRedirect path="/spreadsheets" />} />
-            <Route path="/editor" element={<FullWidthLayout><DocumentEditor /></FullWidthLayout>} />
-            <Route path="/editor/:id" element={<FullWidthLayout><DocumentEditor /></FullWidthLayout>} />
-            <Route path="/presentations" element={<ProjectScopedRedirect path="/presentations" />} />
-            <Route path="/sheet/:id" element={<FullWidthLayout><SpreadsheetEditor /></FullWidthLayout>} />
-            <Route path="/slides/:id" element={<FullWidthLayout><SlideEditor /></FullWidthLayout>} />
-            <Route path="/" element={<Navigate to="/home" replace />} />
-            <Route path="*" element={<Navigate to="/home" replace />} />
-          </Routes>
+          <NotificationsProvider>
+            <HomeRedirect />
+            <CommandPalette />
+            <Routes>
+              <Route path="/chat" element={<FullWidthLayout><Chat /></FullWidthLayout>} />
+              <Route path="/home" element={<AppLayout><HomePage /></AppLayout>} />
+              <Route path="/tour" element={<Navigate to="/home" replace />} />
+              <Route path="/projects" element={<AppLayout><Projects /></AppLayout>} />
+              <Route path="/shared" element={<AppLayout><Shared /></AppLayout>} />
+              <Route path="/shared/cge-model" element={<AppLayout><CGEModel /></AppLayout>} />
+              <Route path="/global/workforce" element={<AppLayout><Workforce /></AppLayout>} />
+              <Route path="/global/workforce/:id" element={<AppLayout><WorkerDetail /></AppLayout>} />
+              <Route path="/global/assets" element={<AppLayout><Assets /></AppLayout>} />
+              <Route path="/project/:id" element={<RedirectToProjectManagement />} />
+              <Route path="/project/:id/management" element={<AppLayout><ProjectManagement /></AppLayout>} />
+              <Route path="/project/:id/documents" element={<AppLayout><Documents /></AppLayout>} />
+              <Route path="/project/:id/spreadsheets" element={<AppLayout><Spreadsheets /></AppLayout>} />
+              <Route path="/project/:id/presentations" element={<AppLayout><Presentations /></AppLayout>} />
+              <Route path="/project/:id/charts" element={<AppLayout><Charts /></AppLayout>} />
+              <Route path="/project/:projectId/charts/:id" element={<FullWidthLayout><ChartDetail /></FullWidthLayout>} />
+              <Route path="/project/:id/datasets" element={<AppLayout><Datasets /></AppLayout>} />
+              <Route path="/project/:id/datasets/:datasetId" element={<AppLayout><DatasetDetail /></AppLayout>} />
+              <Route path="/project/:id/models" element={<AppLayout><Models /></AppLayout>} />
+              <Route path="/project/:id/models/:modelId" element={<AppLayout><ModelDetail /></AppLayout>} />
+              <Route path="/project/:id/workflow/:stepId" element={<FullWidthLayout><WorkflowStepWorkspace /></FullWidthLayout>} />
+              <Route path="/project/:id/management/task/:taskId" element={<AppLayout><TaskDetail /></AppLayout>} />
+              <Route path="/global/workflows" element={<AppLayout><Workflows /></AppLayout>} />
+              <Route path="/global/workflow/new" element={<FullWidthLayout><WorkflowEditor /></FullWidthLayout>} />
+              <Route path="/global/workflow/:id" element={<FullWidthLayout><WorkflowEditor /></FullWidthLayout>} />
+              <Route path="/global/agents" element={<AppLayout><Agents /></AppLayout>} />
+              <Route path="/global/agent/:key" element={<AppLayout><AgentDetail /></AppLayout>} />
+              <Route path="/global/datasets" element={<AppLayout><Datasets /></AppLayout>} />
+              <Route path="/global/datasets/:datasetId" element={<AppLayout><DatasetDetail /></AppLayout>} />
+              <Route path="/global/models" element={<AppLayout><Models /></AppLayout>} />
+              <Route path="/global/models/:modelId" element={<AppLayout><ModelDetail /></AppLayout>} />
+              <Route path="/workflows" element={<Navigate to="/global/workflows" replace />} />
+              <Route path="/workflow/new" element={<Navigate to="/global/workflow/new" replace />} />
+              <Route path="/workflow/:id" element={<RedirectToGlobalWorkflow />} />
+              <Route path="/agents" element={<Navigate to="/global/agents" replace />} />
+              <Route path="/agent/:key" element={<RedirectToGlobalAgent />} />
+              <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
+              <Route path="/datasets" element={<ProjectScopedRedirect path="/datasets" />} />
+              <Route path="/models" element={<ProjectScopedRedirect path="/models" />} />
+              <Route path="/data" element={<ProjectScopedRedirect path="/datasets" />} />
+              <Route path="/charts" element={<ProjectScopedRedirect path="/charts" />} />
+              <Route path="/charts/:id" element={<FullWidthLayout><ChartDetail /></FullWidthLayout>} />
+              <Route path="/exec-summary-template" element={<AppLayout><ExecSummaryTemplate /></AppLayout>} />
+              <Route path="/documents" element={<ProjectScopedRedirect path="/documents" />} />
+              <Route path="/spreadsheets" element={<ProjectScopedRedirect path="/spreadsheets" />} />
+              <Route path="/editor" element={<FullWidthLayout><DocumentEditor /></FullWidthLayout>} />
+              <Route path="/editor/:id" element={<FullWidthLayout><DocumentEditor /></FullWidthLayout>} />
+              <Route path="/presentations" element={<ProjectScopedRedirect path="/presentations" />} />
+              <Route path="/sheet/:id" element={<FullWidthLayout><SpreadsheetEditor /></FullWidthLayout>} />
+              <Route path="/slides/:id" element={<FullWidthLayout><SlideEditor /></FullWidthLayout>} />
+              <Route path="/" element={<Navigate to="/home" replace />} />
+              <Route path="*" element={<Navigate to="/home" replace />} />
+            </Routes>
+          </NotificationsProvider>
         </ProjectProvider>
       </UserProvider>
     </BrowserRouter>

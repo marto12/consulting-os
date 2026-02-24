@@ -1,7 +1,7 @@
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useRef, useCallback, useMemo, type MouseEvent } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "../lib/query-client";
-import { useLocation, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Database,
   Plus,
@@ -55,6 +55,7 @@ interface DatasetRow {
 export default function Datasets() {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
+  const navigate = useNavigate();
   const isGlobal = location.pathname.startsWith("/global/");
   const projectId = !isGlobal && id ? Number(id) : undefined;
   const { activeUser, users } = useUserContext();
@@ -212,6 +213,20 @@ export default function Datasets() {
     setSelectedDataset(ds);
     setPreviewPage(0);
     setShowPreview(true);
+  };
+
+  const handleCardClick = (ds: Dataset) => {
+    if (isGlobal) {
+      navigate(`/global/datasets/${ds.id}`);
+      return;
+    }
+    if (projectId) {
+      navigate(`/project/${projectId}/datasets/${ds.id}`);
+    }
+  };
+
+  const stopPropagation = (event: MouseEvent<HTMLElement>) => {
+    event.stopPropagation();
   };
 
   const handleCSVUpload = useCallback(async (file: File) => {
@@ -449,82 +464,107 @@ export default function Datasets() {
                     <p className="text-sm">No datasets yet</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                    {datasets.map((ds) => {
-                      const isShared = !ds.projectId;
-                      const allowEdit = !isShared;
-                      return (
-                        <Card key={ds.id} className="p-4 group hover:border-primary/30 transition-colors">
-                          <div className="flex items-center gap-2 mb-2">
-                            {sourceIcon(ds.sourceType)}
-                            <h3 className="font-semibold text-sm truncate">{ds.name}</h3>
-                            {sourceBadge(ds.sourceType)}
-                            {isShared && <Badge variant="outline" className="text-[10px]">Shared</Badge>}
-                          </div>
-                          <p className="text-xs text-muted-foreground line-clamp-2 min-h-[2rem]">{ds.description || "No description"}</p>
-                          <div className="flex items-center gap-3 mt-3 text-xs text-muted-foreground">
-                            <span>{ds.rowCount.toLocaleString()} rows</span>
-                            {ds.schemaJson && Array.isArray(ds.schemaJson) && (
-                              <span>{ds.schemaJson.length} columns</span>
-                            )}
-                            {ds.lastEditedByUserId && userLookup.get(ds.lastEditedByUserId) && (
-                              <span>• {userLookup.get(ds.lastEditedByUserId)}</span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1 mt-3 pt-3 border-t border-border/50">
-                            {allowEdit && (
-                              <>
-                                <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => openUpload(ds)}>
-                                  <Upload size={13} className="mr-1" />
-                                  CSV
-                                </Button>
-                                <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => openApiLink(ds)}>
-                                  <Link size={13} className="mr-1" />
-                                  API
-                                </Button>
-                              </>
-                            )}
-                            {ds.rowCount > 0 && (
-                              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => openPreview(ds)}>
-                                <Eye size={13} className="mr-1" />
-                                Preview
-                              </Button>
-                            )}
-                            <div className="ml-auto flex gap-1">
-                            {allowEdit && (
-                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(ds)}>
-                                <Pencil size={13} />
-                              </Button>
-                            )}
-                            {isShared ? (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                                onClick={() => unlinkDataset.mutate(ds.id)}
+                  <Card className="p-0 overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-muted/40">
+                          <tr className="text-left text-muted-foreground">
+                            <th className="px-4 py-3 font-medium">Dataset</th>
+                            <th className="px-4 py-3 font-medium">Source</th>
+                            <th className="px-4 py-3 font-medium">Rows</th>
+                            <th className="px-4 py-3 font-medium">Columns</th>
+                            <th className="px-4 py-3 font-medium">Owner</th>
+                            <th className="px-4 py-3 font-medium text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {datasets.map((ds) => {
+                            const isShared = !ds.projectId;
+                            const allowEdit = !isShared;
+                            const editorName = ds.lastEditedByUserId ? userLookup.get(ds.lastEditedByUserId) : null;
+                            return (
+                              <tr
+                                key={ds.id}
+                                className="border-t border-border/60 hover:bg-muted/30 cursor-pointer"
+                                onClick={() => handleCardClick(ds)}
                               >
-                                Unlink
-                              </Button>
-                            ) : (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                                onClick={() => {
-                                  if (confirm(`Delete "${ds.name}"? This will remove all data.`)) {
-                                    deleteDataset.mutate(ds.id);
-                                  }
-                                }}
-                              >
-                                <Trash2 size={13} />
-                              </Button>
-                            )}
-                            </div>
-                          </div>
-                        </Card>
-                      );
-                    })}
-                  </div>
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-2">
+                                    {sourceIcon(ds.sourceType)}
+                                    <div className="min-w-0">
+                                      <div className="font-semibold text-foreground truncate">{ds.name}</div>
+                                      <div className="text-[11px] text-muted-foreground truncate">{ds.description || "No description"}</div>
+                                    </div>
+                                    {sourceBadge(ds.sourceType)}
+                                    {isShared && <Badge variant="outline" className="text-[10px]">Shared</Badge>}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-muted-foreground capitalize">{ds.sourceType}</td>
+                                <td className="px-4 py-3 text-muted-foreground">{ds.rowCount.toLocaleString()}</td>
+                                <td className="px-4 py-3 text-muted-foreground">
+                                  {ds.schemaJson && Array.isArray(ds.schemaJson) ? ds.schemaJson.length : 0}
+                                </td>
+                                <td className="px-4 py-3 text-muted-foreground">
+                                  {editorName || ds.owner || "System"}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center justify-end gap-1">
+                                    {allowEdit && (
+                                      <>
+                                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={(e) => { stopPropagation(e); openUpload(ds); }}>
+                                          <Upload size={13} className="mr-1" />
+                                          CSV
+                                        </Button>
+                                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={(e) => { stopPropagation(e); openApiLink(ds); }}>
+                                          <Link size={13} className="mr-1" />
+                                          API
+                                        </Button>
+                                      </>
+                                    )}
+                                    {ds.rowCount > 0 && (
+                                      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={(e) => { stopPropagation(e); openPreview(ds); }}>
+                                        <Eye size={13} className="mr-1" />
+                                        Preview
+                                      </Button>
+                                    )}
+                                    {allowEdit && (
+                                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={(e) => { stopPropagation(e); openEdit(ds); }}>
+                                        <Pencil size={13} />
+                                      </Button>
+                                    )}
+                                    {isShared ? (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                                        onClick={(e) => { stopPropagation(e); unlinkDataset.mutate(ds.id); }}
+                                      >
+                                        Unlink
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                                        onClick={(e) => {
+                                          stopPropagation(e);
+                                          if (confirm(`Delete "${ds.name}"? This will remove all data.`)) {
+                                            deleteDataset.mutate(ds.id);
+                                          }
+                                        }}
+                                      >
+                                        <Trash2 size={13} />
+                                      </Button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
                 )}
               </div>
 
@@ -540,44 +580,72 @@ export default function Datasets() {
                     <p className="text-sm text-muted-foreground">No shared datasets available.</p>
                   </Card>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                    {sharedDatasets.map((ds) => (
-                      <Card key={ds.id} className="p-4 group hover:border-primary/30 transition-colors">
-                        <div className="flex items-center gap-2 mb-2">
-                          {sourceIcon(ds.sourceType)}
-                          <h3 className="font-semibold text-sm truncate">{ds.name}</h3>
-                          {sourceBadge(ds.sourceType)}
-                          <Badge variant="outline" className="text-[10px]">Shared</Badge>
-                        </div>
-                        <p className="text-xs text-muted-foreground line-clamp-2 min-h-[2rem]">{ds.description || "No description"}</p>
-                        <div className="flex items-center gap-3 mt-3 text-xs text-muted-foreground">
-                          <span>{ds.rowCount.toLocaleString()} rows</span>
-                          {ds.schemaJson && Array.isArray(ds.schemaJson) && (
-                            <span>{ds.schemaJson.length} columns</span>
-                          )}
-                          {ds.lastEditedByUserId && userLookup.get(ds.lastEditedByUserId) && (
-                            <span>• {userLookup.get(ds.lastEditedByUserId)}</span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border/50">
-                          {ds.rowCount > 0 && (
-                            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => openPreview(ds)}>
-                              <Eye size={13} className="mr-1" />
-                              Preview
-                            </Button>
-                          )}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 px-2 text-xs ml-auto"
-                            onClick={() => linkDataset.mutate(ds.id)}
-                          >
-                            Use in project
-                          </Button>
-                        </div>
-                      </Card>
-                    ))}
-                  </div>
+                  <Card className="p-0 overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-muted/40">
+                          <tr className="text-left text-muted-foreground">
+                            <th className="px-4 py-3 font-medium">Dataset</th>
+                            <th className="px-4 py-3 font-medium">Source</th>
+                            <th className="px-4 py-3 font-medium">Rows</th>
+                            <th className="px-4 py-3 font-medium">Columns</th>
+                            <th className="px-4 py-3 font-medium">Owner</th>
+                            <th className="px-4 py-3 font-medium text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sharedDatasets.map((ds) => {
+                            const editorName = ds.lastEditedByUserId ? userLookup.get(ds.lastEditedByUserId) : null;
+                            return (
+                              <tr
+                                key={ds.id}
+                                className="border-t border-border/60 hover:bg-muted/30 cursor-pointer"
+                                onClick={() => handleCardClick(ds)}
+                              >
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-2">
+                                    {sourceIcon(ds.sourceType)}
+                                    <div className="min-w-0">
+                                      <div className="font-semibold text-foreground truncate">{ds.name}</div>
+                                      <div className="text-[11px] text-muted-foreground truncate">{ds.description || "No description"}</div>
+                                    </div>
+                                    {sourceBadge(ds.sourceType)}
+                                    <Badge variant="outline" className="text-[10px]">Shared</Badge>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-muted-foreground capitalize">{ds.sourceType}</td>
+                                <td className="px-4 py-3 text-muted-foreground">{ds.rowCount.toLocaleString()}</td>
+                                <td className="px-4 py-3 text-muted-foreground">
+                                  {ds.schemaJson && Array.isArray(ds.schemaJson) ? ds.schemaJson.length : 0}
+                                </td>
+                                <td className="px-4 py-3 text-muted-foreground">
+                                  {editorName || ds.owner || "System"}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center justify-end gap-1">
+                                    {ds.rowCount > 0 && (
+                                      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={(e) => { stopPropagation(e); openPreview(ds); }}>
+                                        <Eye size={13} className="mr-1" />
+                                        Preview
+                                      </Button>
+                                    )}
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 px-2 text-xs"
+                                      onClick={(e) => { stopPropagation(e); linkDataset.mutate(ds.id); }}
+                                    >
+                                      Use in project
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
                 )}
               </div>
             </div>

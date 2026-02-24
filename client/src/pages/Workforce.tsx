@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Users, Bot, Plus } from "lucide-react";
+import { Users, Bot, Plus, Check } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import { Button } from "../components/ui/button";
@@ -57,6 +57,7 @@ export default function Workforce() {
   });
 
   const userIds = useMemo(() => users.map((user) => user.id), [users]);
+  const availabilityColumns = ["Process automation", "Document editor", "Spreadsheets", "Slides"];
 
   return (
     <div className="space-y-8">
@@ -71,13 +72,7 @@ export default function Workforce() {
             All human contributors and AI agents available in this workspace.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => navigate("/global/agents")}>Add agent</Button>
-          <Button onClick={() => setShowCreate(true)}>
-            <Plus className="size-4" />
-            Add human
-          </Button>
-        </div>
+        <div />
       </div>
 
       <section className="space-y-3">
@@ -86,35 +81,60 @@ export default function Workforce() {
             <h2 className="text-lg font-semibold text-foreground">Human workers</h2>
             <p className="text-sm text-muted-foreground">Team members available for project assignments.</p>
           </div>
-          <span className="text-xs text-muted-foreground">{users.length} total</span>
+          <div className="flex items-center gap-3">
+            <Button size="sm" variant="outline" onClick={() => setShowCreate(true)}>
+              <Plus className="size-4" />
+              Add human
+            </Button>
+          </div>
         </div>
         {usersLoading ? (
           <Card className="p-4 text-sm text-muted-foreground">Loading workers...</Card>
         ) : users.length === 0 ? (
           <Card className="p-4 text-sm text-muted-foreground">No human workers found.</Card>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {users.map((user) => (
-              <Card key={user.id} className="p-4 cursor-pointer transition hover:-translate-y-0.5 hover:shadow-sm" onClick={() => navigate(`/global/workforce/${user.id}`)}>
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-10 w-10 rounded-lg">
-                    <AvatarFallback
-                      className="rounded-lg text-sm font-semibold text-white"
-                      style={{ backgroundImage: getAvatarGradient(user.name) }}
-                    >
-                      {getInitials(user.name)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-foreground">{user.name}</div>
-                    <div className="truncate text-xs text-muted-foreground">{user.email}</div>
-                    <div className="mt-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-                      {user.role || getWorkforceTitle(user.id, userIds)}
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            ))}
+          <div className="space-y-2">
+            <Card className="p-0 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/40">
+                    <tr className="text-left text-muted-foreground">
+                      <th className="px-4 py-3 font-medium">Name</th>
+                      <th className="px-4 py-3 font-medium">Email</th>
+                      <th className="px-4 py-3 font-medium">Title</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map((user) => (
+                      <tr
+                        key={user.id}
+                        className="border-t border-border/60 hover:bg-muted/30 cursor-pointer"
+                        onClick={() => navigate(`/global/workforce/${user.id}`)}
+                      >
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <Avatar className="h-8 w-8 rounded-lg">
+                              <AvatarFallback
+                                className="rounded-lg text-xs font-semibold text-white"
+                                style={{ backgroundImage: getAvatarGradient(user.name) }}
+                              >
+                                {getInitials(user.name)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span className="font-semibold text-foreground truncate">{user.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">{user.email}</td>
+                        <td className="px-4 py-3 text-muted-foreground uppercase tracking-wide text-[11px]">
+                          {user.role || getWorkforceTitle(user.id, userIds)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+            <div className="text-xs text-muted-foreground text-right">{users.length} total</div>
           </div>
         )}
       </section>
@@ -125,46 +145,72 @@ export default function Workforce() {
             <h2 className="text-lg font-semibold text-foreground">Agents</h2>
             <p className="text-sm text-muted-foreground">AI workers that execute specialized tasks.</p>
           </div>
-          <span className="text-xs text-muted-foreground">{agents.length} total</span>
+          <div className="flex items-center gap-3">
+            <Button size="sm" onClick={() => navigate("/global/agents")}>
+              <Bot className="size-4" />
+              Add agent
+            </Button>
+          </div>
         </div>
         {agentsLoading ? (
           <Card className="p-4 text-sm text-muted-foreground">Loading agents...</Card>
         ) : agents.length === 0 ? (
           <Card className="p-4 text-sm text-muted-foreground">No agents available.</Card>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {agents.map((agent) => (
-              <Card
-                key={agent.key}
-                className="p-4 cursor-pointer transition hover:-translate-y-0.5 hover:shadow-sm"
-                onClick={() => navigate(`/global/agent/${agent.key}`)}
-              >
-                <div className="flex items-start gap-3">
-                  <Avatar className="h-10 w-10 rounded-lg">
-                    <AvatarFallback
-                      className="rounded-lg text-white"
-                      style={{ backgroundImage: getAvatarGradient(agent.name) }}
+          <div className="space-y-2">
+            <Card className="p-0 overflow-hidden">
+              <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40">
+                  <tr className="text-left text-muted-foreground">
+                    <th className="px-4 py-3 font-medium">Agent</th>
+                    <th className="px-4 py-3 font-medium">Role</th>
+                    {availabilityColumns.map((column) => (
+                      <th key={column} className="px-3 py-3 font-medium text-center">{column}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {agents.map((agent) => (
+                    <tr
+                      key={agent.key}
+                      className="border-t border-border/60 hover:bg-muted/30 cursor-pointer"
+                      onClick={() => navigate(`/global/agent/${agent.key}`)}
                     >
-                      <Bot className="size-5" />
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-foreground">{agent.name}</div>
-                    <div className="truncate text-xs text-muted-foreground">{agent.role || "Agent"}</div>
-                    {agent.description && (
-                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{agent.description}</p>
-                    )}
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {getAgentAvailability(agent).map((location) => (
-                        <Badge key={location} variant="secondary" className="text-[11px]">
-                          {location}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            ))}
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <Avatar className="h-8 w-8 rounded-lg">
+                              <AvatarFallback
+                                className="rounded-lg text-white"
+                                style={{ backgroundImage: getAvatarGradient(agent.name) }}
+                              >
+                                <Bot className="size-4" />
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="min-w-0">
+                              <div className="font-semibold text-foreground truncate">{agent.name}</div>
+                              {agent.description && (
+                                <div className="text-[11px] text-muted-foreground line-clamp-1">{agent.description}</div>
+                              )}
+                            </div>
+                          </div>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{agent.role || "Agent"}</td>
+                      {availabilityColumns.map((column) => {
+                        const hasAccess = getAgentAvailability(agent).includes(column);
+                        return (
+                          <td key={column} className="px-3 py-3 text-center">
+                            {hasAccess ? <Check className="size-4 text-emerald-600 inline" /> : <span className="text-muted-foreground">—</span>}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              </div>
+            </Card>
+            <div className="text-xs text-muted-foreground text-right">{agents.length} total</div>
           </div>
         )}
       </section>

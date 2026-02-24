@@ -17,6 +17,7 @@ import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
 import { ScrollArea } from "./ui/scroll-area";
 import { cn } from "../lib/utils";
+import { useNotifications } from "./notifications/NotificationsProvider";
 
 const markdownPattern = /(\*\*|__|##|^- |\n\d+\. |^#{1,6} |```|---)/m;
 
@@ -97,6 +98,7 @@ export default function EditorChatPanel({
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const { notify } = useNotifications();
 
   const { data: agents = [] } = useQuery<Agent[]>({
     queryKey: ["/api/agents"],
@@ -292,6 +294,11 @@ export default function EditorChatPanel({
                       content: `${currentAgentName || "AI"} finished writing to document`,
                     },
                   ]);
+                  notify({
+                    title: `${currentAgentName || "Agent"} finished`,
+                    message: "Writing to the document is complete.",
+                    variant: "success",
+                  });
                 } else if (accumulated.trim()) {
                   setMessages((prev) => [
                     ...prev,
@@ -302,6 +309,11 @@ export default function EditorChatPanel({
                       agentName: currentAgentName || undefined,
                     },
                   ]);
+                  notify({
+                    title: `${currentAgentName || "Agent"} finished`,
+                    message: "Response is ready.",
+                    variant: "success",
+                  });
                 }
                 setStreamingContent("");
                 setStatusMessage("");
@@ -325,7 +337,7 @@ export default function EditorChatPanel({
       setStreamingContent("");
       setStatusMessage("");
     }
-  }, [input, isStreaming, selectedMode, editorType, editorId, getContentFn, messages, writeToDoc, onInsertContent, onClearContent, isDeleteAllIntent]);
+  }, [input, isStreaming, notify, selectedMode, editorType, editorId, getContentFn, messages, writeToDoc, onInsertContent, onClearContent, isDeleteAllIntent]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {

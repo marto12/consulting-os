@@ -95,6 +95,54 @@ function buildCgeSpreadsheetRows(result: any) {
   return { columns, rows };
 }
 
+type PythonModelConfig = {
+  runtime?: string;
+  entrypoint?: string;
+  args?: string[];
+};
+
+async function runPythonModel(config: PythonModelConfig, payload: any): Promise<string> {
+  if (!config?.entrypoint) throw new Error("Model entrypoint is missing");
+  const scriptPath = path.resolve(process.cwd(), config.entrypoint);
+  const args = Array.isArray(config.args) ? config.args : [];
+
+  return new Promise((resolve, reject) => {
+    const python = spawn(config.runtime || "python3", [scriptPath, ...args]);
+    let stdout = "";
+    let stderr = "";
+
+    python.stdout.setEncoding("utf-8");
+    python.stderr.setEncoding("utf-8");
+
+    python.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    python.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    python.on("error", (err) => {
+      reject(new Error(err.message || "Failed to run model"));
+    });
+
+    python.on("close", (code) => {
+      if (code && code !== 0) {
+        reject(new Error(stderr.trim() || `Model exited with code ${code}`));
+        return;
+      }
+      if (stderr.trim().length > 0) {
+        reject(new Error(stderr.trim()));
+        return;
+      }
+      resolve(stdout.trim());
+    });
+
+    const input = payload == null ? "" : JSON.stringify(payload);
+    if (input.length > 0) python.stdin.write(input);
+    python.stdin.end();
+  });
+}
+
 async function loadProjectTemplates() {
   try {
     const entries = await readdir(PROJECT_TEMPLATE_DIR, { withFileTypes: true });
@@ -322,6 +370,49 @@ const DES_WORKFLOW_STEPS = [
   { stepOrder: 5, name: "Centrist Executive Summary", agentKey: "des_centrist_summary" },
 ];
 
+const COMING_SOON_WORKFLOWS = [
+  {
+    name: "Deal value creation model",
+    practiceCoverage: ["Deals", "Private Equity", "Strategy"],
+  },
+  {
+    name: "Commercial due diligence accelerator",
+    practiceCoverage: ["Deals", "Strategy"],
+  },
+  {
+    name: "Risk and control narrative generator",
+    practiceCoverage: ["Risk Advisory", "Audit"],
+  },
+  {
+    name: "Board paper generator",
+    practiceCoverage: ["All practices"],
+  },
+  {
+    name: "Financial model documentation workflow",
+    practiceCoverage: ["Tax", "Deals", "Infrastructure"],
+  },
+  {
+    name: "Proposal and bid accelerator",
+    practiceCoverage: ["All practices"],
+  },
+  {
+    name: "Regulatory submission pack generator",
+    practiceCoverage: ["Public sector", "Infrastructure", "Energy"],
+  },
+  {
+    name: "Internal performance dashboard workflow",
+    practiceCoverage: ["Internal operations"],
+  },
+  {
+    name: "ESG and sustainability reporting accelerator",
+    practiceCoverage: ["Risk", "Strategy", "Climate"],
+  },
+  {
+    name: "Litigation / expert report generator",
+    practiceCoverage: ["Forensics", "Disputes"],
+  },
+];
+
 const DEFAULT_EXEC_SUMMARY_TEMPLATE = `<h2>Executive Summary: [Topic]</h2>
 
 <h3>The Core Question</h3>
@@ -345,17 +436,367 @@ const DEFAULT_EXEC_SUMMARY_TEMPLATE = `<h2>Executive Summary: [Topic]</h2>
 <h3>Implementation Priorities</h3>
 <p>[State the 2-3 immediate actions or decisions required.] [Reference the timeline or sequencing that makes these achievable.]</p>`;
 
+type DefaultModelSeed = {
+  name: string;
+  description: string;
+  inputSchema: any;
+  outputSchema: any;
+  apiConfig: any;
+};
+
+type DefaultDatasetSeed = {
+  name: string;
+  description: string;
+  projectId: number | null;
+  owner?: string;
+  accessLevel?: string;
+  sourceType?: string;
+  sourceUrl?: string | null;
+  schemaJson: Array<{ name: string; type: string }>;
+  metadata: any;
+  rows: Array<Record<string, string>>;
+};
+
+const DEFAULT_MODELS: DefaultModelSeed[] = [
+  {
+    name: "CGE Economic Model",
+    description: "Run computable general equilibrium simulations and export results to charts.",
+    inputSchema: {
+      fields: [
+        { name: "region", type: "string" },
+        { name: "sector", type: "string" },
+        { name: "shock_pct", type: "number" },
+        { name: "horizon_years", type: "number" },
+      ],
+    },
+    outputSchema: {
+      fields: [
+        { name: "gdp_series", type: "array" },
+        { name: "employment_series", type: "array" },
+        { name: "price_index", type: "number" },
+      ],
+    },
+    apiConfig: {
+      runtime: "python3",
+      entrypoint: "server/scripts/cge_model.py",
+      args: [],
+      sampleInput: { region: "US", sector: "Manufacturing", shock_pct: 0.02, horizon_years: 5 },
+    },
+  },
+  {
+    name: "Input-Output Economic Model",
+    description: "Estimates sector multipliers and GDP impact from demand shocks.",
+    inputSchema: {
+      fields: [
+        { name: "industry", type: "string" },
+        { name: "shock_value", type: "number" },
+        { name: "region", type: "string" },
+        { name: "year", type: "number" },
+      ],
+    },
+    outputSchema: {
+      fields: [
+        { name: "gdp_impact", type: "number" },
+        { name: "employment_impact", type: "number" },
+        { name: "sector_impacts", type: "array" },
+      ],
+    },
+    apiConfig: {
+      runtime: "python3",
+      entrypoint: "server/scripts/input_output_model.py",
+      args: [],
+      sampleInput: { industry: "Manufacturing", shock_value: 100, region: "US", year: 2026 },
+    },
+  },
+  {
+    name: "Freight Demand Forecasting Model",
+    description: "Forecasts lane-level volumes and capacity risk for freight networks.",
+    inputSchema: {
+      fields: [
+        { name: "origin", type: "string" },
+        { name: "destination", type: "string" },
+        { name: "mode", type: "string" },
+        { name: "horizon_months", type: "number" },
+        { name: "fuel_price_index", type: "number" },
+      ],
+    },
+    outputSchema: {
+      fields: [
+        { name: "forecast_series", type: "array" },
+        { name: "risk_band", type: "string" },
+      ],
+    },
+    apiConfig: {
+      runtime: "python3",
+      entrypoint: "server/scripts/freight_forecasting_model.py",
+      args: [],
+      sampleInput: { origin: "Chicago", destination: "Dallas", mode: "truck", horizon_months: 6, fuel_price_index: 108 },
+    },
+  },
+  {
+    name: "Macroeconomic Forecasting Model",
+    description: "Generates quarterly GDP, inflation, and unemployment scenarios.",
+    inputSchema: {
+      fields: [
+        { name: "baseline_gdp", type: "number" },
+        { name: "baseline_inflation", type: "number" },
+        { name: "policy_rate", type: "number" },
+        { name: "shock", type: "string" },
+      ],
+    },
+    outputSchema: {
+      fields: [
+        { name: "scenario", type: "array" },
+        { name: "headline", type: "string" },
+      ],
+    },
+    apiConfig: {
+      runtime: "python3",
+      entrypoint: "server/scripts/macroeconomic_forecasting_model.py",
+      args: [],
+      sampleInput: { baseline_gdp: 2.1, baseline_inflation: 3.2, policy_rate: 4.75, shock: "energy_spike" },
+    },
+  },
+  {
+    name: "Pricing Elasticity Simulator",
+    description: "Estimates volume and revenue impact of price changes.",
+    inputSchema: {
+      fields: [
+        { name: "current_price", type: "number" },
+        { name: "proposed_price", type: "number" },
+        { name: "baseline_volume", type: "number" },
+        { name: "elasticity", type: "number" },
+      ],
+    },
+    outputSchema: {
+      fields: [
+        { name: "projected_volume", type: "number" },
+        { name: "revenue_change_pct", type: "number" },
+        { name: "margin_change_pct", type: "number" },
+      ],
+    },
+    apiConfig: {
+      runtime: "python3",
+      entrypoint: "server/scripts/pricing_elasticity_model.py",
+      args: [],
+      sampleInput: { current_price: 120, proposed_price: 132, baseline_volume: 50000, elasticity: -1.2 },
+    },
+  },
+  {
+    name: "Customer Churn Risk Model",
+    description: "Scores accounts for churn risk using usage and sentiment signals.",
+    inputSchema: {
+      fields: [
+        { name: "account_tenure_months", type: "number" },
+        { name: "nps", type: "number" },
+        { name: "support_tickets", type: "number" },
+        { name: "usage_change_pct", type: "number" },
+      ],
+    },
+    outputSchema: {
+      fields: [
+        { name: "churn_probability", type: "number" },
+        { name: "risk_bucket", type: "string" },
+      ],
+    },
+    apiConfig: {
+      runtime: "python3",
+      entrypoint: "server/scripts/churn_risk_model.py",
+      args: [],
+      sampleInput: { account_tenure_months: 18, nps: 12, support_tickets: 5, usage_change_pct: -18 },
+    },
+  },
+  {
+    name: "Supply Chain Risk Stress Test",
+    description: "Quantifies disruption exposure across suppliers and lead times.",
+    inputSchema: {
+      fields: [
+        { name: "supplier_count", type: "number" },
+        { name: "single_source_pct", type: "number" },
+        { name: "lead_time_days", type: "number" },
+        { name: "disruption_probability", type: "number" },
+      ],
+    },
+    outputSchema: {
+      fields: [
+        { name: "expected_delay_days", type: "number" },
+        { name: "risk_score", type: "number" },
+      ],
+    },
+    apiConfig: {
+      runtime: "python3",
+      entrypoint: "server/scripts/supply_chain_risk_model.py",
+      args: [],
+      sampleInput: { supplier_count: 12, single_source_pct: 0.35, lead_time_days: 48, disruption_probability: 0.18 },
+    },
+  },
+];
+
+const DEFAULT_DATASETS: DefaultDatasetSeed[] = [
+  {
+    name: "Global Energy Prices Q1 2026",
+    description: "Weekly energy price benchmarks across major regions.",
+    projectId: null,
+    owner: "Strategy Ops",
+    accessLevel: "shared",
+    sourceType: "api",
+    sourceUrl: "https://api.example.com/energy/prices",
+    schemaJson: [
+      { name: "region", type: "string" },
+      { name: "week", type: "string" },
+      { name: "price_usd_mmbtu", type: "number" },
+    ],
+    metadata: { refreshCadence: "weekly", unit: "USD/MMBtu" },
+    rows: [
+      { region: "North America", week: "2026-W01", price_usd_mmbtu: "2.93" },
+      { region: "Europe", week: "2026-W01", price_usd_mmbtu: "9.87" },
+      { region: "Asia", week: "2026-W01", price_usd_mmbtu: "12.14" },
+      { region: "North America", week: "2026-W02", price_usd_mmbtu: "3.05" },
+    ],
+  },
+  {
+    name: "Consumer Sentiment Pulse",
+    description: "Rolling sentiment index by geography and channel.",
+    projectId: null,
+    owner: "Insights Lab",
+    accessLevel: "shared",
+    sourceType: "manual",
+    sourceUrl: null,
+    schemaJson: [
+      { name: "week", type: "string" },
+      { name: "geography", type: "string" },
+      { name: "index", type: "number" },
+      { name: "channel", type: "string" },
+    ],
+    metadata: { refreshCadence: "weekly", base: "2024=100" },
+    rows: [
+      { week: "2026-W01", geography: "US", index: "104.2", channel: "online" },
+      { week: "2026-W01", geography: "UK", index: "98.7", channel: "retail" },
+      { week: "2026-W01", geography: "DE", index: "101.3", channel: "online" },
+      { week: "2026-W02", geography: "US", index: "103.5", channel: "retail" },
+    ],
+  },
+  {
+    name: "Project 5 - Retention Cohorts",
+    description: "Monthly retention by acquisition cohort for Project 5.",
+    projectId: 5,
+    owner: "Project Team",
+    accessLevel: "private",
+    sourceType: "manual",
+    sourceUrl: null,
+    schemaJson: [
+      { name: "cohort", type: "string" },
+      { name: "month_0", type: "number" },
+      { name: "month_1", type: "number" },
+      { name: "month_2", type: "number" },
+      { name: "month_3", type: "number" },
+    ],
+    metadata: { unit: "percent", note: "Sample cohort retention" },
+    rows: [
+      { cohort: "2025-10", month_0: "100", month_1: "78", month_2: "62", month_3: "55" },
+      { cohort: "2025-11", month_0: "100", month_1: "81", month_2: "65", month_3: "58" },
+      { cohort: "2025-12", month_0: "100", month_1: "84", month_2: "69", month_3: "60" },
+    ],
+  },
+  {
+    name: "Project 5 - Pipeline Snapshot",
+    description: "Sales pipeline summary for Project 5 workstream.",
+    projectId: 5,
+    owner: "Project Team",
+    accessLevel: "private",
+    sourceType: "manual",
+    sourceUrl: null,
+    schemaJson: [
+      { name: "account", type: "string" },
+      { name: "stage", type: "string" },
+      { name: "amount_usd", type: "number" },
+      { name: "close_quarter", type: "string" },
+      { name: "owner", type: "string" },
+    ],
+    metadata: { currency: "USD", snapshot: "2026-02-01" },
+    rows: [
+      { account: "Delta Health", stage: "Qualified", amount_usd: "120000", close_quarter: "2026-Q2", owner: "A. Chen" },
+      { account: "Mosaic Retail", stage: "Proposal", amount_usd: "240000", close_quarter: "2026-Q2", owner: "J. Patel" },
+      { account: "Northwind Logistics", stage: "Negotiation", amount_usd: "315000", close_quarter: "2026-Q3", owner: "S. Kim" },
+      { account: "Evergreen Foods", stage: "Discovery", amount_usd: "90000", close_quarter: "2026-Q2", owner: "R. Diaz" },
+    ],
+  },
+];
+
+async function seedDefaultModels() {
+  const existing = await storage.listModels();
+  const existingByName = new Set(existing.map((m) => m.name.toLowerCase()));
+
+  for (const model of DEFAULT_MODELS) {
+    if (!existingByName.has(model.name.toLowerCase())) {
+      await storage.createModel({
+        projectId: null,
+        name: model.name,
+        description: model.description,
+        inputSchema: model.inputSchema,
+        outputSchema: model.outputSchema,
+        apiConfig: model.apiConfig,
+      });
+    }
+  }
+
+  const project = await storage.getProject(5);
+  if (!project) return;
+
+  const updatedModels = await storage.listModels();
+  const defaultNames = new Set(DEFAULT_MODELS.map((m) => m.name.toLowerCase()));
+  for (const model of updatedModels) {
+    if (defaultNames.has(model.name.toLowerCase())) {
+      await storage.linkProjectModel(project.id, model.id);
+    }
+  }
+}
+
+async function seedDefaultDatasets() {
+  const existing = await storage.listDatasets();
+  const existingByName = new Set(existing.map((d) => d.name.toLowerCase()));
+  const users = await storage.listUsers();
+  const defaultUserId = users[0]?.id ?? null;
+  const project = await storage.getProject(5);
+
+  for (const dataset of DEFAULT_DATASETS) {
+    if (dataset.projectId === 5 && !project) continue;
+    if (existingByName.has(dataset.name.toLowerCase())) continue;
+
+    const created = await storage.createDataset({
+      projectId: dataset.projectId,
+      lastEditedByUserId: defaultUserId,
+      name: dataset.name,
+      description: dataset.description,
+      owner: dataset.owner,
+      accessLevel: dataset.accessLevel,
+      sourceType: dataset.sourceType,
+      sourceUrl: dataset.sourceUrl ?? undefined,
+      schemaJson: dataset.schemaJson,
+      metadata: dataset.metadata,
+      rowCount: dataset.rows.length,
+    });
+
+    await storage.insertDatasetRows(
+      created.id,
+      dataset.rows.map((row, rowIndex) => ({ rowIndex, data: row }))
+    );
+  }
+}
+
 async function ensureDefaults() {
   for (const a of DEFAULT_AGENTS) {
     await storage.upsertAgent(a);
   }
 
   const templates = await storage.listWorkflowTemplates();
+  const existingTemplateNames = new Set(templates.map((t) => t.name.toLowerCase()));
   if (templates.length === 0) {
     const template = await storage.createWorkflowTemplate({
       name: "Consulting Analysis",
       description: "Standard consulting workflow: Project Definition -> Issues Tree -> Hypotheses -> Execution -> Summary -> Presentation",
     });
+    existingTemplateNames.add(template.name.toLowerCase());
     for (const step of DEFAULT_WORKFLOW_STEPS) {
       await storage.addWorkflowTemplateStep({
         workflowTemplateId: template.id,
@@ -386,12 +827,27 @@ async function ensureDefaults() {
       name: "Desktop Executive Summary",
       description: "Adversarial analysis workflow: Clarify Topic -> Key Issues -> Strongman Pro & Con -> Balanced Centrist Executive Summary",
     });
+    existingTemplateNames.add(desTemplate.name.toLowerCase());
     for (const step of DES_WORKFLOW_STEPS) {
       await storage.addWorkflowTemplateStep({
         workflowTemplateId: desTemplate.id,
         ...step,
       });
     }
+  }
+
+  for (const template of COMING_SOON_WORKFLOWS) {
+    if (existingTemplateNames.has(template.name.toLowerCase())) continue;
+    const created = await storage.createWorkflowTemplate({
+      name: template.name,
+      description: "",
+      practiceCoverage: template.practiceCoverage,
+      timesUsed: 0,
+      deploymentStatus: "planned",
+      governanceMaturity: 1,
+      lifecycleStatus: "coming_soon",
+    });
+    existingTemplateNames.add(created.name.toLowerCase());
   }
 
   const pipelines = await storage.listPipelines();
@@ -404,6 +860,8 @@ async function ensureDefaults() {
   }
 
   await storage.ensureDefaultUsers();
+  await seedDefaultModels();
+  await seedDefaultDatasets();
 }
 
 const MANAGEMENT_PHASE_BLUEPRINT = [
@@ -688,6 +1146,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const project = await storage.getProject(Number(req.params.id));
       if (!project) return res.status(404).json({ error: "Not found" });
       res.json(project);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/projects/:id", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const project = await storage.getProject(projectId);
+      if (!project) return res.status(404).json({ error: "Not found" });
+
+      const payload = {
+        governanceControls: req.body?.governanceControls ?? project.governanceControls,
+        totalSavingsToDate: req.body?.totalSavingsToDate ?? null,
+        costReductionRealisedPct: req.body?.costReductionRealisedPct ?? null,
+        marginImpactToDate: req.body?.marginImpactToDate ?? null,
+        projectedAnnualImpact: req.body?.projectedAnnualImpact ?? null,
+      };
+
+      const updated = await storage.updateProject(projectId, payload);
+      res.json(updated);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1511,9 +1990,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/workflows", async (req: Request, res: Response) => {
     try {
-      const { name, description, steps } = req.body;
+      const {
+        name,
+        description,
+        steps,
+        practiceCoverage,
+        timesUsed,
+        deploymentStatus,
+        governanceMaturity,
+        baselineCost,
+        aiCost,
+        lifecycleStatus,
+        comingSoonEta,
+      } = req.body;
       if (!name) return res.status(400).json({ error: "name is required" });
-      const template = await storage.createWorkflowTemplate({ name, description });
+      const template = await storage.createWorkflowTemplate({
+        name,
+        description,
+        practiceCoverage,
+        timesUsed,
+        deploymentStatus,
+        governanceMaturity,
+        baselineCost,
+        aiCost,
+        lifecycleStatus,
+        comingSoonEta,
+      });
       if (steps && Array.isArray(steps)) {
         for (const s of steps) {
           await storage.addWorkflowTemplateStep({
@@ -1535,8 +2037,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.put("/api/workflows/:id", async (req: Request, res: Response) => {
     try {
-      const { name, description, steps } = req.body;
-      const template = await storage.updateWorkflowTemplate(Number(req.params.id), { name, description });
+      const {
+        name,
+        description,
+        steps,
+        practiceCoverage,
+        timesUsed,
+        deploymentStatus,
+        governanceMaturity,
+        baselineCost,
+        aiCost,
+        lifecycleStatus,
+        comingSoonEta,
+      } = req.body;
+      const template = await storage.updateWorkflowTemplate(Number(req.params.id), {
+        name,
+        description,
+        practiceCoverage,
+        timesUsed,
+        deploymentStatus,
+        governanceMaturity,
+        baselineCost,
+        aiCost,
+        lifecycleStatus,
+        comingSoonEta,
+      });
       let allSteps;
       if (steps && Array.isArray(steps)) {
         allSteps = await storage.replaceWorkflowTemplateSteps(template.id, steps);
@@ -1727,57 +2252,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
     sendSSE("connected", "CGE model stream connected");
 
     python.stdout.setEncoding("utf-8");
+    let stdoutBuffer = "";
+
+    const handleCgeLine = (line: string) => {
+      const [rawType, ...rest] = line.split(":");
+      const payload = rest.join(":");
+      if (rawType === "RESULT") {
+        (async () => {
+          let parsed: any = null;
+          try {
+            parsed = JSON.parse(payload);
+          } catch {
+            parsed = { headline: "CGE run complete" };
+          }
+
+          if (projectId && Number.isFinite(projectId)) {
+            const { columns, rows } = buildCgeSpreadsheetRows(parsed);
+            if (rows.length > 0) {
+              const name = `CGE Outputs ${new Date().toISOString().slice(0, 10)}`;
+              const dataset = await storage.createDataset({
+                projectId,
+                name,
+                sourceType: "spreadsheet",
+                schemaJson: columns.map((col) => ({ name: col, type: "string" })),
+                rowCount: rows.length,
+              });
+              await storage.insertDatasetRows(dataset.id, rows);
+              parsed.spreadsheetId = dataset.id;
+              parsed.spreadsheetName = dataset.name;
+            }
+          }
+
+          sendSSE("complete", JSON.stringify(parsed));
+          if (!closed) {
+            closed = true;
+            res.end();
+          }
+        })().catch((err) => {
+          sendSSE("error", err.message || "Failed to save CGE outputs");
+          if (!closed) {
+            closed = true;
+            res.end();
+          }
+        });
+        return;
+      }
+      if (rawType === "STATUS" || rawType === "PROGRESS") {
+        sendSSE("progress", payload.trim());
+        return;
+      }
+      sendSSE("progress", line.trim());
+    };
+
     python.stdout.on("data", (chunk: string) => {
-      const lines = chunk.split(/\r?\n/).filter(Boolean);
-      lines.forEach((line) => {
-        const [rawType, ...rest] = line.split(":");
-        const payload = rest.join(":");
-        if (rawType === "RESULT") {
-          (async () => {
-            let parsed: any = null;
-            try {
-              parsed = JSON.parse(payload);
-            } catch {
-              parsed = { headline: "CGE run complete" };
-            }
-
-            if (projectId && Number.isFinite(projectId)) {
-              const { columns, rows } = buildCgeSpreadsheetRows(parsed);
-              if (rows.length > 0) {
-                const name = `CGE Outputs ${new Date().toISOString().slice(0, 10)}`;
-                const dataset = await storage.createDataset({
-                  projectId,
-                  name,
-                  sourceType: "spreadsheet",
-                  schemaJson: columns.map((col) => ({ name: col, type: "string" })),
-                  rowCount: rows.length,
-                });
-                await storage.insertDatasetRows(dataset.id, rows);
-                parsed.spreadsheetId = dataset.id;
-                parsed.spreadsheetName = dataset.name;
-              }
-            }
-
-            sendSSE("complete", JSON.stringify(parsed));
-            if (!closed) {
-              closed = true;
-              res.end();
-            }
-          })().catch((err) => {
-            sendSSE("error", err.message || "Failed to save CGE outputs");
-            if (!closed) {
-              closed = true;
-              res.end();
-            }
-          });
-          return;
-        }
-        if (rawType === "STATUS" || rawType === "PROGRESS") {
-          sendSSE("progress", payload.trim());
-          return;
-        }
-        sendSSE("progress", line.trim());
-      });
+      stdoutBuffer += chunk;
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() ?? "";
+      lines.filter(Boolean).forEach(handleCgeLine);
     });
 
     python.stderr.setEncoding("utf-8");
@@ -1794,6 +2325,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
 
     python.on("close", () => {
+      if (!closed && stdoutBuffer.trim()) {
+        handleCgeLine(stdoutBuffer.trim());
+        stdoutBuffer = "";
+      }
       if (!closed) {
         sendSSE("complete", JSON.stringify({ headline: "CGE run complete" }));
         closed = true;
@@ -1823,6 +2358,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const m = await storage.getModel(Number(req.params.id));
       if (!m) return res.status(404).json({ error: "Not found" });
       res.json(m);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/models/:id/run", async (req: Request, res: Response) => {
+    try {
+      const modelId = Number(req.params.id);
+      const model = await storage.getModel(modelId);
+      if (!model) return res.status(404).json({ error: "Model not found" });
+      if (!model.apiConfig) return res.status(400).json({ error: "Model has no apiConfig" });
+
+      const rawOutput = await runPythonModel(model.apiConfig as PythonModelConfig, req.body || {});
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(rawOutput);
+      } catch {
+        parsed = { output: rawOutput };
+      }
+
+      res.json({ modelId: model.id, name: model.name, output: parsed });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
