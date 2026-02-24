@@ -48,6 +48,7 @@ interface WorkflowStep {
   agentKey: string;
   description: string;
   parallelGroup?: number;
+  configJson?: any;
 }
 
 interface WorkflowTemplate {
@@ -203,6 +204,11 @@ function StepPanel({
   parallelGroupOptions: number[];
 }) {
   const color = STEP_COLORS[index % STEP_COLORS.length];
+  const configPreview = useMemo(
+    () => ({ ...(step.configJson || {}), parallelGroup: step.parallelGroup || 0 }),
+    [step.configJson, step.parallelGroup]
+  );
+  const configText = useMemo(() => JSON.stringify(configPreview, null, 2), [configPreview]);
 
   return (
     <Card className="p-4 border-l-4" style={{ borderLeftColor: color }}>
@@ -304,6 +310,35 @@ function StepPanel({
             Steps in the same group run in parallel.
           </div>
         </div>
+
+        {step.agentKey === "model_runner" && (
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Model name</label>
+            <Input
+              value={step.configJson?.modelName || ""}
+              onChange={(e) =>
+                onUpdate(index, {
+                  configJson: {
+                    ...(step.configJson || {}),
+                    modelName: e.target.value,
+                  },
+                })
+              }
+              className="h-8 text-sm"
+              placeholder="CGE Economic Model"
+            />
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              Matches against project model names when running.
+            </div>
+          </div>
+        )}
+
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Step config</label>
+          <pre className="text-xs bg-muted/40 rounded-md p-2 overflow-x-auto whitespace-pre-wrap">
+            {configText}
+          </pre>
+        </div>
       </div>
     </Card>
   );
@@ -345,6 +380,7 @@ export default function WorkflowEditor() {
           agentKey: s.agentKey,
           description: s.description || "",
           parallelGroup: s.configJson?.parallelGroup ?? 0,
+          configJson: s.configJson || {},
         }))
       );
       setInitialized(true);
@@ -698,6 +734,7 @@ export default function WorkflowEditor() {
       agentKey: agents[0]?.key || "project_definition",
       description: "",
       parallelGroup: 0,
+      configJson: {},
     };
     setSteps((prev) => [...prev, newStep]);
     setSelectedIdx(steps.length);
@@ -711,7 +748,7 @@ export default function WorkflowEditor() {
         description,
         steps: steps.map((step) => ({
           ...step,
-          configJson: { parallelGroup: step.parallelGroup || 0 },
+          configJson: { ...(step.configJson || {}), parallelGroup: step.parallelGroup || 0 },
         })),
       };
       if (isNew) {

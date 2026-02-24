@@ -37,6 +37,19 @@ export default function ModelDetail() {
   const [runInput, setRunInput] = useState("");
   const [inputError, setInputError] = useState<string | null>(null);
 
+  const formatJson = (value: any) => {
+    if (value === null || value === undefined) return "No configuration";
+    try {
+      return JSON.stringify(
+        value,
+        (_key, val) => (typeof val === "bigint" ? val.toString() : val),
+        2,
+      );
+    } catch {
+      return "Unable to display configuration.";
+    }
+  };
+
   const modelQuery = useQuery<Model>({
     queryKey: ["/api/data/models", numericId],
     queryFn: async () => {
@@ -53,6 +66,13 @@ export default function ModelDetail() {
       return res.json();
     },
   });
+
+  useEffect(() => {
+    if (!modelQuery.data) return;
+    if (runInput) return;
+    const sample = modelQuery.data.apiConfig?.sampleInput ?? {};
+    setRunInput(formatJson(sample));
+  }, [modelQuery.data, runInput]);
 
   if (!Number.isFinite(numericId)) {
     return (
@@ -92,17 +112,10 @@ export default function ModelDetail() {
 
   const model = modelQuery.data;
   const editedBy = model.lastEditedByUserId ? userLookup.get(model.lastEditedByUserId) : null;
-  const formatJson = (value: any) => (value ? JSON.stringify(value, null, 2) : "No configuration");
   const hasApiConfig = !!model.apiConfig;
   const placeholderText = `{
   "param": "value"
-}`;
-
-  useEffect(() => {
-    if (runInput) return;
-    const sample = model.apiConfig?.sampleInput ?? {};
-    setRunInput(JSON.stringify(sample, null, 2));
-  }, [model.apiConfig, runInput]);
+ }`;
 
   const handleRun = () => {
     try {

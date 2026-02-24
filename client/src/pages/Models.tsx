@@ -161,7 +161,11 @@ export default function Models() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {globalModels.map((m) => (
-                  <Card key={m.id} className="p-4">
+                  <Card
+                    key={m.id}
+                    className="p-4 cursor-pointer hover:bg-muted/30"
+                    onClick={() => handleRowClick(m.id)}
+                  >
                     <div className="flex items-center gap-2 mb-2">
                       <Box size={16} className="text-primary" />
                       <h3 className="font-semibold text-sm">{m.name}</h3>

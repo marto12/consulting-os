@@ -594,6 +594,28 @@ export const storage = {
       .orderBy(asc(workflowInstanceSteps.stepOrder));
   },
 
+  async listWorkflowInstanceStepsForProject(projectId: number): Promise<Array<WorkflowInstanceStep & { workflowTemplateId: number; workflowName: string | null; workflowInstanceId: number }>> {
+    const rows = await db
+      .select({
+        step: workflowInstanceSteps,
+        workflowTemplateId: workflowInstances.workflowTemplateId,
+        workflowName: workflowTemplates.name,
+        workflowInstanceId: workflowInstances.id,
+      })
+      .from(workflowInstanceSteps)
+      .innerJoin(workflowInstances, eq(workflowInstanceSteps.workflowInstanceId, workflowInstances.id))
+      .leftJoin(workflowTemplates, eq(workflowInstances.workflowTemplateId, workflowTemplates.id))
+      .where(eq(workflowInstances.projectId, projectId))
+      .orderBy(asc(workflowInstances.createdAt), asc(workflowInstanceSteps.stepOrder));
+
+    return rows.map((row) => ({
+      ...row.step,
+      workflowTemplateId: row.workflowTemplateId,
+      workflowName: row.workflowName || null,
+      workflowInstanceId: row.workflowInstanceId,
+    }));
+  },
+
   async getWorkflowInstanceStep(stepId: number): Promise<WorkflowInstanceStep | undefined> {
     const [step] = await db
       .select()

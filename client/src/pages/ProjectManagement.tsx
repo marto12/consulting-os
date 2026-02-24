@@ -27,11 +27,10 @@ import {
   CircleDot,
   ChevronDown,
   ChevronRight,
-  FileText,
+  GitBranch,
   Play,
   ShieldCheck,
   Sparkles,
-  Terminal,
   User,
   Zap,
 } from "lucide-react";
@@ -73,6 +72,14 @@ type WorkflowStep = {
   name: string;
   status: string;
   agentKey?: string;
+  workflowName?: string | null;
+  workflowTemplateId?: number | null;
+};
+
+type WorkflowTemplate = {
+  id: number;
+  name: string;
+  description?: string;
 };
 
 type ManagementData = {
@@ -358,7 +365,6 @@ export default function ProjectManagement() {
   const queryClient = useQueryClient();
   const { users } = useUserContext();
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
-  const [drawerTab, setDrawerTab] = useState<"details" | "outputs" | "logs">("details");
   const [overviewView, setOverviewView] = useState<"operations" | "impact">("operations");
   const [view, setView] = useState<"list" | "board" | "timeline">("list");
   const [dragOverStatus, setDragOverStatus] = useState<string | null>(null);
@@ -447,9 +453,26 @@ export default function ProjectManagement() {
     },
   });
 
+  const attachWorkflowMutation = useMutation({
+    mutationFn: async ({ templateId }: { templateId: number }) => {
+      const res = await apiRequest("POST", `/api/projects/${projectId}/workflow/attach-template`, { templateId });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "management"] });
+    },
+    onError: () => {
+      setToast({ message: "Failed to attach workflow.", type: "error" });
+    },
+  });
+
   const { data: managementData, isLoading } = useQuery<ManagementData>({
     queryKey: ["/api/projects", projectId, "management"],
     enabled: Number.isFinite(projectId),
+  });
+
+  const { data: workflowTemplates = [] } = useQuery<WorkflowTemplate[]>({
+    queryKey: ["/api/workflows"],
   });
 
   const { data: deliverables = [] } = useQuery<
@@ -471,6 +494,7 @@ export default function ProjectManagement() {
     workflowSteps.forEach((step) => map.set(step.id, step));
     return map;
   }, [workflowSteps]);
+
 
   useEffect(() => {
     if (!managementData?.tasks) return;
@@ -513,6 +537,7 @@ export default function ProjectManagement() {
         .sort((a, b) => a.sortOrder - b.sortOrder);
     });
   }, [managementData?.tasks]);
+
 
   const taskMap = useMemo(() => {
     return new Map(localTasks.map((task) => [task.id, task]));
@@ -609,7 +634,8 @@ export default function ProjectManagement() {
       }
       if (task.taskType === "agent") {
         const workflow = task.workflowId ? workflowStepMap.get(task.workflowId) : null;
-        return workflow?.name || "Unassigned";
+        if (!workflow) return "Unassigned";
+        return workflow.workflowName ? `${workflow.workflowName} · ${workflow.name}` : workflow.name;
       }
       return task.gate?.clientOwner || "Client";
     },
@@ -645,43 +671,20 @@ export default function ProjectManagement() {
     [handleStatusChange]
   );
 
-  const handleRunTask = useCallback(
-    (taskId: number) => {
-      const startedAt = new Date().toISOString();
-      setLocalTasks((prev) =>
-        prev.map((task) => {
-          if (task.id !== taskId || task.taskType !== "agent") return task;
-          const nextEntry: ExecutionHistory = {
-            id: `${task.id}-${Date.now()}`,
-            state: "running",
-            startedAt,
-            summary: "Run started",
-            output: { id: `${task.id}-out-${Date.now()}`, title: `${task.title} output`, type: "artifact" },
-          };
-          const history = [nextEntry, ...(task.execution?.history || [])];
-          return {
-            ...task,
-            status: "running",
-            execution: {
-              state: "running",
-              lastRunAt: startedAt,
-              lastResult: "Running",
-              history,
-            },
-          };
-        })
-      );
-      fetch(`/api/projects/${projectId}/tasks/${taskId}/run`, { method: "POST" }).catch(() => null);
-    },
-    [projectId]
-  );
-
-  const openTaskDrawer = useCallback((taskId: number, _tab: "details" | "outputs" | "logs" = "details") => {
+  const openTaskDrawer = useCallback((taskId: number) => {
     setSelectedTaskId(null);
-    setDrawerTab("details");
     if (!Number.isFinite(projectId)) return;
     navigate(`/project/${projectId}/management/task/${taskId}`);
   }, [navigate, projectId]);
+
+  const handleRunWorkflow = useCallback(
+    (taskId: number, workflowId?: number | null) => {
+      if (!workflowId) return;
+      fetch(`/api/projects/${projectId}/workflow/steps/${workflowId}/run`, { method: "POST" }).catch(() => null);
+      navigate(`/project/${projectId}/management/task/${taskId}`);
+    },
+    [navigate, projectId]
+  );
 
   const handleDependencyAdd = useCallback((taskId: number, depId: number) => {
     updateTask(taskId, (task) => {
@@ -1346,18 +1349,31 @@ export default function ProjectManagement() {
                       }
                       className="flex w-full items-center justify-between gap-3 border-b border-border px-4 py-3 text-left"
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-3 min-w-0">
                         {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                        <div>
-                          <div className="text-sm font-semibold text-foreground">{phase.name}</div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-foreground truncate">{phase.name}</div>
                           <div className="text-xs text-muted-foreground">
                             {counts.done}/{counts.total} complete {isCurrent && "· Current phase"}
                           </div>
                         </div>
                       </div>
-                      <Badge variant="outline" className="text-xs">
-                        {counts.done}/{counts.total}
-                      </Badge>
+                      <div className="flex items-center gap-3">
+                        <div className="hidden sm:flex items-center gap-2 min-w-[140px]">
+                          <div className="h-1.5 w-full rounded-full bg-muted">
+                            <div
+                              className="h-1.5 rounded-full bg-emerald-500"
+                              style={{ width: `${counts.total === 0 ? 0 : Math.round((counts.done / counts.total) * 100)}%` }}
+                            />
+                          </div>
+                          <span className="text-[11px] text-muted-foreground w-10 text-right">
+                            {counts.total === 0 ? 0 : Math.round((counts.done / counts.total) * 100)}%
+                          </span>
+                        </div>
+                        <Badge variant="outline" className="text-xs hidden">
+                          {counts.done}/{counts.total}
+                        </Badge>
+                      </div>
                     </button>
                     {!isCollapsed && (
                       <div className="divide-y divide-border">
@@ -1377,11 +1393,6 @@ export default function ProjectManagement() {
                               <div className="min-w-0 space-y-1">
                                 <div className="flex items-center gap-2">
                                   <div className={cn("font-semibold text-foreground truncate", task.status === "complete" && "line-through")}>{task.title}</div>
-                                  {task.taskType === "agent" && task.workflowId && (
-                                    <Badge variant="outline" className="text-[10px]">
-                                      workflow: {workflowStepMap.get(task.workflowId)?.name || `Step ${task.workflowId}`}
-                                    </Badge>
-                                  )}
                                   {task.isBlocked && (
                                     <Badge variant="destructive" className="text-[10px]">Blocked</Badge>
                                   )}
@@ -1436,157 +1447,167 @@ export default function ProjectManagement() {
                               <div
                                 onClick={(event) => event.stopPropagation()}
                                 onPointerDown={(event) => event.stopPropagation()}
+                                className="flex flex-col gap-2"
                               >
-                                {task.taskType === "human" && (
-                                  <Select
-                                    value={task.responsibleId ? String(task.responsibleId) : ""}
-                                    onValueChange={(value: string) => {
+                                <Select
+                                  value={task.taskType === "client" ? "client" : task.taskType === "agent" ? "agent" : task.responsibleId ? String(task.responsibleId) : ""}
+                                  onValueChange={(value: string) => {
+                                    if (value === "agent") {
                                       updateTask(task.id, (prev) => ({
                                         ...prev,
-                                        responsibleId: value ? Number(value) : null,
+                                        taskType: "agent",
+                                        responsibleId: null,
                                         workflowId: null,
                                         gate: prev.gate,
                                       }));
                                       updateTaskMutation.mutate({
                                         taskId: task.id,
                                         payload: {
-                                          ownerType: "human",
-                                          assigneeUserId: value ? Number(value) : null,
+                                          ownerType: "agent",
+                                          taskType: "agent",
+                                          assigneeUserId: null,
                                           workflowStepId: null,
                                         },
                                       });
-                                    }}
-                                  >
-                                    <SelectTrigger className="h-7 w-full min-w-[150px] rounded-full border px-2 py-0 text-[11px]">
-                                      <SelectValue placeholder="Unassigned" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {users.map((user) => (
-                                        <SelectItem key={user.id} value={String(user.id)}>
-                                          <div className="flex items-center gap-2">
-                                            <User className="h-3.5 w-3.5" />
-                                            <span>{user.name}</span>
-                                          </div>
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                )}
-                                {task.taskType === "agent" && (
-                                  <Select
-                                    value={task.workflowId ? String(task.workflowId) : ""}
-                                    onValueChange={(value: string) => {
+                                      return;
+                                    }
+                                    if (value === "client") {
                                       updateTask(task.id, (prev) => ({
                                         ...prev,
-                                        workflowId: value ? Number(value) : null,
+                                        taskType: "client",
                                         responsibleId: null,
-                                        gate: prev.gate,
-                                      }));
-                                      updateTaskMutation.mutate({
-                                        taskId: task.id,
-                                        payload: {
-                                          ownerType: "agent",
-                                          workflowStepId: value ? Number(value) : null,
-                                          assigneeUserId: null,
-                                        },
-                                      });
-                                    }}
-                                  >
-                                    <SelectTrigger className="h-7 w-full min-w-[150px] rounded-full border px-2 py-0 text-[11px]">
-                                      <SelectValue placeholder="Unassigned" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {workflowSteps.map((step) => (
-                                        <SelectItem key={step.id} value={String(step.id)}>
-                                          <div className="flex items-center gap-2">
-                                            <Bot className="h-3.5 w-3.5" />
-                                            <span>{step.name}</span>
-                                          </div>
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                )}
-                                {task.taskType === "client" && (
-                                  <Select
-                                    value={String(task.gate?.clientOwner || "Client")}
-                                    onValueChange={(value: string) => {
-                                      updateTask(task.id, (prev) => ({
-                                        ...prev,
-                                        gate: { ...(prev.gate ?? {}), clientOwner: value },
+                                        workflowId: null,
+                                        gate: { ...(prev.gate ?? {}), clientOwner: "Client" },
                                       }));
                                       updateTaskMutation.mutate({
                                         taskId: task.id,
                                         payload: {
                                           ownerType: "client",
-                                          gateJson: { ...(task.gate ?? {}), clientOwner: value },
+                                          taskType: "client",
+                                          gateJson: { ...(task.gate ?? {}), clientOwner: "Client" },
                                           assigneeUserId: null,
                                           workflowStepId: null,
                                         },
                                       });
-                                    }}
-                                  >
-                                    <SelectTrigger className="h-7 w-full min-w-[150px] rounded-full border px-2 py-0 text-[11px]">
-                                      <SelectValue placeholder="Client" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="Client">
+                                      return;
+                                    }
+                                    updateTask(task.id, (prev) => ({
+                                      ...prev,
+                                      taskType: "human",
+                                      responsibleId: value ? Number(value) : null,
+                                      workflowId: null,
+                                      gate: prev.gate,
+                                    }));
+                                    updateTaskMutation.mutate({
+                                      taskId: task.id,
+                                      payload: {
+                                        ownerType: "human",
+                                        taskType: "human",
+                                        assigneeUserId: value ? Number(value) : null,
+                                        workflowStepId: null,
+                                      },
+                                    });
+                                  }}
+                                >
+                                  <SelectTrigger className="h-7 w-full min-w-[150px] rounded-full border px-2 py-0 text-[11px]">
+                                    <SelectValue placeholder="Unassigned" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="client">
+                                      <div className="flex items-center gap-2">
+                                        <ShieldCheck className="h-3.5 w-3.5" />
+                                        <span>Client</span>
+                                      </div>
+                                    </SelectItem>
+                                    <SelectItem value="agent">
+                                      <div className="flex items-center gap-2">
+                                        <Bot className="h-3.5 w-3.5" />
+                                        <span>Agent workflow</span>
+                                      </div>
+                                    </SelectItem>
+                                    {users.map((user) => (
+                                      <SelectItem key={user.id} value={String(user.id)}>
                                         <div className="flex items-center gap-2">
-                                          <ShieldCheck className="h-3.5 w-3.5" />
-                                          <span>Client</span>
+                                          <User className="h-3.5 w-3.5" />
+                                          <span>{user.name}</span>
                                         </div>
                                       </SelectItem>
-                                      {users.map((user) => (
-                                        <SelectItem key={user.id} value={user.name}>
-                                          <div className="flex items-center gap-2">
-                                            <User className="h-3.5 w-3.5" />
-                                            <span>{user.name}</span>
-                                          </div>
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+
+                                {task.taskType === "agent" && (
+                                  <div className="flex flex-col gap-2 w-full">
+                                    <div className="flex items-center gap-2 w-full">
+                                      <Select
+                                        value={(() => {
+                                          if (!task.workflowId) return "";
+                                          const templateId = workflowStepMap.get(task.workflowId)?.workflowTemplateId;
+                                          return templateId ? String(templateId) : "";
+                                        })()}
+                                        onValueChange={(value: string) => {
+                                          const templateId = Number(value);
+                                          if (!Number.isFinite(templateId)) return;
+                                          attachWorkflowMutation.mutate(
+                                            { templateId },
+                                            {
+                                              onSuccess: (data) => {
+                                                const steps = data?.steps || [];
+                                                const nextStepId = steps[0]?.id || null;
+                                                updateTask(task.id, (prev) => ({
+                                                  ...prev,
+                                                  taskType: "agent",
+                                                  workflowId: nextStepId,
+                                                  responsibleId: null,
+                                                }));
+                                                updateTaskMutation.mutate({
+                                                  taskId: task.id,
+                                                  payload: {
+                                                    ownerType: "agent",
+                                                    workflowStepId: nextStepId,
+                                                    assigneeUserId: null,
+                                                  },
+                                                });
+                                              },
+                                            }
+                                          );
+                                        }}
+                                      >
+                                        <SelectTrigger className="h-7 w-full min-w-[150px] rounded-full border px-2 py-0 text-[11px]">
+                                          <SelectValue placeholder="Select workflow" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {workflowTemplates.map((template) => (
+                                            <SelectItem key={template.id} value={String(template.id)}>
+                                              <div className="flex items-center gap-2">
+                                                <GitBranch className="h-3.5 w-3.5" />
+                                                <span>{template.name}</span>
+                                              </div>
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                      {task.workflowId && (
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          className="h-7 w-7 p-0"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            handleRunWorkflow(task.id, task.workflowId);
+                                          }}
+                                          aria-label="Run workflow"
+                                        >
+                                          <Play className="h-3.5 w-3.5" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </div>
                                 )}
+
                               </div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                {task.taskType === "agent" ? (
-                                  <>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        handleRunTask(task.id);
-                                      }}
-                                      disabled={task.isBlocked}
-                                    >
-                                      <Play className="h-3.5 w-3.5" />
-                                      Run
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        openTaskDrawer(task.id, "outputs");
-                                      }}
-                                    >
-                                      <FileText className="h-3.5 w-3.5" />
-                                      Outputs
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        openTaskDrawer(task.id, "logs");
-                                      }}
-                                    >
-                                      <Terminal className="h-3.5 w-3.5" />
-                                      Logs
-                                    </Button>
-                                  </>
-                                ) : (
+                              {task.taskType !== "agent" && (
+                                <div className="flex flex-wrap items-center gap-2">
                                   <Button
                                     size="sm"
                                     variant="ghost"
@@ -1598,8 +1619,8 @@ export default function ProjectManagement() {
                                   >
                                     <ArrowUpRight className="h-3.5 w-3.5" />
                                   </Button>
-                                )}
-                              </div>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -1683,81 +1704,153 @@ export default function ProjectManagement() {
                             <div
                               onClick={(event) => event.stopPropagation()}
                               onPointerDown={(event) => event.stopPropagation()}
+                              className="flex flex-col gap-2"
                             >
-                              {task.taskType === "human" && (
-                                <Select
-                                  value={task.responsibleId ? String(task.responsibleId) : ""}
-                                  onValueChange={(value: string) => {
+                              <Select
+                                value={task.taskType === "client" ? "client" : task.taskType === "agent" ? "agent" : task.responsibleId ? String(task.responsibleId) : ""}
+                                onValueChange={(value: string) => {
+                                  if (value === "agent") {
                                     updateTask(task.id, (prev) => ({
                                       ...prev,
-                                      responsibleId: value ? Number(value) : null,
+                                      taskType: "agent",
+                                      responsibleId: null,
                                       workflowId: null,
                                       gate: prev.gate,
                                     }));
                                     updateTaskMutation.mutate({
                                       taskId: task.id,
                                       payload: {
-                                        ownerType: "human",
-                                        assigneeUserId: value ? Number(value) : null,
+                                        ownerType: "agent",
+                                        taskType: "agent",
+                                        assigneeUserId: null,
                                         workflowStepId: null,
                                       },
                                     });
-                                  }}
-                                >
-                                  <SelectTrigger className="h-7 w-full min-w-[150px] rounded-full border px-2 py-0 text-[11px]">
-                                    <SelectValue placeholder="Unassigned" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {users.map((user) => (
-                                        <SelectItem key={user.id} value={String(user.id)}>
-                                          <div className="flex items-center gap-2">
-                                            <User className="h-3.5 w-3.5" />
-                                            <span>{user.name}</span>
-                                          </div>
-                                        </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              )}
-                              {task.taskType === "agent" && (
-                                <Select
-                                  value={task.workflowId ? String(task.workflowId) : ""}
-                                  onValueChange={(value: string) => {
+                                    return;
+                                  }
+                                  if (value === "client") {
                                     updateTask(task.id, (prev) => ({
                                       ...prev,
-                                      workflowId: value ? Number(value) : null,
+                                      taskType: "client",
                                       responsibleId: null,
-                                      gate: prev.gate,
+                                      workflowId: null,
+                                      gate: { ...(prev.gate ?? {}), clientOwner: "Client" },
                                     }));
                                     updateTaskMutation.mutate({
                                       taskId: task.id,
                                       payload: {
-                                        ownerType: "agent",
-                                        workflowStepId: value ? Number(value) : null,
+                                        ownerType: "client",
+                                        taskType: "client",
+                                        gateJson: { ...(task.gate ?? {}), clientOwner: "Client" },
                                         assigneeUserId: null,
+                                        workflowStepId: null,
                                       },
                                     });
-                                  }}
-                                >
-                                  <SelectTrigger className="h-7 w-full min-w-[150px] rounded-full border px-2 py-0 text-[11px]">
-                                    <SelectValue placeholder="Unassigned" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {workflowSteps.map((step) => (
-                                      <SelectItem key={step.id} value={String(step.id)}>
-                                        <div className="flex items-center gap-2">
-                                          <Bot className="h-3.5 w-3.5" />
-                                          <span>{step.name}</span>
-                                        </div>
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
+                                    return;
+                                  }
+                                  updateTask(task.id, (prev) => ({
+                                    ...prev,
+                                    taskType: "human",
+                                    responsibleId: value ? Number(value) : null,
+                                    workflowId: null,
+                                    gate: prev.gate,
+                                  }));
+                                  updateTaskMutation.mutate({
+                                    taskId: task.id,
+                                    payload: {
+                                      ownerType: "human",
+                                      taskType: "human",
+                                      assigneeUserId: value ? Number(value) : null,
+                                      workflowStepId: null,
+                                    },
+                                  });
+                                }}
+                              >
+                                <SelectTrigger className="h-7 w-full min-w-[150px] rounded-full border px-2 py-0 text-[11px]">
+                                  <SelectValue placeholder="Unassigned" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="client">
+                                    <div className="flex items-center gap-2">
+                                      <ShieldCheck className="h-3.5 w-3.5" />
+                                      <span>Client</span>
+                                    </div>
+                                  </SelectItem>
+                                  <SelectItem value="agent">
+                                    <div className="flex items-center gap-2">
+                                      <Bot className="h-3.5 w-3.5" />
+                                      <span>Agent workflow</span>
+                                    </div>
+                                  </SelectItem>
+                                  {users.map((user) => (
+                                    <SelectItem key={user.id} value={String(user.id)}>
+                                      <div className="flex items-center gap-2">
+                                        <User className="h-3.5 w-3.5" />
+                                        <span>{user.name}</span>
+                                      </div>
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+
+                              {task.taskType === "agent" && (
+                                <div className="flex flex-col gap-2 w-full">
+                                  <Select
+                                    value={(() => {
+                                      if (!task.workflowId) return "";
+                                      const templateId = workflowStepMap.get(task.workflowId)?.workflowTemplateId;
+                                      return templateId ? String(templateId) : "";
+                                    })()}
+                                    onValueChange={(value: string) => {
+                                      const templateId = Number(value);
+                                      if (!Number.isFinite(templateId)) return;
+                                      attachWorkflowMutation.mutate(
+                                        { templateId },
+                                        {
+                                          onSuccess: (data) => {
+                                            const steps = data?.steps || [];
+                                            const nextStepId = steps[0]?.id || null;
+                                            updateTask(task.id, (prev) => ({
+                                              ...prev,
+                                              taskType: "agent",
+                                              workflowId: nextStepId,
+                                              responsibleId: null,
+                                            }));
+                                            updateTaskMutation.mutate({
+                                              taskId: task.id,
+                                              payload: {
+                                                ownerType: "agent",
+                                                workflowStepId: nextStepId,
+                                                assigneeUserId: null,
+                                              },
+                                            });
+                                          },
+                                        }
+                                      );
+                                    }}
+                                  >
+                                    <SelectTrigger className="h-7 w-full min-w-[150px] rounded-full border px-2 py-0 text-[11px]">
+                                      <SelectValue placeholder="Select workflow" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {workflowTemplates.map((template) => (
+                                        <SelectItem key={template.id} value={String(template.id)}>
+                                          <div className="flex items-center gap-2">
+                                            <GitBranch className="h-3.5 w-3.5" />
+                                            <span>{template.name}</span>
+                                          </div>
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
                               )}
+
                               {task.taskType === "client" && (
-                                <Select
+                                <Input
                                   value={String(task.gate?.clientOwner || "Client")}
-                                  onValueChange={(value: string) => {
+                                  onChange={(event) => {
+                                    const value = event.target.value;
                                     updateTask(task.id, (prev) => ({
                                       ...prev,
                                       gate: { ...(prev.gate ?? {}), clientOwner: value },
@@ -1772,27 +1865,9 @@ export default function ProjectManagement() {
                                       },
                                     });
                                   }}
-                                >
-                                  <SelectTrigger className="h-7 w-full min-w-[150px] rounded-full border px-2 py-0 text-[11px]">
-                                    <SelectValue placeholder="Client" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="Client">
-                                      <div className="flex items-center gap-2">
-                                        <ShieldCheck className="h-3.5 w-3.5" />
-                                        <span>Client</span>
-                                      </div>
-                                    </SelectItem>
-                                    {users.map((user) => (
-                                      <SelectItem key={user.id} value={user.name}>
-                                        <div className="flex items-center gap-2">
-                                          <User className="h-3.5 w-3.5" />
-                                          <span>{user.name}</span>
-                                        </div>
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
+                                  className="h-7 text-[11px]"
+                                  placeholder="Client owner"
+                                />
                               )}
                             </div>
                             <div className="flex items-center gap-2">
@@ -1839,79 +1914,155 @@ export default function ProjectManagement() {
               </SheetHeader>
 
               <div className="flex items-center gap-2 border-b border-border pb-2 text-xs">
-                {([
-                  { key: "details", label: "Details", Icon: Sparkles },
-                  { key: "outputs", label: "Outputs", Icon: FileText },
-                  { key: "logs", label: "Logs", Icon: Terminal },
-                ] as const).map((tab) => (
-                  <button
-                    key={tab.key}
-                    onClick={() => setDrawerTab(tab.key)}
-                    className={cn(
-                      "inline-flex items-center gap-1 rounded-full border px-3 py-1",
-                      drawerTab === tab.key ? "border-primary text-primary" : "border-border text-muted-foreground"
-                    )}
-                  >
-                    <tab.Icon className="h-3.5 w-3.5" />
-                    {tab.label}
-                  </button>
-                ))}
+                <div className="inline-flex items-center gap-1 rounded-full border border-primary px-3 py-1 text-primary">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Details
+                </div>
               </div>
 
-              {drawerTab === "details" ? (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Responsible</div>
-                    {selectedTask.taskType === "human" && (
-                      <select
-                        value={selectedTask.responsibleId ?? ""}
-                        onChange={(event) =>
-                          updateTask(selectedTask.id, (task) => ({
-                            ...task,
-                            responsibleId: event.target.value ? Number(event.target.value) : null,
-                          }))
-                        }
-                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                      >
-                        <option value="">Unassigned</option>
-                        {users.map((user) => (
-                          <option key={user.id} value={user.id}>
-                            {user.name}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                    {selectedTask.taskType === "agent" && (
-                      <select
-                        value={selectedTask.workflowId ?? ""}
-                        onChange={(event) =>
-                          updateTask(selectedTask.id, (task) => ({
-                            ...task,
-                            workflowId: event.target.value ? Number(event.target.value) : null,
-                          }))
-                        }
-                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                      >
-                        <option value="">Unassigned</option>
-                        {workflowSteps.map((step) => (
-                          <option key={step.id} value={step.id}>
-                            {step.name}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                    {selectedTask.taskType === "client" && (
-                      <Input
-                        value={selectedTask.gate?.clientOwner || ""}
-                        onChange={(event) =>
-                          updateTask(selectedTask.id, (task) => ({
-                            ...task,
-                            gate: { ...task.gate, clientOwner: event.target.value },
-                          }))
-                        }
-                        placeholder="Client owner"
-                      />
-                    )}
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Responsible</div>
+                  <select
+                    value={selectedTask.taskType === "client" ? "client" : selectedTask.taskType === "agent" ? "agent" : selectedTask.responsibleId ?? ""}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      if (value === "agent") {
+                        updateTask(selectedTask.id, (task) => ({
+                          ...task,
+                          taskType: "agent",
+                          responsibleId: null,
+                          workflowId: null,
+                        }));
+                        updateTaskMutation.mutate({
+                          taskId: selectedTask.id,
+                          payload: {
+                            ownerType: "agent",
+                            taskType: "agent",
+                            assigneeUserId: null,
+                            workflowStepId: null,
+                          },
+                        });
+                        return;
+                      }
+                      if (value === "client") {
+                        updateTask(selectedTask.id, (task) => ({
+                          ...task,
+                          taskType: "client",
+                          responsibleId: null,
+                          workflowId: null,
+                          gate: { ...(task.gate ?? {}), clientOwner: "Client" },
+                        }));
+                        updateTaskMutation.mutate({
+                          taskId: selectedTask.id,
+                          payload: {
+                            ownerType: "client",
+                            taskType: "client",
+                            gateJson: { ...(selectedTask.gate ?? {}), clientOwner: "Client" },
+                            assigneeUserId: null,
+                            workflowStepId: null,
+                          },
+                        });
+                        return;
+                      }
+                      updateTask(selectedTask.id, (task) => ({
+                        ...task,
+                        taskType: "human",
+                        responsibleId: value ? Number(value) : null,
+                      }));
+                      updateTaskMutation.mutate({
+                        taskId: selectedTask.id,
+                        payload: {
+                          ownerType: "human",
+                          taskType: "human",
+                          assigneeUserId: value ? Number(value) : null,
+                          workflowStepId: null,
+                        },
+                      });
+                    }}
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  >
+                    <option value="client">Client</option>
+                    <option value="agent">Agent workflow</option>
+                    <option value="">Unassigned</option>
+                    {users.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.name}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedTask.taskType === "agent" && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={(() => {
+                            if (!selectedTask.workflowId) return "";
+                            const templateId = workflowStepMap.get(selectedTask.workflowId)?.workflowTemplateId;
+                            return templateId ? String(templateId) : "";
+                          })()}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            const templateId = Number(value);
+                            if (!Number.isFinite(templateId)) return;
+                            attachWorkflowMutation.mutate(
+                              { templateId },
+                              {
+                                onSuccess: (data) => {
+                                  const steps = data?.steps || [];
+                                  const nextStepId = steps[0]?.id || null;
+                                  updateTask(selectedTask.id, (task) => ({
+                                    ...task,
+                                    taskType: "agent",
+                                    workflowId: nextStepId,
+                                    responsibleId: null,
+                                  }));
+                                  updateTaskMutation.mutate({
+                                    taskId: selectedTask.id,
+                                    payload: {
+                                      ownerType: "agent",
+                                      workflowStepId: nextStepId,
+                                      assigneeUserId: null,
+                                    },
+                                  });
+                                },
+                              }
+                            );
+                          }}
+                          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          <option value="">Select workflow</option>
+                          {workflowTemplates.map((template) => (
+                            <option key={template.id} value={template.id}>
+                              {template.name}
+                            </option>
+                          ))}
+                        </select>
+                        {selectedTask.workflowId && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-9 w-9 p-0"
+                            onClick={() => handleRunWorkflow(selectedTask.id, selectedTask.workflowId)}
+                            aria-label="Run workflow"
+                          >
+                            <Play className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {selectedTask.taskType === "client" && (
+                    <Input
+                      value={selectedTask.gate?.clientOwner || ""}
+                      onChange={(event) =>
+                        updateTask(selectedTask.id, (task) => ({
+                          ...task,
+                          gate: { ...task.gate, clientOwner: event.target.value },
+                        }))
+                      }
+                      placeholder="Client owner"
+                    />
+                  )}
                   </div>
 
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -2020,54 +2171,7 @@ export default function ProjectManagement() {
                     </div>
                   )}
                 </div>
-              ) : drawerTab === "outputs" ? (
-                <div className="space-y-3">
-                  <div className="text-sm font-semibold text-foreground">Latest outputs</div>
-                  {selectedDeliverables.length === 0 ? (
-                    <div className="text-sm text-muted-foreground">No outputs yet.</div>
-                  ) : (
-                    <div className="grid grid-cols-1 gap-3">
-                      {selectedDeliverables.map((deliverable) => (
-                        <Card key={deliverable.id} className="p-3">
-                          <div className="flex items-start gap-2">
-                            <FileText className="h-4 w-4 text-primary" />
-                            <div className="min-w-0">
-                              <div className="text-sm font-semibold text-foreground truncate">{deliverable.title}</div>
-                              <div className="text-xs text-muted-foreground">v{deliverable.version}</div>
-                              <div className="text-xs text-muted-foreground">
-                                {new Date(deliverable.createdAt).toLocaleString()}
-                              </div>
-                            </div>
-                          </div>
-                        </Card>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="text-sm font-semibold text-foreground">Run history</div>
-                  {selectedTask.execution?.history?.length ? (
-                    <div className="space-y-2">
-                      {selectedTask.execution.history.map((entry) => (
-                        <Card key={entry.id} className="p-3">
-                          <div className="flex items-center justify-between">
-                            <div className="text-sm font-semibold text-foreground">{entry.summary || "Run"}</div>
-                            <Badge variant="outline" className="text-xs">{EXECUTION_LABELS[entry.state]}</Badge>
-                          </div>
-                          <div className="text-xs text-muted-foreground">Started {new Date(entry.startedAt).toLocaleString()}</div>
-                          {entry.output && (
-                            <div className="text-xs text-muted-foreground">Output: {entry.output.title}</div>
-                          )}
-                        </Card>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-muted-foreground">No runs yet.</div>
-                  )}
-                </div>
-              )}
-            </div>
+              </div>
           ) : (
             <div className="text-sm text-muted-foreground">Loading task details...</div>
           )}

@@ -143,6 +143,49 @@ async function runPythonModel(config: PythonModelConfig, payload: any): Promise<
   });
 }
 
+function normalizeModelName(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function parseModelRunnerInput(rawInput: any) {
+  if (rawInput == null) return {};
+  if (typeof rawInput === "string") {
+    try {
+      return JSON.parse(rawInput);
+    } catch {
+      return { input: rawInput };
+    }
+  }
+  return rawInput;
+}
+
+async function resolveModelForStep(projectId: number, step: { name?: string; configJson?: any }) {
+  const config = step?.configJson || {};
+  const modelId = Number(config.modelId ?? config.model_id);
+  if (Number.isFinite(modelId)) {
+    const model = await storage.getModel(modelId);
+    if (model) return model;
+  }
+
+  const models = await storage.listProjectModels(projectId);
+  if (models.length === 0) return null;
+
+  const findByName = (name?: string | null) => {
+    if (!name) return null;
+    const normalized = normalizeModelName(name);
+    if (!normalized) return null;
+    const exact = models.find((model) => normalizeModelName(model.name) === normalized);
+    if (exact) return exact;
+    const partial = models.find((model) => {
+      const modelName = normalizeModelName(model.name);
+      return modelName.includes(normalized) || normalized.includes(modelName);
+    });
+    return partial || null;
+  };
+
+  return findByName(config.modelName) || findByName(step?.name);
+}
+
 async function loadProjectTemplates() {
   try {
     const entries = await readdir(PROJECT_TEMPLATE_DIR, { withFileTypes: true });
@@ -335,6 +378,7 @@ const RUN_NEXT_MAP: Record<string, string> = {
 };
 
 const DEFAULT_AGENTS = [
+  { key: "model_runner", name: "Model Runner", role: "Model", roleColor: "#0EA5E9", description: "Runs registered analytical models and returns structured outputs" },
   { key: "project_definition", name: "Project Definition", role: "Framing", roleColor: "#F59E0B", description: "Translates vague briefs into structured, decision-based problem definitions with governing questions, success metrics, and initial hypotheses" },
   { key: "issues_tree", name: "Issues Tree", role: "Generator", roleColor: "#3B82F6", description: "Builds MECE issues tree from project objective" },
   { key: "mece_critic", name: "MECE Critic", role: "Quality Gate", roleColor: "#8B5CF6", description: "Validates MECE structure and compliance" },
@@ -1210,9 +1254,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
         assigneeIds: assigneesByTask.get(task.id) ?? (task.assigneeUserId ? [task.assigneeUserId] : []),
       }));
       const checkpoints = await storage.listProjectCheckpoints(projectId);
-      const instance = await storage.getWorkflowInstance(projectId);
-      const steps = instance ? await storage.getWorkflowInstanceSteps(instance.id) : [];
+      const steps = await storage.listWorkflowInstanceStepsForProject(projectId);
       res.json({ phases, tasks: tasksWithAssignees, checkpoints, workflowSteps: steps });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/projects/:id/workflow/attach-template", async (req: Request, res: Response) => {
+    try {
+      const projectId = Number(req.params.id);
+      const templateId = Number(req.body?.templateId);
+      if (!Number.isFinite(templateId)) return res.status(400).json({ error: "templateId is required" });
+
+      const project = await storage.getProject(projectId);
+      if (!project) return res.status(404).json({ error: "Project not found" });
+      const template = await storage.getWorkflowTemplate(templateId);
+      if (!template) return res.status(404).json({ error: "Workflow template not found" });
+
+      const templateSteps = await storage.getWorkflowTemplateSteps(templateId);
+      const instance = await storage.createWorkflowInstance({
+        projectId,
+        workflowTemplateId: templateId,
+        steps: templateSteps.map((s) => ({
+          stepOrder: s.stepOrder,
+          name: s.name,
+          agentKey: s.agentKey,
+          configJson: s.configJson,
+        })),
+      });
+
+      const steps = await storage.getWorkflowInstanceSteps(instance.id);
+      res.status(201).json({ instance, steps });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1500,6 +1573,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!step) throw new Error("Step not found");
 
     await storage.updateWorkflowInstanceStep(stepId, { status: "running" });
+
+    if (step.agentKey === "model_runner") {
+      const model = await resolveModelForStep(projectId, step);
+      if (!model) throw new Error("Model not configured for this step");
+      if (!model.apiConfig) throw new Error("Model has no apiConfig");
+
+      const runLog = await storage.insertRunLog(
+        projectId,
+        step.agentKey,
+        { stepId, agentKey: step.agentKey, modelId: model.id },
+        `model:${model.name}`
+      );
+
+      try {
+        onProgress(`Running model: ${model.name}`, "status");
+        const stepConfig = (step.configJson as any) || {};
+        const modelConfig = (model.apiConfig as any) || {};
+        const input = parseModelRunnerInput(
+          stepConfig.input ??
+            stepConfig.inputJson ??
+            stepConfig.sampleInput ??
+            modelConfig.sampleInput ??
+            {}
+        );
+        const rawOutput = await runPythonModel(model.apiConfig as PythonModelConfig, input);
+        let parsedOutput: any = null;
+        try {
+          parsedOutput = JSON.parse(rawOutput);
+        } catch {
+          parsedOutput = { output: rawOutput };
+        }
+
+        const deliverableContent = {
+          modelId: model.id,
+          modelName: model.name,
+          input,
+          output: parsedOutput,
+          runAt: new Date().toISOString(),
+        };
+        const deliverableTitle = `${model.name} run`;
+
+        await storage.createDeliverable({
+          projectId,
+          stepId,
+          title: deliverableTitle,
+          contentJson: deliverableContent,
+        });
+
+        await storage.updateWorkflowInstanceStep(stepId, {
+          status: "completed",
+          outputSummary: { title: deliverableTitle, modelId: model.id },
+        });
+        await storage.updateRunLog(runLog.id, deliverableContent, "success");
+
+        const updatedProject = await storage.getProject(projectId);
+        const instance = await storage.getWorkflowInstance(projectId);
+        if (instance) {
+          await storage.updateWorkflowInstanceCurrentStep(instance.id, step.stepOrder);
+        }
+
+        return {
+          project: updatedProject,
+          step: await storage.getWorkflowInstanceStep(stepId),
+          deliverableTitle,
+        };
+      } catch (agentErr: any) {
+        await storage.updateWorkflowInstanceStep(stepId, { status: "failed" });
+        await storage.updateRunLog(runLog.id, null, "failed", agentErr.message);
+        throw new Error(`Agent failed: ${agentErr.message}`);
+      }
+    }
 
     const modelUsed = getModelUsed();
     const runLog = await storage.insertRunLog(
